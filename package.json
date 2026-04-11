@@ -1,0 +1,77 @@
+{
+  "name": "savant",
+  "version": "6.4.0",
+  "description": "Savant — AI Session Dashboard",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "EB_TELEMETRY=0 ELECTRON_BUILDER_OFFLINE=1 electron-builder --mac",
+    "dev": "NODE_ENV=development electron ."
+  },
+  "author": "Project X",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^41.0.3",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.icapital.savant",
+    "productName": "Savant",
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "icon.png",
+      "target": [
+        "dmg",
+        "dir"
+      ]
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "icon.png",
+      "loading.html",
+      "terminal.html"
+    ],
+    "asarUnpack": [
+      "node_modules/node-pty/**"
+    ],
+    "extraResources": [
+      {
+        "from": "savant",
+        "to": "savant",
+        "filter": [
+          "**/*",
+          "!__pycache__/**",
+          "!*.pyc",
+          "!*_mongo.py",
+          "!mongo_client.py",
+          "!migrations.py",
+          "!migrate_mongo_to_sqlite.py",
+          "!savant/**"
+        ]
+      }
+    ],
+    "dmg": {
+      "title": "Savant",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@electron/rebuild": "^4.0.3",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
+    "node-pty": "^1.1.0"
+  }
+}
