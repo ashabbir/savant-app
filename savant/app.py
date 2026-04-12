@@ -6,6 +6,7 @@ import yaml
 import glob
 import time
 import logging
+import hashlib
 from collections import Counter
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -4762,216 +4763,334 @@ def _gemini_read_workspace(session_id: str) -> str | None:
     """Read workspace assignment from savant meta for a Gemini session."""
     return _gemini_read_session_meta(session_id).get("workspace")
 
-def gemini_get_all_sessions():
-    """Gather Gemini sessions from ~/.gemini/tmp/savant-app/chats/."""
+def _gemini_parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _gemini_extract_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if text:
+                    parts.append(str(text))
+            elif item:
+                parts.append(str(item))
+        return "\n".join(parts).strip()
+    if content is None:
+        return ""
+    return str(content)
+
+
+def _gemini_tool_calls(msg: dict) -> list:
+    tool_calls = msg.get("toolCalls")
+    if isinstance(tool_calls, list):
+        return [tc for tc in tool_calls if isinstance(tc, dict)]
+    return []
+
+
+def _gemini_message_project_path(data: dict, project_map: dict) -> str:
+    project_hash = data.get("projectHash")
+    pinfo = project_map.get(project_hash, {})
+    project_path = pinfo.get("path", data.get("projectPath", ""))
+    if project_path:
+        return project_path
+    directories = data.get("directories")
+    if isinstance(directories, list):
+        for item in directories:
+            if isinstance(item, str) and item.startswith("/"):
+                return item
+            if isinstance(item, dict):
+                for key in ("path", "cwd", "directory"):
+                    value = item.get(key)
+                    if isinstance(value, str) and value.startswith("/"):
+                        return value
+    return ""
+
+
+def _gemini_scan_candidates():
     if not os.path.isdir(GEMINI_CHATS_DIR):
         return []
 
-    # Load project mapping to resolve project hashes
-    project_map = {} # hash -> {path, name}
-    projects_file = os.path.join(GEMINI_DIR, "projects.json")
-    if os.path.isfile(projects_file):
-        try:
-            with open(projects_file) as f:
-                pdata = json.load(f)
-                projects = pdata.get("projects", {})
-                for path, name in projects.items():
-                    import hashlib
-                    phash = hashlib.sha256(path.encode('utf-8')).hexdigest()
-                    project_map[phash] = {"path": path, "name": name}
-        except Exception:
-            pass
-
-    sessions = []
-    # Gemini sessions are stored as session-YYYY-MM-DDTHH-MM-ID.json
-    for filename in os.listdir(GEMINI_CHATS_DIR):
-        if not filename.endswith(".json") or not filename.startswith("session-"):
-            continue
-        
-        full_path = os.path.join(GEMINI_CHATS_DIR, filename)
-        try:
-            with open(full_path, 'r') as f:
-                data = json.load(f)
-                
-            session_id = data.get("sessionId")
-            if not session_id:
+    candidates = []
+    for root, _, files in os.walk(GEMINI_CHATS_DIR):
+        for filename in files:
+            if not filename.endswith(".json"):
                 continue
-                
-            last_updated = data.get("lastUpdated")
-            start_time = data.get("startTime")
-            messages = data.get("messages", [])
-            project_hash = data.get("projectHash")
-            
-            pinfo = project_map.get(project_hash, {})
-            project_path = pinfo.get("path", data.get("projectPath", ""))
-            project_name = pinfo.get("name", os.path.basename(project_path) if project_path else "")
-
-            # Find user messages and summary
-            summary = ""
-            user_msgs = []
-            for msg in messages:
-                if msg.get("type") == "user":
-                    content = msg.get("content", [])
-                    text = ""
-                    if isinstance(content, list) and len(content) > 0:
-                        text = content[0].get("text", "")
-                    elif isinstance(content, str):
-                        text = content
-                    
-                    if text:
-                        user_msgs.append({"timestamp": msg.get("timestamp"), "content": text})
-                        if not summary:
-                            summary = text[:100]
-            
-            # Metadata
-            meta = _gemini_read_session_meta(session_id)
-            
-            # Status calculation
-            status = "COMPLETED"
-            is_open = False
-            if last_updated:
-                try:
-                    lu_dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
-                    if (datetime.now(timezone.utc) - lu_dt).total_seconds() < 3600:
-                        status = "RUNNING"
-                        is_open = True
-                except Exception:
-                    pass
-
-            sessions.append({
-                "id": session_id,
-                "provider": "gemini",
-                "project": project_name,
-                "project_path": project_path,
-                "cwd": project_path,
-                "summary": summary or "Gemini Session",
-                "modified": last_updated or start_time,
-                "created": start_time,
-                "updated_at": last_updated or start_time,
-                "created_at": start_time,
+            full_path = os.path.join(root, filename)
+            rel_path = os.path.relpath(full_path, GEMINI_CHATS_DIR)
+            candidates.append({
                 "path": full_path,
-                "message_count": len(messages),
-                "user_messages": user_msgs[:3],
-                "workspace": meta.get("workspace"),
-                "starred": meta.get("starred"),
-                "archived": meta.get("archived"),
-                "status": status,
-                "is_open": is_open,
-                "resume_command": f"cd {project_path} && gemini --resume {session_id}" if project_path else f"gemini --resume {session_id}",
+                "filename": filename,
+                "rel_path": rel_path,
+                "is_root": os.path.dirname(full_path) == os.path.realpath(GEMINI_CHATS_DIR),
+                "artifact_dir_name": None if root == GEMINI_CHATS_DIR else os.path.basename(root),
             })
+    return candidates
+
+
+def _gemini_build_project_map():
+    project_map = {}
+    projects_file = os.path.join(GEMINI_DIR, "projects.json")
+    if not os.path.isfile(projects_file):
+        return project_map
+    try:
+        with open(projects_file) as f:
+            pdata = json.load(f)
+        projects = pdata.get("projects", {})
+        for path, name in projects.items():
+            phash = hashlib.sha256(path.encode("utf-8")).hexdigest()
+            project_map[phash] = {"path": path, "name": name}
+    except Exception:
+        pass
+    return project_map
+
+
+def _gemini_candidate_key(data: dict, candidate: dict) -> str | None:
+    session_id = data.get("sessionId")
+    artifact_dir = candidate.get("artifact_dir_name") or ""
+    if candidate.get("is_root") and session_id:
+        return session_id
+    if artifact_dir and re.fullmatch(r"[0-9a-fA-F-]{36}", artifact_dir):
+        return artifact_dir
+    if session_id:
+        return session_id
+    return None
+
+
+def _gemini_prefer_candidate(current: dict | None, candidate_info: dict) -> dict:
+    if current is None:
+        return candidate_info
+    if candidate_info["candidate"].get("is_root") and not current["candidate"].get("is_root"):
+        return candidate_info
+    if current["candidate"].get("is_root") and not candidate_info["candidate"].get("is_root"):
+        return current
+    current_dt = _gemini_parse_timestamp(current["data"].get("lastUpdated") or current["data"].get("startTime"))
+    cand_dt = _gemini_parse_timestamp(candidate_info["data"].get("lastUpdated") or candidate_info["data"].get("startTime"))
+    if cand_dt and (not current_dt or cand_dt > current_dt):
+        return candidate_info
+    return current
+
+
+def _gemini_collect_sessions():
+    project_map = _gemini_build_project_map()
+    sessions = {}
+
+    for candidate in _gemini_scan_candidates():
+        try:
+            with open(candidate["path"], "r") as f:
+                data = json.load(f)
         except Exception as e:
-            logger.error(f"Error parsing Gemini session {filename}: {e}")
-            
-    # Sort by modified time descending
-    sessions.sort(key=lambda x: x.get("modified", ""), reverse=True)
-    return sessions
+            logger.error(f"Error parsing Gemini session {candidate['rel_path']}: {e}")
+            continue
+
+        if not isinstance(data, dict):
+            continue
+
+        key = _gemini_candidate_key(data, candidate)
+        if not key:
+            continue
+
+        record = {"data": data, "candidate": candidate}
+        sessions[key] = _gemini_prefer_candidate(sessions.get(key), record)
+
+    collected = []
+    for session_id, record in sessions.items():
+        data = record["data"]
+        candidate = record["candidate"]
+        messages = data.get("messages", [])
+        project_path = _gemini_message_project_path(data, project_map)
+        project_name = ""
+        if project_path:
+            project_name = os.path.basename(project_path.rstrip("/"))
+        project_hash = data.get("projectHash")
+        if project_hash in project_map:
+            project_name = project_map[project_hash].get("name") or project_name
+
+        summary = ""
+        summary_field = data.get("summary")
+        if isinstance(summary_field, str) and summary_field.strip():
+            summary = summary_field.strip()
+        user_msgs = []
+        tool_count = 0
+        last_tool_names = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            text = _gemini_extract_text(msg.get("content"))
+            if msg.get("type") == "user" and text:
+                user_msgs.append({"timestamp": msg.get("timestamp"), "content": text})
+                if not summary:
+                    summary = text[:140]
+            for tc in _gemini_tool_calls(msg):
+                tool_count += 1
+                tname = tc.get("displayName") or tc.get("name")
+                if tname:
+                    last_tool_names.append(str(tname))
+
+        if not summary:
+            summary = "Gemini Session"
+
+        last_updated = data.get("lastUpdated")
+        start_time = data.get("startTime")
+        meta = _gemini_read_session_meta(session_id)
+        artifact_dir = os.path.join(GEMINI_CHATS_DIR, session_id)
+        status = "COMPLETED"
+        is_open = False
+        lu_dt = _gemini_parse_timestamp(last_updated or start_time)
+        if lu_dt and (datetime.now(timezone.utc) - lu_dt).total_seconds() < 3600:
+            status = "RUNNING"
+            is_open = True
+
+        collected.append({
+            "id": session_id,
+            "provider": "gemini",
+            "project": project_name,
+            "project_path": project_path,
+            "cwd": project_path,
+            "summary": summary,
+            "modified": last_updated or start_time,
+            "created": start_time,
+            "updated_at": last_updated or start_time,
+            "created_at": start_time,
+            "path": candidate["path"],
+            "session_path": candidate["path"],
+            "message_count": len(messages) if isinstance(messages, list) else 0,
+            "turn_count": sum(1 for msg in messages if isinstance(msg, dict) and msg.get("type") == "user"),
+            "user_messages": user_msgs[:3],
+            "workspace": meta.get("workspace"),
+            "starred": meta.get("starred"),
+            "archived": meta.get("archived"),
+            "nickname": meta.get("nickname", ""),
+            "status": status,
+            "is_open": is_open,
+            "resume_command": f"cd {project_path} && gemini --resume {session_id}" if project_path else f"gemini --resume {session_id}",
+            "tools_used": sorted(set(last_tool_names))[:8],
+            "tool_call_count": tool_count,
+            "artifact_dir": artifact_dir if os.path.isdir(artifact_dir) else "",
+            "file_count": sum(
+                1
+                for root, _, files in os.walk(artifact_dir)
+                for _ in files
+            ) if os.path.isdir(artifact_dir) else 0,
+        })
+    collected.sort(key=lambda x: x.get("modified", ""), reverse=True)
+    return collected
+
+
+def _gemini_find_session(session_id: str):
+    all_sessions = _bg_cache.get("gemini_sessions") or []
+    info = next((s for s in all_sessions if s["id"] == session_id), None)
+    if info and os.path.isfile(info.get("path", "")):
+        return info
+    for session in _gemini_collect_sessions():
+        if session["id"] == session_id:
+            return session
+    return None
+
+
+def _gemini_load_session_json(session_id: str):
+    info = _gemini_find_session(session_id)
+    if not info:
+        return None, None
+    try:
+        with open(info["path"], "r") as f:
+            data = json.load(f)
+        return info, data
+    except Exception as e:
+        logger.error(f"Error reading Gemini detail {session_id}: {e}")
+        return info, None
+
+def gemini_get_all_sessions():
+    """Gather Gemini sessions from ~/.gemini/tmp/savant-app/chats/."""
+    return _gemini_collect_sessions()
 
 def gemini_get_session_detail(session_id):
     """Read full Gemini session JSON and return info/detail structure."""
-    all_sessions = _bg_cache.get('gemini_sessions') or []
-    info = next((s for s in all_sessions if s['id'] == session_id), None)
-    if not info:
-        # Try finding the file if not in cache
-        for filename in os.listdir(GEMINI_CHATS_DIR):
-            if session_id in filename and filename.endswith(".json"):
-                info = {"path": os.path.join(GEMINI_CHATS_DIR, filename), "id": session_id}
-                break
-    
-    if not info or not os.path.isfile(info.get("path", "")):
+    info, data = _gemini_load_session_json(session_id)
+    if not info or not data:
         return None
-        
-    try:
-        with open(info["path"], 'r') as f:
-            data = json.load(f)
-            
-        messages = data.get("messages", [])
-        last_updated = data.get("lastUpdated")
-        start_time = data.get("startTime")
-        
-        # Build status/stats
-        status = "COMPLETED" # Default for Gemini sessions in chats/
-        
-        # Check if it was active recently
-        if last_updated:
-            lu_dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
-            if (datetime.now(timezone.utc) - lu_dt).total_seconds() < 600:
-                status = "RUNNING"
-                
-        # Look for workspace mapping
-        workspace_id = _gemini_read_workspace(session_id)
-        
-        return {
-            "id": session_id,
-            "provider": "gemini",
-            "summary": info.get("summary", "Gemini Session"),
-            "status": status,
-            "modified": last_updated or start_time,
-            "created": start_time,
-            "workspace_id": workspace_id,
-            "message_count": len(messages),
-            "project_path": data.get("projectPath", ""),
-            "cwd": data.get("projectPath", ""),
-            "resume_command": f"cd {data.get('projectPath', '~')} && gemini --resume {session_id}" if data.get("projectPath") else f"gemini --resume {session_id}",
-            "active_tools": [], # Gemini tool calls are inline
-        }
-    except Exception as e:
-        logger.error(f"Error reading Gemini detail {session_id}: {e}")
-        return None
+    messages = data.get("messages", [])
+    last_updated = data.get("lastUpdated")
+    start_time = data.get("startTime")
+    lu_dt = _gemini_parse_timestamp(last_updated)
+    status = "RUNNING" if lu_dt and (datetime.now(timezone.utc) - lu_dt).total_seconds() < 600 else "COMPLETED"
+    project_map = _gemini_build_project_map()
+    project_path = info.get("project_path") or _gemini_message_project_path(data, project_map)
+    active_tools = []
+    for msg in reversed(messages if isinstance(messages, list) else []):
+        for tc in _gemini_tool_calls(msg):
+            if tc.get("status") not in ("success", "error"):
+                active_tools.append({
+                    "id": tc.get("id"),
+                    "name": tc.get("displayName") or tc.get("name") or "Tool",
+                })
+        if active_tools:
+            break
+    return {
+        "id": session_id,
+        "provider": "gemini",
+        "summary": info.get("nickname") or info.get("summary", "Gemini Session"),
+        "nickname": info.get("nickname", ""),
+        "status": status,
+        "modified": last_updated or start_time,
+        "created": start_time,
+        "workspace_id": _gemini_read_workspace(session_id),
+        "message_count": len(messages) if isinstance(messages, list) else 0,
+        "project_path": project_path,
+        "cwd": project_path,
+        "resume_command": f"cd {project_path} && gemini --resume {session_id}" if project_path else f"gemini --resume {session_id}",
+        "active_tools": active_tools,
+        "session_path": info.get("path"),
+        "artifact_dir": info.get("artifact_dir", ""),
+        "file_count": info.get("file_count", 0),
+    }
 
 def gemini_parse_full_conversation(session_id):
     """Parse messages from Gemini session JSON into UI-friendly conversation."""
-    all_sessions = _bg_cache.get('gemini_sessions') or []
-    info = next((s for s in all_sessions if s['id'] == session_id), None)
-    if not info:
-        for filename in os.listdir(GEMINI_CHATS_DIR):
-            if session_id in filename and filename.endswith(".json"):
-                info = {"path": os.path.join(GEMINI_CHATS_DIR, filename), "id": session_id}
-                break
-    
-    if not info or not os.path.isfile(info.get("path", "")):
+    _, data = _gemini_load_session_json(session_id)
+    if not data:
         return [], {}, {}
-        
-    try:
-        with open(info["path"], 'r') as f:
-            data = json.load(f)
-            
-        messages = data.get("messages", [])
-        conversation = []
-        tool_map = {}
-        stats = {"user_messages": 0, "assistant_messages": 0, "tool_calls": 0}
-        
-        for msg in messages:
-            m_type = msg.get("type")
-            content = msg.get("content", "")
-            if isinstance(content, list) and len(content) > 0:
-                content = content[0].get("text", "")
-                
-            entry = {
-                "type": m_type,
-                "content": content,
-                "timestamp": msg.get("timestamp"),
-                "thoughts": msg.get("thoughts", [])
-            }
-            
-            if m_type == "user":
-                stats["user_messages"] += 1
-            elif m_type == "gemini":
-                entry["type"] = "assistant" # UI expects assistant
-                stats["assistant_messages"] += 1
-                
-                # Check for tool calls
-                if msg.get("toolCalls"):
-                    entry["tool_calls"] = msg["toolCalls"]
-                    stats["tool_calls"] += len(msg["toolCalls"])
-                    for tc in msg["toolCalls"]:
-                        tool_map[tc["id"]] = tc
-            
-            conversation.append(entry)
-            
-        return conversation, tool_map, stats
-    except Exception as e:
-        logger.error(f"Error parsing Gemini conversation {session_id}: {e}")
-        return [], {}, {}
+    messages = data.get("messages", [])
+    conversation = []
+    tool_map = {}
+    stats = {"user_messages": 0, "assistant_messages": 0, "tool_calls": 0}
+
+    for msg in messages if isinstance(messages, list) else []:
+        if not isinstance(msg, dict):
+            continue
+        m_type = msg.get("type")
+        entry = {
+            "type": "assistant" if m_type == "gemini" else m_type,
+            "content": _gemini_extract_text(msg.get("content")),
+            "timestamp": msg.get("timestamp"),
+            "thoughts": msg.get("thoughts", []),
+        }
+
+        if m_type == "user":
+            stats["user_messages"] += 1
+        elif m_type == "gemini":
+            stats["assistant_messages"] += 1
+
+        tool_calls = _gemini_tool_calls(msg)
+        if tool_calls:
+            entry["tool_calls"] = tool_calls
+            stats["tool_calls"] += len(tool_calls)
+            for tc in tool_calls:
+                tc_id = tc.get("id")
+                if tc_id:
+                    tool_map[tc_id] = tc
+
+        conversation.append(entry)
+    return conversation, tool_map, stats
 
 @app.route("/api/gemini/sessions")
 def api_gemini_sessions():
@@ -4986,7 +5105,7 @@ def api_gemini_sessions():
     
     # Simple pagination
     limit = safe_limit(request.args.get("limit", 20, type=int), 100)
-    offset = safe_limit(request.args.get("offset", 0, type=int), 100000)
+    offset = max(0, request.args.get("offset", 0, type=int) or 0)
     
     paginated = all_sessions[offset : offset + limit]
     return jsonify({
@@ -5028,6 +5147,8 @@ def api_gemini_session_conversation(session_id):
 
 @app.route("/api/gemini/session/<session_id>/workspace", methods=["POST"])
 def api_gemini_session_workspace(session_id):
+    if not _gemini_find_session(session_id):
+        return jsonify({"error": "Not a Gemini session"}), 404
     data = request.get_json(force=True)
     ws_id = data.get("workspace_id")
     meta = _gemini_read_session_meta(session_id)
@@ -5040,37 +5161,62 @@ def api_gemini_session_workspace(session_id):
                 if s['id'] == session_id:
                     s['workspace'] = ws_id
                     break
-    return jsonify({"id": session_id, "workspace_id": ws_id})
+    if ws_id:
+        _emit_event("session_assigned", "Gemini session assigned to workspace", {"session_id": f"gemini_{session_id}", "workspace_id": ws_id})
+    return jsonify({"id": session_id, "workspace": ws_id, "workspace_id": ws_id})
 
 @app.route("/api/gemini/session/<session_id>/star", methods=["POST"])
 def api_gemini_session_star(session_id):
-    data = request.get_json(force=True)
-    starred = data.get("starred", True)
+    if not _gemini_find_session(session_id):
+        return jsonify({"error": "Not a Gemini session"}), 404
     meta = _gemini_read_session_meta(session_id)
-    meta["starred"] = starred
+    meta["starred"] = not meta.get("starred", False)
     _gemini_write_session_meta(session_id, meta)
     with _bg_lock:
         if _bg_cache.get('gemini_sessions') is not None:
             for s in _bg_cache['gemini_sessions']:
                 if s['id'] == session_id:
-                    s['starred'] = starred
+                    s['starred'] = meta["starred"]
                     break
-    return jsonify({"id": session_id, "starred": starred})
+    return jsonify({"id": session_id, "starred": meta["starred"]})
 
 @app.route("/api/gemini/session/<session_id>/archive", methods=["POST"])
 def api_gemini_session_archive(session_id):
-    data = request.get_json(force=True)
-    archived = data.get("archived", True)
+    if not _gemini_find_session(session_id):
+        return jsonify({"error": "Not a Gemini session"}), 404
     meta = _gemini_read_session_meta(session_id)
-    meta["archived"] = archived
+    meta["archived"] = not meta.get("archived", False)
     _gemini_write_session_meta(session_id, meta)
     with _bg_lock:
         if _bg_cache.get('gemini_sessions') is not None:
             for s in _bg_cache['gemini_sessions']:
                 if s['id'] == session_id:
-                    s['archived'] = archived
+                    s['archived'] = meta["archived"]
                     break
-    return jsonify({"id": session_id, "archived": archived})
+    return jsonify({"id": session_id, "archived": meta["archived"]})
+
+
+@app.route("/api/gemini/session/<session_id>/rename", methods=["POST"])
+def api_gemini_session_rename(session_id):
+    if not _gemini_find_session(session_id):
+        return jsonify({"error": "Not a Gemini session"}), 404
+    data = request.get_json(force=True)
+    nickname = (data.get("nickname") or "").strip()
+    meta = _gemini_read_session_meta(session_id)
+    if nickname:
+        meta["nickname"] = nickname
+    else:
+        meta.pop("nickname", None)
+    _gemini_write_session_meta(session_id, meta)
+    with _bg_lock:
+        if _bg_cache.get("gemini_sessions") is not None:
+            for s in _bg_cache["gemini_sessions"]:
+                if s["id"] == session_id:
+                    s["nickname"] = nickname
+                    if nickname:
+                        s["summary"] = nickname
+                    break
+    return jsonify({"id": session_id, "nickname": nickname})
 
 @app.route("/api/gemini/session/<session_id>/notes", methods=["GET"])
 def api_gemini_session_notes_get(session_id):
@@ -5141,7 +5287,8 @@ def api_gemini_session_file(session_id):
     rel_path = request.args.get("path", "")
     if not rel_path or ".." in rel_path:
         return jsonify({"error": "Invalid path"}), 400
-    session_dir = os.path.join(GEMINI_CHATS_DIR, session_id)
+    info = _gemini_find_session(session_id)
+    session_dir = info.get("artifact_dir") if info else ""
     if not os.path.isdir(session_dir):
         return jsonify({"error": "Session directory not found"}), 404
     full = os.path.realpath(os.path.join(session_dir, rel_path))
@@ -5166,7 +5313,8 @@ def api_gemini_session_file_raw(session_id):
     rel_path = request.args.get("path", "")
     if not rel_path or ".." in rel_path:
         return "Invalid path", 400
-    session_dir = os.path.join(GEMINI_CHATS_DIR, session_id)
+    info = _gemini_find_session(session_id)
+    session_dir = info.get("artifact_dir") if info else ""
     if not os.path.isdir(session_dir):
         return "Session not found", 404
     full = os.path.realpath(os.path.join(session_dir, rel_path))
@@ -5182,7 +5330,8 @@ def api_gemini_session_file_write(session_id):
     content = data.get("content")
     if not rel_path or ".." in rel_path or content is None:
         return jsonify({"error": "Invalid path or missing content"}), 400
-    session_dir = os.path.join(GEMINI_CHATS_DIR, session_id)
+    info = _gemini_find_session(session_id)
+    session_dir = info.get("artifact_dir") if info else ""
     if not os.path.isdir(session_dir):
         return jsonify({"error": "Session directory not found"}), 404
     full = os.path.realpath(os.path.join(session_dir, rel_path))
@@ -5194,6 +5343,227 @@ def api_gemini_session_file_write(session_id):
         return jsonify({"ok": True, "size": len(content)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/gemini/session/<session_id>/project-files")
+def api_gemini_session_project_files(session_id):
+    info, data = _gemini_load_session_json(session_id)
+    if not info or not data:
+        return jsonify({"error": "Session not found"}), 404
+
+    cwd = info.get("cwd") or data.get("projectPath") or ""
+    files_seen = {}
+    for msg in data.get("messages", []) if isinstance(data.get("messages"), list) else []:
+        if not isinstance(msg, dict):
+            continue
+        ts = msg.get("timestamp", "")
+        for tc in _gemini_tool_calls(msg):
+            args = tc.get("args") if isinstance(tc.get("args"), dict) else {}
+            fpath = args.get("path") or args.get("file_path") or args.get("target_file")
+            if not fpath and tc.get("name") == "run_shell_command":
+                continue
+            if not fpath or "/.gemini/" in fpath or "/.claude/" in fpath or "/.codex/" in fpath or "/.copilot/" in fpath:
+                continue
+
+            tool_name = (tc.get("name") or "").lower()
+            action = "view"
+            if any(k in tool_name for k in ("write", "create")):
+                action = "create"
+            elif any(k in tool_name for k in ("edit", "patch", "replace")):
+                action = "edit"
+            elif any(k in tool_name for k in ("read", "view", "open")):
+                action = "view"
+            else:
+                action = tool_name or "view"
+
+            if fpath not in files_seen:
+                files_seen[fpath] = {
+                    "path": fpath,
+                    "action": action,
+                    "count": 0,
+                    "first_seen": ts,
+                    "last_seen": ts,
+                }
+            files_seen[fpath]["count"] += 1
+            files_seen[fpath]["last_seen"] = ts
+            if action in ("create", "edit", "write"):
+                files_seen[fpath]["action"] = action
+
+    file_list = []
+    for fpath, item in files_seen.items():
+        item["name"] = os.path.basename(fpath)
+        item["relative"] = os.path.relpath(fpath, cwd) if cwd and fpath.startswith(cwd) else fpath
+        file_list.append(item)
+    file_list.sort(key=lambda x: x.get("last_seen", ""), reverse=True)
+    return jsonify({"files": file_list, "cwd": cwd})
+
+
+@app.route("/api/gemini/session/<session_id>/git-changes")
+def api_gemini_session_git_changes(session_id):
+    _, data = _gemini_load_session_json(session_id)
+    if not data:
+        return jsonify({"error": "Session not found"}), 404
+
+    commits = []
+    file_changes = []
+    git_commands = []
+
+    for msg in data.get("messages", []) if isinstance(data.get("messages"), list) else []:
+        if not isinstance(msg, dict):
+            continue
+        ts = msg.get("timestamp", "")
+        for tc in _gemini_tool_calls(msg):
+            name = tc.get("name") or ""
+            args = tc.get("args") if isinstance(tc.get("args"), dict) else {}
+            result_display = tc.get("resultDisplay") or ""
+            description = tc.get("description") or ""
+            command = ""
+            if name == "run_shell_command":
+                command = (args.get("command") or "").strip()
+            elif "git " in description:
+                command = description.strip()
+            if command and "git " in command:
+                git_commands.append({
+                    "command": command,
+                    "timestamp": ts,
+                    "result": result_display,
+                })
+                fpath = args.get("path") or args.get("file_path")
+                if fpath:
+                    file_changes.append({"type": "edit", "path": fpath, "timestamp": ts})
+                commit_match = re.search(r"\[([^\s]+)\s+([0-9a-f]{7,40})\]\s+(.+)", result_display)
+                if commit_match:
+                    commits.append({
+                        "branch": commit_match.group(1),
+                        "sha": commit_match.group(2),
+                        "message": commit_match.group(3).strip(),
+                        "timestamp": ts,
+                        "files_changed": 0,
+                        "insertions": 0,
+                        "deletions": 0,
+                    })
+
+    unique_files = {}
+    for fc in file_changes:
+        path = fc["path"]
+        if path not in unique_files:
+            unique_files[path] = {"path": path, "creates": 0, "edits": 0, "first_seen": fc["timestamp"], "last_seen": fc["timestamp"]}
+        if fc["type"] == "create":
+            unique_files[path]["creates"] += 1
+        else:
+            unique_files[path]["edits"] += 1
+        unique_files[path]["last_seen"] = fc["timestamp"]
+
+    return jsonify({
+        "commits": commits,
+        "file_changes": file_changes,
+        "file_summary": sorted(unique_files.values(), key=lambda x: x["last_seen"], reverse=True),
+        "git_commands": git_commands,
+    })
+
+
+@app.route("/api/gemini/session/<session_id>", methods=["DELETE"])
+def api_gemini_session_delete(session_id):
+    info = _gemini_find_session(session_id)
+    if info and os.path.isfile(info.get("path", "")):
+        try:
+            os.remove(info["path"])
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    artifact_dir = info.get("artifact_dir") if info else ""
+    if artifact_dir and os.path.isdir(artifact_dir):
+        try:
+            shutil.rmtree(artifact_dir)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    with _bg_lock:
+        if _bg_cache.get("gemini_sessions") is not None:
+            _bg_cache["gemini_sessions"] = [s for s in _bg_cache["gemini_sessions"] if s["id"] != session_id]
+    meta_path = os.path.join(GEMINI_DIR, ".savant-meta", f"{session_id}.json")
+    if os.path.isfile(meta_path):
+        try:
+            os.remove(meta_path)
+        except Exception:
+            pass
+    return jsonify({"deleted": session_id})
+
+
+@app.route("/api/gemini/sessions/bulk-delete", methods=["POST"])
+def api_gemini_bulk_delete():
+    data = request.get_json(force=True)
+    ids = data.get("ids", [])
+    if not ids:
+        return jsonify({"error": "No session IDs provided"}), 400
+    deleted = []
+    errors = []
+    for sid in ids:
+        sid = str(sid)
+        info = _gemini_find_session(sid)
+        ok = False
+        if info and os.path.isfile(info.get("path", "")):
+            try:
+                os.remove(info["path"])
+                ok = True
+            except Exception as e:
+                errors.append({"id": sid, "error": str(e)})
+        artifact_dir = info.get("artifact_dir") if info else ""
+        if artifact_dir and os.path.isdir(artifact_dir):
+            try:
+                shutil.rmtree(artifact_dir)
+                ok = True
+            except Exception as e:
+                errors.append({"id": sid, "error": str(e)})
+        meta_path = os.path.join(GEMINI_DIR, ".savant-meta", f"{sid}.json")
+        if os.path.isfile(meta_path):
+            try:
+                os.remove(meta_path)
+            except Exception:
+                pass
+        if ok or not info:
+            deleted.append(sid)
+    if deleted:
+        deleted_set = set(deleted)
+        with _bg_lock:
+            if _bg_cache.get("gemini_sessions") is not None:
+                _bg_cache["gemini_sessions"] = [s for s in _bg_cache["gemini_sessions"] if s["id"] not in deleted_set]
+    return jsonify({"deleted": deleted, "errors": errors})
+
+
+@app.route("/api/gemini/search")
+def api_gemini_search():
+    query = request.args.get("q", "").strip().lower()
+    if not query or len(query) < 2:
+        return jsonify({"results": [], "error": "Query too short"})
+    limit = int(request.args.get("limit", 50))
+    results = []
+    for session in gemini_get_all_sessions():
+        _, data = _gemini_load_session_json(session["id"])
+        if not data:
+            continue
+        for msg in data.get("messages", []) if isinstance(data.get("messages"), list) else []:
+            if not isinstance(msg, dict):
+                continue
+            text = _gemini_extract_text(msg.get("content"))
+            if not text:
+                continue
+            lower = text.lower()
+            if query not in lower:
+                continue
+            idx = lower.index(query)
+            start = max(0, idx - 80)
+            results.append({
+                "session_id": session["id"],
+                "summary": session.get("nickname") or session.get("summary") or "Gemini Session",
+                "provider": "gemini",
+                "timestamp": msg.get("timestamp", ""),
+                "content": text[start:start + 200],
+            })
+            if len(results) >= limit:
+                break
+        if len(results) >= limit:
+            break
+    results.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+    return jsonify({"results": results})
 
 @app.route("/api/claude/sessions")
 def api_claude_sessions():

@@ -57,6 +57,8 @@ def codex_dir(tmp_path, monkeypatch):
     import app as app_mod
     monkeypatch.setattr(app_mod, "CODEX_DIR", str(cdir))
     monkeypatch.setattr(app_mod, "CODEX_SESSIONS_DIR", str(cdir / "sessions"))
+    app_mod._bg_cache["codex_sessions"] = None
+    app_mod._bg_cache["codex_usage"] = None
 
     return {"dir": str(cdir), "session_id": session_id}
 
