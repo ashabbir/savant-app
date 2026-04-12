@@ -52,6 +52,7 @@ def _clear_cancel(project: str):
 
 
 def _set_status(project: str, **kwargs):
+    kwargs.setdefault("updated_at", datetime.now(timezone.utc).isoformat())
     with _indexing_lock:
         if project not in _indexing_status:
             _indexing_status[project] = {}

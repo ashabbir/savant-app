@@ -22,7 +22,7 @@
 {% endmacro %}
 
 {# ── Mode switcher nav (stays in main page) ────────────────────────────────── #}
-{% macro savant_mode_switcher(page="index") %}
+{% macro savant_header(page="index") %}
   <div class="mode-switcher">
     {% if page == "index" %}
     <button class="mode-btn icon-action" onclick="openAllTrackersModal()" title="All MRs &amp; Jira Tickets" style="min-width:auto;padding:4px 10px;">🔀</button>

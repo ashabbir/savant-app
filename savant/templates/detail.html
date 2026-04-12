@@ -1701,7 +1701,8 @@ body.theme-dark .modal-title { font-family: 'Inter', sans-serif; color: var(--te
 </head>
 <body>
 <!-- Top Bar (logo only) -->
-{% from "components/_header.html" import savant_topbar, savant_mode_switcher %}
+{% from "components/_header.html" import savant_topbar %}
+{% from "components/_header.html" import savant_header %}
 <div id="top-bar">
   {{ savant_topbar() }}
 </div>
@@ -1749,7 +1750,7 @@ body.theme-dark .modal-title { font-family: 'Inter', sans-serif; color: var(--te
 
 <div class="container">
 <div class="header">
-  {{ savant_mode_switcher(page="detail") }}
+  {{ savant_header(page="detail") }}
   <div class="subtitle">WORK · CONNECT · CREATE
     <span class="info-icon">?
       <div class="info-tooltip">
@@ -4237,6 +4238,13 @@ if (window.terminalAPI && window.terminalAPI.onDrawerState) {
     } else {
       container.style.maxWidth = '';
       container.style.overflow = '';
+    }
+  });
+}
+</script>
+</body>
+</html>
+';
     }
   });
 }

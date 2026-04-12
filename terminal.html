@@ -248,7 +248,22 @@ html, body {
       <button class="term-header-btn" id="btn-split-v"></button>
       <button class="term-header-btn" id="term-expand-btn"></button>
       <button class="term-header-btn" id="btn-help"></button>
-      <div class="term-help-popup" id="term-help-popup"></div>
+      <div class="term-help-popup" id="term-help-popup">
+        <div class="term-help-title">Terminal Shortcuts</div>
+        <div class="term-help-row"><kbd>⌘ T</kbd><span>New tab</span></div>
+        <div class="term-help-row"><kbd>⌘ D</kbd><span>Split vertical</span></div>
+        <div class="term-help-row"><kbd>⌘ ⇧ D</kbd><span>Split horizontal</span></div>
+        <div class="term-help-row"><kbd>⌘ K</kbd><span>Clear scrollback</span></div>
+        <div class="term-help-row"><kbd>⌘ [</kbd><span>Previous pane</span></div>
+        <div class="term-help-row"><kbd>⌘ ]</kbd><span>Next pane</span></div>
+        <div class="term-help-row"><kbd>⌘ {</kbd><span>Previous tab</span></div>
+        <div class="term-help-row"><kbd>⌘ }</kbd><span>Next tab</span></div>
+        <div class="term-help-row"><kbd>⌘ `</kbd><span>Toggle terminal</span></div>
+        <div class="term-help-section">Zoom</div>
+        <div class="term-help-row"><kbd>⌘ =</kbd><span>Zoom in</span></div>
+        <div class="term-help-row"><kbd>⌘ -</kbd><span>Zoom out</span></div>
+        <div class="term-help-row"><kbd>⌘ 0</kbd><span>Reset zoom</span></div>
+      </div>
     </div>
   </div>
 
@@ -291,31 +306,33 @@ const TERM_THEME = {
 };
 
 const TERM_OPTIONS = {
-  fontFamily:                "'JetBrains Mono','Menlo','Cascadia Code','Consolas',monospace",
-  fontWeight:                'normal',
-  fontWeightBold:            'bold',
-  lineHeight:                1.2,
-  letterSpacing:             0,
-  theme:                     TERM_THEME,
-  cursorBlink:               true,
-  cursorStyle:               'block',
-  cursorWidth:               1,
-  scrollback:                10000,
-  fastScrollModifier:        'alt',
-  fastScrollSensitivity:     5,
-  scrollSensitivity:         1,
-  macOptionIsMeta:           true,
+  fontFamily: "'JetBrains Mono','Menlo','Cascadia Code','Consolas',monospace",
+  fontWeight: 'normal',
+  fontWeightBold: 'bold',
+  lineHeight: 1.2,
+  letterSpacing: 0,
+  theme: TERM_THEME,
+  cursorBlink: true,
+  cursorStyle: 'block',
+  cursorWidth: 1,
+  scrollback: 10000,
+  fastScrollModifier: 'alt',
+  fastScrollSensitivity: 5,
+  scrollSensitivity: 1,
+  macOptionIsMeta: true,
   macOptionClickForcesSelection: false,
-  altClickMovesCursor:       true,
-  rightClickSelectsWord:     true,
-  wordSeparator:             " ()[]{}',\"`\u2500",
-  tabStopWidth:              8,
+  altClickMovesCursor: true,
+  rightClickSelectsWord: true,
+  wordSeparator: " ()[]{}',\"`\u2500",
+  tabStopWidth: 8,
   drawBoldTextInBrightColors: true,
-  allowProposedApi:          true,
-  allowTransparency:         false,
-  overviewRulerWidth:        15,
-  windowsPty:                { backend: 'conpty', buildNumber: 0 },
+  allowProposedApi: true,
+  allowTransparency: false,
+  overviewRulerWidth: 15,
+  windowsPty: { backend: 'conpty', buildNumber: 0 },
 };
+
+const TERM_SPLIT_COLORS = ['#7aa2f7', '#e0af68', '#9ece6a', '#bb9af7'];
 
 
 // ── Section 2: State ────────────────────────────────────────────────────────
@@ -1403,6 +1420,57 @@ function _initCommandListener() {
           } else {
             termAddTab(runCwd).then(_writeCmd);
           }
+        }
+        break;
+      }
+
+      case 'init':
+        _reconnect();
+        break;
+
+      case 'fit-all':
+        _fitAll();
+        break;
+    }
+  });
+}
+
+
+// ── Section 20: Initialization ─────────────────────────────────────────────
+
+function _init() {
+  _termApi = window.terminalAPI;
+
+  if (!_termApi) return;
+
+  // Wire incoming PTY data
+  _termApi.onData((tabId, data) => {
+    const tab = _termTabs.get(tabId);
+    if (!tab) return;
+
+    // Mark as unread if this tab's leaf is not focused
+    const leaf = _findLeafByTabId(tabId);
+    if (!leaf || leaf.id !== _focusedLeafId) tab.unread = true;
+
+    tab.xterm.write(data);
+    _renderTabs();
+  });
+
+  // Wire PTY close events
+  _termApi.onClosed((tabId) => _closeTabUI(tabId));
+
+  // Initialize all subsystems
+  _initKeyboardShortcuts();
+  _initFocusListeners();
+  _initVisibilityListeners();
+  _initCommandListener();
+}
+
+document.addEventListener('DOMContentLoaded', _init);
+</script>
+</body>
+</html>
+}
         }
         break;
       }

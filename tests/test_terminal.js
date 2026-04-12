@@ -231,10 +231,11 @@ test("preload.js exposes list method", () => {
   assert.ok(preload.includes('"terminal:list"'), "terminal:list invoke missing");
 });
 
-test("index.html has _reconnectTerminals function", () => {
-  const html = fs.readFileSync(path.join(__dirname, "..", "savant", "templates", "index.html"), "utf-8");
-  assert.ok(html.includes("async function _reconnectTerminals"), "_reconnectTerminals function missing");
-  assert.ok(html.includes("_termApi.list()"), "Should call terminalAPI.list() for reconnection");
+const termJs = fs.readFileSync(path.join(__dirname, "..", "savant", "static", "js", "terminal.js"), "utf-8");
+
+test("terminal.js has _reconnectTerminals function", () => {
+  assert.ok(termJs.includes("async function _reconnectTerminals"), "_reconnectTerminals function missing");
+  assert.ok(termJs.includes("_termApi.list()"), "Should call terminalAPI.list() for reconnection");
 });
 
 test("index.html has split pane functions", () => {

@@ -46,10 +46,10 @@ const _guideTree = [
     id: 'what-is-savant', title: 'What is Savant?', children: [],
     content: `
       <h2>What is Savant?</h2>
-      <p>Savant is a <strong>desktop application for macOS</strong> that monitors, manages, and enhances AI coding sessions. It tracks sessions from <strong>GitHub Copilot CLI</strong>, <strong>Cline</strong>, and <strong>Claude Code</strong> — giving your team a unified dashboard to see what AI assistants are doing across all projects.</p>
+      <p>Savant is a <strong>desktop application for macOS</strong> that monitors, manages, and enhances AI coding sessions. It tracks sessions from <strong>GitHub Copilot CLI</strong>, <strong>Claude Code</strong>, <strong>Codex</strong>, and <strong>Gemini</strong> — giving your team a unified dashboard to see what AI assistants are doing across all projects.</p>
 
       ${_gStats([
-        { icon: '🤖', value: '2', label: 'AI Tools Supported', color: 'var(--cyan)' },
+        { icon: '🤖', value: '4', label: 'AI Tools Supported', color: 'var(--cyan)' },
         { icon: '🧠', value: '4', label: 'MCP Servers', color: 'var(--magenta)' },
         { icon: '📊', value: '4', label: 'Dashboard Tabs', color: 'var(--orange)' },
         { icon: '⚡', value: 'Real-time', label: 'Session Monitoring', color: 'var(--green)' },
@@ -66,7 +66,7 @@ const _guideTree = [
 
       <h3>The Solution</h3>
       ${_gFlow([
-        { icon: '🔍', title: 'Detect', desc: 'Auto-discovers session files from Copilot, Claude, Cline', color: 'var(--cyan)' },
+        { icon: '🔍', title: 'Detect', desc: 'Auto-discovers session files from Copilot, Claude, Codex, and Gemini', color: 'var(--cyan)' },
         { icon: '📊', title: 'Dashboard', desc: 'Real-time cards with status, models, activity', color: 'var(--green)' },
         { icon: '📁', title: 'Organize', desc: 'Group into workspaces, link tasks & Jira', color: 'var(--magenta)' },
         { icon: '🧠', title: 'Knowledge', desc: 'Build a graph of your engineering domain', color: 'var(--orange)' },
@@ -105,7 +105,7 @@ const _guideTree = [
 
       ${_gFlow([
         { icon: '1', title: 'Launch Savant', desc: 'Open from /Applications or npm run dev', color: 'var(--cyan)', bg: 'rgba(0,240,255,0.05)' },
-        { icon: '2', title: 'Start AI Sessions', desc: 'Use Copilot, Claude Code, or Cline normally', color: 'var(--green)', bg: 'rgba(0,255,100,0.05)' },
+        { icon: '2', title: 'Start AI Sessions', desc: 'Use Copilot, Claude Code, Codex, or Gemini normally', color: 'var(--green)', bg: 'rgba(0,255,100,0.05)' },
         { icon: '3', title: 'Monitor', desc: 'Sessions appear automatically in the dashboard', color: 'var(--magenta)', bg: 'rgba(168,85,247,0.05)' },
         { icon: '4', title: 'Organize', desc: 'Group into workspaces, create tasks, build knowledge', color: 'var(--orange)', bg: 'rgba(255,165,0,0.05)' },
       ])}
@@ -172,7 +172,7 @@ const _guideTree = [
     id: 'use-sessions', title: 'Monitoring Sessions', _sub: true, children: [],
     content: `
       <h2>Monitoring Sessions</h2>
-      <p>The <strong>Sessions</strong> tab is the heart of Savant. It auto-discovers and displays all AI coding sessions from Copilot CLI and Claude Code.</p>
+      <p>The <strong>Sessions</strong> tab is the heart of Savant. It auto-discovers and displays AI coding sessions from Copilot CLI, Claude Code, Codex, and Gemini.</p>
 
       <h3>Session Discovery</h3>
       ${_gFlow([
@@ -242,7 +242,7 @@ const _guideTree = [
         <tr><td>Text search</td><td>Type in the search bar or press <kbd>/</kbd></td></tr>
         <tr><td>Status filter</td><td>Click status badges above the session list</td></tr>
         <tr><td>Project filter</td><td>Use the project dropdown</td></tr>
-        <tr><td>Provider</td><td>Sub-tabs: Copilot | Claude</td></tr>
+        <tr><td>Provider</td><td>Sub-tabs: Copilot | Claude | Codex | Gemini</td></tr>
         <tr><td>Starred only</td><td>Toggle the star filter</td></tr>
       </table>
 
@@ -258,7 +258,7 @@ const _guideTree = [
 
       <h3>Why Workspaces?</h3>
       ${_gFlow([
-        { icon: '🔀', title: 'Problem', desc: 'Sessions scattered across Copilot & Claude for one ticket', color: 'var(--red)' },
+        { icon: '🔀', title: 'Problem', desc: 'Sessions scattered across Copilot, Claude, Codex, and Gemini for one ticket', color: 'var(--red)' },
         { icon: '📁', title: 'Solution', desc: 'Workspace groups all sessions + tasks + MRs + Jira', color: 'var(--green)' },
         { icon: '📊', title: 'Result', desc: 'One place to see everything for this work', color: 'var(--cyan)' },
       ])}
@@ -440,13 +440,17 @@ list_workspaces(status="open")</code></pre>
       <p>An interactive D3 force-directed graph. Click nodes to explore, use the search bar to filter, and switch between Business/Stack/All views. Nodes are color-coded by type.</p>
       <table class="guide-table">
         <tr><th style="width:30px;"></th><th>Node Type</th><th>Examples</th></tr>
-        <tr><td style="color:#3b82f6;">●</td><td>client</td><td>Fidelity, UBS, Halo</td></tr>
-        <tr><td style="color:#06b6d4;">●</td><td>domain</td><td>Auth/SSO, Holdings, Orders</td></tr>
-        <tr><td style="color:#22c55e;">●</td><td>service</td><td>icn, simonapp, auth-service</td></tr>
-        <tr><td style="color:#a855f7;">●</td><td>library</td><td>icn-user-acl, shared-utils</td></tr>
-        <tr><td style="color:#f59e0b;">●</td><td>technology</td><td>Rails, Redis, Kafka, AWS</td></tr>
-        <tr><td style="color:#ef4444;">●</td><td>insight</td><td>Developer knowledge, patterns</td></tr>
-        <tr><td style="color:#6b7280;">●</td><td>issue</td><td>Known bugs, tech debt</td></tr>
+        <tr><td style="color:#f97316;">●</td><td>client</td><td>Fidelity, UBS, Halo</td></tr>
+        <tr><td style="color:#3b82f6;">●</td><td>domain</td><td>Auth/SSO, Holdings, Orders</td></tr>
+        <tr><td style="color:#06b6d4;">●</td><td>service</td><td>icn, simonapp, auth-service</td></tr>
+        <tr><td style="color:#84cc16;">●</td><td>library</td><td>icn-user-acl, shared-utils</td></tr>
+        <tr><td style="color:#8b5cf6;">●</td><td>technology</td><td>Rails, Redis, Kafka, AWS</td></tr>
+        <tr><td style="color:#f59e0b;">●</td><td>insight</td><td>Developer knowledge, patterns</td></tr>
+        <tr><td style="color:#10b981;">●</td><td>project</td><td>Auth migration, dashboard refresh, platform initiatives</td></tr>
+        <tr><td style="color:#ec4899;">●</td><td>concept</td><td>RBAC, PKCE, eventual consistency</td></tr>
+        <tr><td style="color:#6366f1;">●</td><td>repo</td><td>savant-app, icn, simonapp</td></tr>
+        <tr><td style="color:#14b8a6;">●</td><td>session</td><td>AI coding session traces and handoffs</td></tr>
+        <tr><td style="color:#ef4444;">●</td><td>issue</td><td>Known bugs, tech debt</td></tr>
       </table>
     `
   },
@@ -589,7 +593,7 @@ list_workspaces(status="open")</code></pre>
         { title: 'Health check', desc: 'Polls GET /api/db/health until Flask responds', color: 'var(--green)' },
         { title: 'Kill orphans', desc: 'Uses lsof to find and kill any stale processes on MCP ports', color: 'var(--orange)' },
         { title: 'Spawn MCP servers', desc: '4 FastMCP processes on ports 8091, 8092, 8093, 8094', color: 'var(--yellow)' },
-        { title: 'Patch AI configs', desc: 'setupMcpConfigs() injects SSE entries into Copilot/Claude/Cline config files', color: 'var(--magenta)' },
+        { title: 'Patch AI configs', desc: 'setupMcpConfigs() injects MCP entries into Copilot, Claude, Gemini, and Codex config files', color: 'var(--magenta)' },
         { title: 'Navigate to Flask', desc: 'BrowserWindow loads the Flask URL — app is ready', color: 'var(--cyan)' },
       ])}
 
@@ -656,6 +660,8 @@ class WorkspaceDB:
         <tr><td>Logs</td><td><code>~/Library/Application Support/savant/savant-main.log</code></td></tr>
         <tr><td>Copilot sessions</td><td><code>~/.copilot-cli/sessions/</code></td></tr>
         <tr><td>Claude sessions</td><td><code>~/.claude/projects/</code></td></tr>
+        <tr><td>Codex sessions</td><td><code>~/.codex/sessions/</code></td></tr>
+        <tr><td>Gemini sessions</td><td><code>~/.gemini/tmp/savant-app/chats/</code></td></tr>
       </table>
     `
   },
@@ -667,7 +673,7 @@ class WorkspaceDB:
 
       <h3>Session Data Flow</h3>
       ${_gFlow([
-        { icon: '🤖', title: 'AI Tool', desc: 'Copilot/Claude writes JSONL events to disk', color: 'var(--green)' },
+        { icon: '🤖', title: 'AI Tool', desc: 'Copilot, Claude, Codex, and Gemini write session data to disk', color: 'var(--green)' },
         { icon: '🔍', title: 'Scanner', desc: 'Background thread reads files every 30s', color: 'var(--cyan)' },
         { icon: '🗃', title: 'Cache', desc: 'Parsed sessions cached in memory', color: 'var(--magenta)' },
         { icon: '📡', title: 'REST API', desc: 'GET /api/sessions serves cached data', color: 'var(--orange)' },
@@ -812,7 +818,8 @@ def create_task(title: str, workspace_id: str,
       <ul>
         <li><strong>Copilot CLI</strong> — <code>~/.copilot/config.json</code></li>
         <li><strong>Claude Desktop</strong> — <code>~/Library/Application Support/Claude/claude_desktop_config.json</code></li>
-        <li><strong>Claude Code</strong> — <code>~/.claude/settings.json</code></li>
+        <li><strong>Gemini CLI</strong> — <code>~/.gemini/settings.json</code></li>
+        <li><strong>Codex CLI</strong> — <code>~/.codex/config.toml</code></li>
       </ul>
       <p>This means AI tools automatically discover Savant's MCP servers without manual config.</p>
     `
@@ -919,13 +926,17 @@ content: |
       <h3>Node Types & Colors</h3>
       <table class="guide-table">
         <tr><th style="width:30px;">Color</th><th>Type</th><th>Examples</th><th>Graph Layer</th></tr>
-        <tr><td style="color:#3b82f6;">●</td><td>client</td><td>Fidelity, UBS, Halo</td><td>Business</td></tr>
-        <tr><td style="color:#06b6d4;">●</td><td>domain</td><td>Auth/SSO, Holdings, Orders</td><td>Business</td></tr>
-        <tr><td style="color:#22c55e;">●</td><td>service</td><td>icn, simonapp, auth-service</td><td>Stack</td></tr>
-        <tr><td style="color:#a855f7;">●</td><td>library</td><td>icn-user-acl, shared-utils</td><td>Stack</td></tr>
-        <tr><td style="color:#f59e0b;">●</td><td>technology</td><td>Rails, Redis, Kafka, Okta</td><td>Stack</td></tr>
-        <tr><td style="color:#ef4444;">●</td><td>insight</td><td>Developer knowledge, patterns</td><td>All</td></tr>
-        <tr><td style="color:#6b7280;">●</td><td>issue</td><td>Known bugs, tech debt items</td><td>All</td></tr>
+        <tr><td style="color:#f97316;">●</td><td>client</td><td>Fidelity, UBS, Halo</td><td>Business</td></tr>
+        <tr><td style="color:#3b82f6;">●</td><td>domain</td><td>Auth/SSO, Holdings, Orders</td><td>Business</td></tr>
+        <tr><td style="color:#06b6d4;">●</td><td>service</td><td>icn, simonapp, auth-service</td><td>Stack</td></tr>
+        <tr><td style="color:#84cc16;">●</td><td>library</td><td>icn-user-acl, shared-utils</td><td>Stack</td></tr>
+        <tr><td style="color:#8b5cf6;">●</td><td>technology</td><td>Rails, Redis, Kafka, Okta</td><td>Stack</td></tr>
+        <tr><td style="color:#f59e0b;">●</td><td>insight</td><td>Developer knowledge, patterns</td><td>All</td></tr>
+        <tr><td style="color:#10b981;">●</td><td>project</td><td>Workspace-scoped initiatives and delivery threads</td><td>All</td></tr>
+        <tr><td style="color:#ec4899;">●</td><td>concept</td><td>Shared abstractions, patterns, and ideas</td><td>All</td></tr>
+        <tr><td style="color:#6366f1;">●</td><td>repo</td><td>Source repositories and codebases</td><td>Stack</td></tr>
+        <tr><td style="color:#14b8a6;">●</td><td>session</td><td>AI session history and execution context</td><td>All</td></tr>
+        <tr><td style="color:#ef4444;">●</td><td>issue</td><td>Known bugs, tech debt items</td><td>All</td></tr>
       </table>
 
       <h3>Staged Workflow</h3>
@@ -1084,6 +1095,8 @@ open /Applications/Savant.app</code></pre>
         <tr><td>Meta / session index</td><td><code>~/.savant/meta/</code></td></tr>
         <tr><td>Copilot sessions</td><td><code>~/.copilot-cli/sessions/</code></td></tr>
         <tr><td>Claude sessions</td><td><code>~/.claude/projects/</code></td></tr>
+        <tr><td>Codex sessions</td><td><code>~/.codex/sessions/</code></td></tr>
+        <tr><td>Gemini sessions</td><td><code>~/.gemini/tmp/savant-app/chats/</code></td></tr>
       </table>
     `
   },

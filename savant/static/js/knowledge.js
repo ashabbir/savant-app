@@ -127,7 +127,7 @@ function _kbRenderGraph(container, svg) {
   svg.call(_kbZoom);
 
   // Cluster centroids — arrange type groups in a circle around center
-  const typeOrder = ['client','domain','service','library','technology','insight'];
+  const typeOrder = ['client','domain','service','library','technology','insight','project','concept','repo','session','issue'];
   const clusterCenters = {};
   typeOrder.forEach((t, i) => {
     const angle = (i / typeOrder.length) * 2 * Math.PI - Math.PI / 2;
@@ -413,7 +413,7 @@ function kbFilterType(btn, type) {
   btn.classList.add('active');
   _kbActiveFilter = type;
   const label = document.getElementById('kb-filter-label');
-  const KB_TYPE_LABELS = { client:'Clients', domain:'Domains', service:'Services', library:'Libraries', technology:'Technologies', insight:'Insights', project:'Projects', concept:'Concepts', repo:'Repos', session:'Sessions' };
+  const KB_TYPE_LABELS = { client:'Clients', domain:'Domains', service:'Services', library:'Libraries', technology:'Technologies', insight:'Insights', project:'Projects', concept:'Concepts', repo:'Repos', session:'Sessions', issue:'Issues' };
   if (type && KB_TYPE_LABELS[type]) {
     label.textContent = '← ' + KB_TYPE_LABELS[type] + ' selected';
     label.style.display = '';
@@ -1296,7 +1296,7 @@ function kbConnectModal(sourceId) {
   _kbConnectSelectedIds = new Set();
 
   // Group ALL node types (use full canonical list so every type shows even if empty)
-  const allTypes = ['client','domain','service','library','technology','insight','project','concept','repo','session'];
+  const allTypes = ['client','domain','service','library','technology','insight','project','concept','repo','session','issue'];
   const grouped = {};
   allTypes.forEach(t => { grouped[t] = []; });
   nodes.forEach(n => {

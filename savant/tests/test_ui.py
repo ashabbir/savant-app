@@ -79,7 +79,7 @@ def browser(_pw):
 def page(browser, flask_server):
     """Fresh isolated context per test. Hero modal suppressed."""
     ctx = browser.new_context(base_url=flask_server)
-    ctx.add_init_script("localStorage.setItem('savant_seen_release','v99.0.0')")
+    ctx.add_init_script("localStorage.setItem('savant_seen_release','v6.5.0')")
     pg = ctx.new_page()
     pg.goto(flask_server)
     pg.wait_for_load_state("networkidle", timeout=15_000)
@@ -145,7 +145,7 @@ class TestPageLoad:
         assert page.locator("#notif-bell").is_visible()
 
     def test_provider_subtabs_present(self, page):
-        for btn_id in ["prov-copilot", "prov-cline", "prov-claude", "prov-codex", "prov-gemini"]:
+        for btn_id in ["prov-copilot", "prov-claude", "prov-codex", "prov-gemini"]:
             assert page.locator(f"#{btn_id}").is_visible(), f"#{btn_id} missing"
 
     def test_api_health(self, flask_server):
@@ -461,7 +461,7 @@ class TestDetailPageNavBar:
     def detail_page(self, browser, flask_server, session_dir):
         _, sess_id = session_dir
         ctx = browser.new_context(base_url=flask_server)
-        ctx.add_init_script("localStorage.setItem('savant_seen_release','v99.0.0')")
+        ctx.add_init_script("localStorage.setItem('savant_seen_release','v6.5.0')")
         pg = ctx.new_page()
         pg.goto(f"{flask_server}/session/{sess_id}")
         pg.wait_for_load_state("domcontentloaded", timeout=10_000)

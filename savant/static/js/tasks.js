@@ -832,23 +832,38 @@ async function _selectDep(depId) {
   if (!taskId || !depId) return;
   _hideDepDropdown();
   try {
+    const taskTitle = document.getElementById('task-title-input')?.value?.trim() || taskId;
+    const depTask = _depAvailable.find(t => t.id === depId) || _allTasks.find(t => t.id === depId);
+    const depTitle = depTask?.title || depId;
     const res = await fetch(`/api/tasks/${taskId}/deps`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ depends_on: depId })
     });
-    if (!res.ok) { const e = await res.json().catch(()=>({})); alert(e.error || 'Failed'); return; }
-    const updated = await res.json();
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      const msg = e.error || `Request failed (${res.status})`;
+      alert(`Could not add dependency.\n\nTask: ${taskTitle}\nDepends on: ${depTitle}\nReason: ${msg}`);
+      return;
+    }
+    const updated = _normalizeTask(await res.json());
     _showTaskDeps(updated);
-  } catch(e) { alert('Failed: ' + e.message); }
+  } catch(e) { alert('Could not add dependency.\n\nReason: ' + e.message); }
 }
 
 async function removeTaskDep(taskId, depId) {
   try {
+    const depTask = _allTasks.find(t => t.id === depId);
+    const depTitle = depTask?.title || depId;
     const res = await fetch(`/api/tasks/${taskId}/deps/${depId}`, { method: 'DELETE' });
-    if (!res.ok) { const e = await res.json().catch(()=>({})); alert(e.error || 'Failed'); return; }
-    const updated = await res.json();
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      const msg = e.error || `Request failed (${res.status})`;
+      alert(`Could not remove dependency.\n\nDepends on: ${depTitle}\nReason: ${msg}`);
+      return;
+    }
+    const updated = _normalizeTask(await res.json());
     _showTaskDeps(updated);
-  } catch(e) { alert('Failed: ' + e.message); }
+  } catch(e) { alert('Could not remove dependency.\n\nReason: ' + e.message); }
 }
 
 // Wire up autocomplete events after DOM ready

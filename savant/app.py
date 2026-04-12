@@ -5,6 +5,7 @@ import shutil
 import yaml
 import glob
 import time
+import uuid
 import logging
 import hashlib
 from collections import Counter
@@ -2766,7 +2767,7 @@ def api_tasks_create():
     existing = TaskDB.list_by_date(task_date)
     max_order = max((t.get("order", 0) for t in existing), default=-1)
     task = {
-        "task_id": str(int(time.time() * 1000)),
+        "task_id": _unique_ts_id(),
         "title": title,
         "description": (data.get("description") or "").strip(),
         "status": initial_status,
@@ -2868,7 +2869,7 @@ def api_task_deps_add(task_id):
     if dep_id in deps:
         return jsonify({"error": "Dependency already exists"}), 409
     all_tasks = TaskDB.list_all(workspace_id=task.get("workspace_id"))
-    all_map = {t["id"]: t for t in all_tasks}
+    all_map = {(t.get("id") or t.get("task_id")): t for t in all_tasks if (t.get("id") or t.get("task_id"))}
     visited = set()
     stack = [dep_id]
     while stack:

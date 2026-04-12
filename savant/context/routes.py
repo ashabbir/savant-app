@@ -400,6 +400,7 @@ def reindex_all():
 def indexing_status():
     from .indexer import get_indexing_status
     from .db import ContextDB
+    from datetime import datetime, timezone
 
     live = get_indexing_status()
 
@@ -410,14 +411,18 @@ def indexing_status():
             name = r["name"]
             if name not in live and r.get("status") == "indexing":
                 live[name] = {
-                    "status": "indexing",
-                    "phase": "Starting",
+                    "status": "stalled",
+                    "phase": "No active worker",
                     "progress": 0,
                     "total": 0,
                     "files_done": 0,
                     "chunks_done": 0,
                     "current_file": "",
                     "errors": 0,
+                    "error": (
+                        "This repo is marked as indexing in the database, but no live index worker is running. "
+                        "The previous job likely exited early or the app was restarted. Use Stop Indexing to reset it, then retry."
+                    ),
                 }
             elif name not in live:
                 live[name] = {
@@ -432,6 +437,22 @@ def indexing_status():
                 }
     except Exception:
         pass
+
+    for item in live.values():
+        updated_at = item.get("updated_at")
+        if item.get("status") != "indexing" or not updated_at:
+            continue
+        try:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(updated_at)).total_seconds()
+        except Exception:
+            continue
+        if age >= 180:
+            item["status"] = "stalled"
+            item["phase"] = "No recent progress"
+            item["error"] = (
+                f"No index progress has been reported for {int(age)} seconds. "
+                "The worker may be hung on model load, file IO, or embedding generation."
+            )
 
     return jsonify(live)
 

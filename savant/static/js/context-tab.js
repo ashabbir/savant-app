@@ -246,11 +246,24 @@ function ctxStartPolling() {
       }
 
       if (!anyActive) {
+        const stalled = Object.entries(status).filter(([, s]) => s.status === 'stalled');
+        const errored = Object.entries(status).filter(([, s]) => s.status === 'error');
+        const cancelled = Object.entries(status).filter(([, s]) => s.status === 'cancelled');
         clearInterval(_ctxPollingTimer);
         _ctxPollingTimer = null;
         _ctxLastIndexStatus = {};
         ctxLoadProjects();
-        showToast('success', 'Indexing complete');
+        if (stalled.length) {
+          const [name, info] = stalled[0];
+          showToast('error', `Indexing stalled for "${name}": ${info.error || info.phase || 'No active worker'}`);
+        } else if (errored.length) {
+          const [name, info] = errored[0];
+          showToast('error', `Indexing failed for "${name}": ${info.error || 'Unknown error'}`);
+        } else if (cancelled.length) {
+          showToast('info', 'Indexing stopped');
+        } else {
+          showToast('success', 'Indexing complete');
+        }
       }
     } catch (e) { /* ignore */ }
   }, 1500);
@@ -355,6 +368,8 @@ function _ctxRenderDetail(indexStatus) {
       </div>`;
   } else if (statusCls === 'cancelled') {
     progressHtml = `<div class="ctx-det-section"><div class="ctx-progress-phase" style="color:#f59e0b;">⏹ Cancelled — ${filesDone} files, ${chunksDone} chunks indexed before stop</div></div>`;
+  } else if (statusCls === 'stalled') {
+    progressHtml = `<div class="ctx-det-section"><div class="ctx-progress-phase" style="color:#fb7185;">⚠ ${_escHtml(phase || 'Indexing stalled')}</div><div class="ctx-progress-label" style="margin-top:6px;color:#fca5a5;">${_escHtml((idx && idx.error) || 'No live background worker is reporting progress.')}</div></div>`;
   } else if (hasError) {
     progressHtml = `<div class="ctx-det-section"><div class="ctx-progress-phase" style="color:#ef4444;">❌ ${_escHtml(idx.error)}</div></div>`;
   }
@@ -530,4 +545,3 @@ function _ctxRenderFileList(container, items, prefix, type) {
 
 function ctxReadMemory(uri) { openContextFile(uri, 'memory'); }
 function ctxReadCodeFile(uri) { openContextFile(uri, 'code'); }
-

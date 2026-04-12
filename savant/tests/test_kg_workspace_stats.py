@@ -85,6 +85,7 @@ class TestKgWorkspaceStats:
             "total_nodes": 0,
             "total_edges": 0,
             "nodes_by_type": {},
+            "staged_count": 0,
         }
 
     def test_kg_stats_counts_committed_nodes(self, client):

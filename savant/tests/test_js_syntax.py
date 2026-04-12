@@ -169,7 +169,7 @@ def test_all_functions_declared():
                          'Reflect', 'BigInt', 'Intl', 'globalThis', 'undefined',
                          'NaN', 'Infinity', 'eval', 'Function', 'RegExp', 'TypeError',
                          'RangeError', 'SyntaxError', 'ReferenceError', 'URIError',
-                         'AggregateError', 'Notification'):
+                         'AggregateError', 'Notification', 'stopPropagation', 'preventDefault'):
                 continue
             called_functions.add(fname)
 

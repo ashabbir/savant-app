@@ -19,3 +19,4 @@ savant/models/
 # Local tooling
 .claude/
 .copilot-plan.md
+arch-version*
