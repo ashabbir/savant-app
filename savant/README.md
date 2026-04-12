@@ -55,6 +55,7 @@ That's it. The dashboard auto-discovers all three AI tools from their default da
 ```bash
 cd app
 pip install -r requirements.txt
+pip install -r mcp/requirements.txt
 python app.py
 # Production mode:
 gunicorn --bind 0.0.0.0:8090 --workers 2 --timeout 30 app:app

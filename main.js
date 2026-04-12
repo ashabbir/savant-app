@@ -579,16 +579,25 @@ const MCP_SERVERS = {
 
 // Cached Python binary path (resolved once, reused for all MCP servers)
 let _mcpPythonCmd = undefined; // undefined = not probed yet, null = not found
+let _mcpPythonProbeErrors = [];
 
 function _findMcpPython() {
   if (_mcpPythonCmd !== undefined) return _mcpPythonCmd;
   const candidates = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3", "python3"];
+  _mcpPythonProbeErrors = [];
   for (const p of candidates) {
     try {
       execSync(`${p} -c "import mcp"`, { stdio: "ignore" });
       _mcpPythonCmd = p;
       return p;
-    } catch { /* try next */ }
+    } catch (err) {
+      const reason = (err.stderr || err.stdout || err.message || "")
+        .toString()
+        .trim()
+        .split("\n")
+        .slice(-1)[0] || "import mcp failed";
+      _mcpPythonProbeErrors.push(`${p}: ${reason}`);
+    }
   }
   _mcpPythonCmd = null;
   return null;
@@ -606,6 +615,9 @@ function _startMcpServer(name, apiPort, { extraArgs = [], extraEnv = {} } = {}) 
   const pythonCmd = _findMcpPython();
   if (!pythonCmd) {
     _err(`No Python with mcp package found for ${name} server`);
+    if (_mcpPythonProbeErrors.length) {
+      _err(`MCP Python probe errors: ${_mcpPythonProbeErrors.join(" | ")}`);
+    }
     return null;
   }
 
@@ -631,8 +643,17 @@ function _startMcpServer(name, apiPort, { extraArgs = [], extraEnv = {} } = {}) 
   const safeLog = (msg) => { try { _log(msg); } catch {} };
   child.stdout.on("data", (d) => safeLog(`${tag} ${d.toString().trim()}`));
   child.stderr.on("data", (d) => safeLog(`${tag} ${d.toString().trim()}`));
-  child.on("error", (err) => _err(`${tag} spawn error: ${err.message}`));
-  child.on("exit", (code) => safeLog(`${name} MCP exited with code ${code}`));
+  child.on("error", (err) => {
+    _err(`${tag} spawn error: ${err.message}`);
+    _err(`${tag} command: ${pythonCmd} ${args.join(" ")}`);
+  });
+  child.on("exit", (code, signal) => {
+    if (code !== 0 && code !== null) {
+      _err(`${tag} CRASHED with code ${code}${signal ? ` (signal: ${signal})` : ""}`);
+    } else {
+      _log(`${name} MCP exited cleanly${signal ? ` (signal: ${signal})` : ""}`);
+    }
+  });
 
   cfg.process = child;
   return child;

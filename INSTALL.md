@@ -17,7 +17,7 @@ brew install python3
 ### 3. Install Python dependencies
 
 ```bash
-pip3 install flask==3.1.0 pyyaml==6.0.2 gunicorn==23.0.0 pydantic==2.5.0 "sqlite-vec>=0.1.7" "pathspec>=0.11.0" "pygments>=2.15.0"
+pip3 install flask==3.1.0 pyyaml==6.0.2 gunicorn==23.0.0 "pydantic>=2.11,<3" "sqlite-vec>=0.1.7" "pathspec>=0.11.0" "pygments>=2.15.0" "mcp>=1.0" requests
 ```
 
 Or, after mounting the DMG:
@@ -76,6 +76,12 @@ Check that Python has Flask:
 
 ```bash
 /opt/homebrew/bin/python3 -c "import flask; print(flask.__version__)"
+```
+
+Check that Python can import MCP:
+
+```bash
+/opt/homebrew/bin/python3 -c "import mcp; print('mcp ok')"
 ```
 
 If that errors, re-run step 3. Check the log for details:
