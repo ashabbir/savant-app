@@ -6372,21 +6372,50 @@ def _codex_message_text(content):
     return ""
 
 
+def _codex_unwrap_entry(entry):
+    """Normalize modern Codex JSONL wrappers into a single event shape."""
+    if not isinstance(entry, dict):
+        return {}
+
+    ts = entry.get("timestamp")
+    etype = entry.get("type")
+    payload = entry.get("payload")
+
+    if etype in {"response_item", "event_msg"} and isinstance(payload, dict):
+        normalized = dict(payload)
+        normalized.setdefault("timestamp", ts)
+        normalized["_wrapper_type"] = etype
+        return normalized
+
+    normalized = dict(entry)
+    normalized.setdefault("timestamp", ts)
+    return normalized
+
+
 def _codex_extract_env_context(text):
     match = re.search(r"<cwd>(.*?)</cwd>", text or "", flags=re.DOTALL)
     return (match.group(1).strip() if match else "")
 
 
 def _codex_extract_summary(entries):
-    for entry in entries:
+    for raw_entry in entries:
+        entry = _codex_unwrap_entry(raw_entry)
         if entry.get("type") == "message" and entry.get("role") == "user":
             text = _codex_message_text(entry.get("content"))
             if "<environment_context>" in text:
                 continue
+            if "# AGENTS.md instructions" in text or "<INSTRUCTIONS>" in text:
+                continue
             text = text.strip()
             if text:
                 return text.splitlines()[0][:140]
-    first = entries[0] if entries else {}
+    for raw_entry in entries:
+        entry = _codex_unwrap_entry(raw_entry)
+        if entry.get("type") == "message" and entry.get("role") == "user":
+            text = _codex_message_text(entry.get("content")).strip()
+            if text:
+                return text.splitlines()[0][:140]
+    first = _codex_unwrap_entry(entries[0]) if entries else {}
     instructions = first.get("instructions", "") if isinstance(first, dict) else ""
     if instructions:
         return instructions.strip().splitlines()[0][:140]
@@ -6414,7 +6443,8 @@ def _codex_build_session_info(path, include_tree=False):
     updated_at = datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc).isoformat()
 
     cwd = ""
-    for entry in entries:
+    for raw_entry in entries:
+        entry = _codex_unwrap_entry(raw_entry)
         if entry.get("type") == "message" and entry.get("role") == "user":
             text = _codex_message_text(entry.get("content"))
             if "<environment_context>" in text:
@@ -6428,7 +6458,8 @@ def _codex_build_session_info(path, include_tree=False):
     message_count = 0
     turn_count = 0
     last_event_type = None
-    for entry in entries:
+    for raw_entry in entries:
+        entry = _codex_unwrap_entry(raw_entry)
         last_event_type = entry.get("type") or last_event_type
         if entry.get("type") == "message":
             message_count += 1
@@ -6514,18 +6545,21 @@ def codex_parse_conversation(session_id):
     tool_map = {}
     stats = _new_conversation_stats()
 
-    for entry in entries:
+    for raw_entry in entries:
+        entry = _codex_unwrap_entry(raw_entry)
         etype = entry.get("type")
         ts = entry.get("timestamp")
         if etype == "message":
             text = _codex_message_text(entry.get("content")).strip()
             if entry.get("role") == "user":
                 stats["user_messages"] += 1
-                conversation.append({"type": "user_message", "timestamp": ts, "content": text})
+                if text:
+                    conversation.append({"type": "user_message", "timestamp": ts, "content": text})
             elif entry.get("role") == "assistant":
                 stats["assistant_messages"] += 1
                 stats["assistant_chars"] += len(text)
-                conversation.append({"type": "assistant_message", "timestamp": ts, "content": text, "reasoning": "", "tool_requests": []})
+                if text:
+                    conversation.append({"type": "assistant_message", "timestamp": ts, "content": text, "reasoning": "", "tool_requests": []})
         elif etype == "function_call":
             stats["tool_calls"] += 1
             tool_name = entry.get("name", "unknown")
@@ -6560,6 +6594,8 @@ def codex_parse_conversation(session_id):
                 stats["tool_successes"] += 1
             elif success is False:
                 stats["tool_failures"] += 1
+        elif etype == "reasoning":
+            continue
 
     _finalize_conversation_stats(stats)
     return conversation, tool_map, stats
