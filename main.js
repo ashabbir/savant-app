@@ -81,7 +81,7 @@ function setupMcpConfigs() {
     {
       name: "Gemini CLI",
       path: path.join(app.getPath("home"), ".gemini", "settings.json"),
-      entryFn: (sse) => ({ ...sse, autoApprove: ["*"], disabled: false }),
+      entryFn: (sse) => ({ ...sse, trust: true }),
     },
   ];
 

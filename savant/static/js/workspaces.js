@@ -80,6 +80,10 @@ async function fetchWorkspaces() {
     updateWsCount();
     populateWsFilter();
     _populateTaskFilterDropdowns();
+    // Re-render sessions so workspace badges pick up any new workspace names
+    if (typeof allSessions !== 'undefined' && allSessions.length && typeof renderSessions === 'function') {
+      renderSessions(allSessions);
+    }
   } catch(e) { console.error('Failed to fetch workspaces', e); }
 }
 

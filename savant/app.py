@@ -100,8 +100,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 def _unique_ts_id():
-    """Generate a unique timestamp-based ID (ms + random suffix)."""
-    return str(int(time.time() * 1000)) + str(_random.randint(10, 99))
+    """Generate a unique timestamp-based ID (ns + random suffix)."""
+    import time
+    return str(time.time_ns()) + str(_random.randint(1000, 9999))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKGROUND CACHE — all list/usage data served from memory
@@ -5162,7 +5163,7 @@ def api_gemini_session_workspace(session_id):
                     s['workspace'] = ws_id
                     break
     if ws_id:
-        _emit_event("session_assigned", "Gemini session assigned to workspace", {"session_id": f"gemini_{session_id}", "workspace_id": ws_id})
+        _emit_event("session_assigned", f"Gemini session assigned to workspace", {"session_id": session_id, "workspace_id": ws_id})
     return jsonify({"id": session_id, "workspace": ws_id, "workspace_id": ws_id})
 
 @app.route("/api/gemini/session/<session_id>/star", methods=["POST"])

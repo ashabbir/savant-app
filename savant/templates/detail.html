@@ -4113,7 +4113,15 @@ async function _pollEvents() {
       if ((t === 'task_created' || t === 'task_updated') && typeof loadSession === 'function') loadSession();
       if ((t === 'mr_created' || t === 'mr_updated') && typeof loadMRInfo === 'function' && currentTab === 'meta') loadMRInfo();
       if ((t === 'jira_created' || t === 'jira_updated') && typeof loadJiraInfo === 'function' && currentTab === 'meta') loadJiraInfo();
-      if (t === 'session_assigned' && typeof loadWorkspaceSelector === 'function') loadWorkspaceSelector();
+      if (t === 'session_assigned' && typeof loadSession === 'function') {
+        // Only refresh if it's our session
+        const detailSid = evt.detail ? evt.detail.session_id : '';
+        const currentSidWithPrefix = (MODE === 'copilot' ? '' : MODE + '_') + SESSION_ID;
+        if (detailSid === currentSidWithPrefix || detailSid === SESSION_ID) {
+          loadSession();
+          if (typeof loadWorkspaceSelector === 'function') loadWorkspaceSelector();
+        }
+      }
       if ((t === 'workspace_created' || t === 'workspace_closed' || t === 'workspace_reopened') && typeof loadWorkspaceSelector === 'function') loadWorkspaceSelector();
     }
   } catch (e) {}
@@ -4176,9 +4184,15 @@ initStatusBar({
   updateWorkspace: function() {
     const txt = document.getElementById('status-bar-workspace-text');
     if (txt) {
-      const sessionData = window.sessionData || {};
-      const workspaceName = sessionData.workspace || 'Session Detail';
-      txt.textContent = '🗂 ' + workspaceName.substring(0, 24);
+      const workspaceId = sessionInfo.workspace || (window.sessionData ? window.sessionData.workspace : null);
+      if (workspaceId && typeof _allWorkspaces !== 'undefined') {
+        const ws = _allWorkspaces.find(w => w.id === workspaceId);
+        if (ws) {
+          txt.textContent = '🗂 ' + ws.name.substring(0, 24);
+          return;
+        }
+      }
+      txt.textContent = workspaceId || 'Session Detail';
     }
   }
 });

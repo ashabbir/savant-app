@@ -2,19 +2,19 @@
   "mcpServers": {
     "savant-workspace": {
       "url": "http://127.0.0.1:8091/sse",
-      "type": "sse"
+      "trust": true
     },
     "savant-abilities": {
       "url": "http://127.0.0.1:8092/sse",
-      "type": "sse"
+      "trust": true
     },
     "savant-context": {
       "url": "http://127.0.0.1:8093/sse",
-      "type": "sse"
+      "trust": true
     },
     "savant-knowledge": {
       "url": "http://127.0.0.1:8094/sse",
-      "type": "sse"
+      "trust": true
     }
   }
 }
