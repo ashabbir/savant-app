@@ -141,7 +141,7 @@ function renderWorkspaces() {
   // Build dashboard stats
   if (_workspaces.length) {
     const totalWs = _workspaces.length;
-    let totalSessions = 0, totalCopilot = 0, totalCline = 0, totalClaude = 0;
+    let totalSessions = 0, totalCopilot = 0, totalCline = 0, totalClaude = 0, totalCodex = 0, totalGemini = 0;
     let totalTasks = 0, tasksDone = 0, tasksActive = 0, tasksBlocked = 0;
     let totalMRs = 0;
     let totalKgNodes = 0;
@@ -152,6 +152,8 @@ function renderWorkspaces() {
       totalCopilot += c.copilot || 0;
       totalCline += c.cline || 0;
       totalClaude += c.claude || 0;
+      totalCodex += c.codex || 0;
+      totalGemini += c.gemini || 0;
       const ts = ws.task_stats || {};
       totalTasks += ts.total || 0;
       tasksDone += ts.done || 0;
@@ -173,7 +175,7 @@ function renderWorkspaces() {
       </div>
       <div class="ws-dash-card accent-magenta">
         <div class="ws-dash-label">PROVIDERS</div>
-        <div class="ws-dash-value" style="color:var(--text);font-size:0.9rem;">⟐${totalCopilot} 🎭${totalClaude}</div>
+        <div class="ws-dash-value" style="color:var(--text);font-size:0.9rem;">⟐${totalCopilot} 🎭${totalClaude} 🧠${totalCodex} ♊${totalGemini}</div>
         <div class="ws-dash-sub">across all workspaces</div>
       </div>
       <div class="ws-dash-card accent-yellow">
@@ -282,6 +284,8 @@ function renderWorkspaces() {
         <div class="ws-provider-row">
           ${c.copilot ? `<span class="ws-provider-chip copilot">⟐ <span class="count">${c.copilot}</span></span>` : ''}
           ${c.claude ? `<span class="ws-provider-chip claude">🎭 <span class="count">${c.claude}</span></span>` : ''}
+          ${c.codex ? `<span class="ws-provider-chip codex">🧠 <span class="count">${c.codex}</span></span>` : ''}
+          ${c.gemini ? `<span class="ws-provider-chip gemini">♊ <span class="count">${c.gemini}</span></span>` : ''}
         </div>
         ${statusChips ? `<div class="ws-provider-row" style="margin-top:4px;flex-wrap:wrap;gap:4px;">${statusChips}</div>` : ''}
         ${taskLine}
@@ -419,7 +423,7 @@ async function saveWorkspace() {
 function switchWsSubTab(tab) {
   _wsSubTab = tab;
   if (typeof updateBreadcrumb === 'function') updateBreadcrumb();
-  document.querySelectorAll('#ws-detail-panel .savant-subtab').forEach(b => {
+  document.querySelectorAll('#ws-detail-tabs .savant-subtab').forEach(b => {
     const t = b.getAttribute('onclick').match(/'(\w+)'/)[1];
     b.classList.toggle('active', t === tab);
   });
@@ -430,6 +434,7 @@ function switchWsSubTab(tab) {
   document.getElementById('ws-detail-files').style.display = tab === 'files' ? '' : 'none';
   document.getElementById('ws-detail-sfiles').style.display = tab === 'sfiles' ? '' : 'none';
   document.getElementById('ws-detail-notes').style.display = tab === 'notes' ? '' : 'none';
+  document.getElementById('ws-detail-abilities').style.display = tab === 'abilities' ? '' : 'none';
   document.getElementById('ws-detail-knowledge').style.display = tab === 'knowledge' ? '' : 'none';
   // Clear workspace KG HTML when leaving to avoid duplicate IDs with main KG
   if (tab !== 'knowledge') {
@@ -443,9 +448,9 @@ function switchWsSubTab(tab) {
   if (tab === 'files' && _currentWsId) loadWsFiles(_currentWsId);
   if (tab === 'sfiles' && _currentWsId) loadWsSessionFiles(_currentWsId);
   if (tab === 'notes' && _currentWsId) loadWsNotes(_currentWsId);
+  if (tab === 'abilities' && _currentWsId) loadWsAbilities(_currentWsId);
   if (tab === 'knowledge' && _currentWsId) loadWsKnowledge(_currentWsId);
-}
-
+  }
 async function openWsDetail(wsId) {
   showLoadingScreen(() => { _openWsDetailInner(wsId); });
 }
@@ -480,15 +485,19 @@ async function _openWsDetailInner(wsId) {
 
   // Reset to sessions tab
   _wsSubTab = 'sessions';
-  document.querySelectorAll('#ws-detail-panel .savant-subtab').forEach(b => {
-    const t = b.getAttribute('onclick').match(/'(\w+)'/)[1];
+  document.querySelectorAll('#ws-detail-tabs .savant-subtab').forEach(b => {
+    const match = (b.getAttribute('onclick') || '').match(/'(\w+)'/);
+    const t = match ? match[1] : '';
     b.classList.toggle('active', t === 'sessions');
   });
   document.getElementById('ws-detail-tasks').style.display = 'none';
   document.getElementById('ws-detail-mrs').style.display = 'none';
+  document.getElementById('ws-detail-jira').style.display = 'none';
   document.getElementById('ws-detail-files').style.display = 'none';
   document.getElementById('ws-detail-sfiles').style.display = 'none';
   document.getElementById('ws-detail-notes').style.display = 'none';
+  document.getElementById('ws-detail-abilities').style.display = 'none';
+  document.getElementById('ws-detail-knowledge').style.display = 'none';
   document.getElementById('ws-detail-sessions').style.display = '';
 
   const statsEl = document.getElementById('ws-detail-stats');
@@ -533,7 +542,7 @@ async function _openWsDetailInner(wsId) {
         No sessions assigned to this workspace yet.<br>Assign sessions from their detail page.</div>`;
     } else {
       container.innerHTML = _wsDetailSessions.map(s => {
-        const provIcon = s.provider === 'copilot' ? '⟐' : s.provider === 'cline' ? '🤖' : '🎭';
+      const provIcon = s.provider === 'copilot' ? '⟐' : s.provider === 'cline' ? '🤖' : s.provider === 'codex' ? '🧠' : s.provider === 'gemini' ? '♊' : '🎭';
         const provBadge = `<span class="provider-badge ${s.provider}">${provIcon} ${s.provider}</span>`;
         // Build a full card via buildCardHtml, then inject provider badge
         const cardHtml = buildCardHtml(s, s.provider);
@@ -586,7 +595,7 @@ async function loadWsFiles(wsId) {
     let html = `<div style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text-dim);margin-bottom:12px;">
       ${groups.length} session${groups.length !== 1 ? 's' : ''} · ${totalFiles} file${totalFiles !== 1 ? 's' : ''} total</div>`;
     groups.forEach((g, idx) => {
-      const provIcon = g.provider === 'copilot' ? '⟐' : g.provider === 'cline' ? '🤖' : '🎭';
+      const provIcon = g.provider === 'copilot' ? '⟐' : g.provider === 'cline' ? '🤖' : g.provider === 'codex' ? '🧠' : g.provider === 'gemini' ? '♊' : '🎭';
       html += `<div class="ws-file-group">
         <div class="ws-file-group-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('hidden')">
           <span class="expand-icon">▼</span>
@@ -630,7 +639,7 @@ async function loadWsSessionFiles(wsId) {
     let html = `<div style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text-dim);margin-bottom:12px;">
       ${groups.length} session${groups.length !== 1 ? 's' : ''} · ${totalFiles} file${totalFiles !== 1 ? 's' : ''} total</div>`;
     groups.forEach(g => {
-      const provIcon = g.provider === 'copilot' ? '⟐' : g.provider === 'cline' ? '🤖' : '🎭';
+      const provIcon = g.provider === 'copilot' ? '⟐' : g.provider === 'cline' ? '🤖' : g.provider === 'codex' ? '🧠' : g.provider === 'gemini' ? '♊' : '🎭';
       html += `<div class="ws-file-group">
         <div class="ws-file-group-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('hidden')">
           <span class="expand-icon">▼</span>
@@ -747,7 +756,7 @@ function loadWsMergeRequests() {
 
     for (const e of mr.entries) {
       const sName = e.session.nickname || e.session.summary || e.session.id.slice(0, 8);
-      const provIcon = e.session.provider === 'copilot' ? '⟐' : e.session.provider === 'cline' ? '🤖' : '🎭';
+      const provIcon = e.session.provider === 'copilot' ? '⟐' : e.session.provider === 'cline' ? '🤖' : e.session.provider === 'codex' ? '🧠' : e.session.provider === 'gemini' ? '♊' : '🎭';
       const statusColor = mrColors[e.status] || '#888';
       const statusLabel = mrLabels[e.status] || e.status;
       const provStr = e.session.provider ? `<span class="chip-provider">${provIcon} ${e.session.provider}</span>` : '';
@@ -914,7 +923,7 @@ async function loadWsNotes(wsId) {
       container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-dim);font-family:var(--font-mono);font-size:0.7rem;">No notes yet across sessions in this workspace.</div>`;
       return;
     }
-    const providerIcon = {copilot:'⟐', cline:'🤖', claude:'🎭'};
+    const providerIcon = {copilot:'⟐', cline:'🤖', claude:'🎭', codex:'🧠', gemini:'♊'};
     let totalNotes = 0;
     groups.forEach(g => totalNotes += g.note_count);
     let html = `<div style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text-dim);margin-bottom:14px;">${totalNotes} note${totalNotes!==1?'s':''} across ${groups.length} session${groups.length!==1?'s':''}</div>`;
@@ -957,6 +966,7 @@ function navigateToSessionDirect(sessionId, provider) {
   let url;
   if (provider === 'cline') url = `/cline/task/${sessionId}`;
   else if (provider === 'claude') url = `/claude/session/${sessionId}`;
+  else if (provider === 'codex') url = `/codex/session/${sessionId}`;
   else url = `/session/${sessionId}`;
   showLoadingThenNavigate(url);
 }
@@ -1214,6 +1224,53 @@ async function submitKnowledge(wsId) {
   }
 }
 
+async function loadWsAbilities(wsId) {
+  const container = document.getElementById('ws-detail-abilities');
+  if (!container) return;
+  container.innerHTML = '<div class="loading">Resolving engineer abilities...</div>';
+  
+  try {
+    // Resolve engineer persona for this workspace
+    // We use the workspace name as repo_id since it's likely to match or be fuzzy-matched
+    const ws = _workspaces.find(w => w.id === wsId) || {};
+    const res = await fetch('/api/abilities/resolve', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        persona: 'engineer',
+        repo_id: ws.name || wsId,
+        tags: ['backend', 'frontend', 'python', 'javascript']
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    const manifest = data.manifest || {};
+    const applied = manifest.applied || {};
+    
+    let html = `<div style="margin-bottom:20px; border-bottom:1px solid var(--border); padding-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="font-family:'Orbitron',sans-serif; font-size:0.8rem; color:var(--cyan);">RESOLVED ABILITIES</h3>
+      <span style="font-size:0.5rem; color:var(--text-dim); font-family:var(--font-mono);">HASH: ${manifest.hash ? manifest.hash.slice(0,8) : 'N/A'}</span>
+    </div>`;
+
+    html += `<div class="ab-resolve-manifest" style="margin-bottom:20px; background:var(--bg-panel); border:1px solid var(--border); border-radius:8px; padding:12px 16px; font-family:var(--font-mono); font-size:0.55rem;">
+      <div class="ab-manifest-row" style="margin-bottom:4px; color:var(--text-dim);"><span>Persona:</span> <code style="color:var(--magenta);">${applied.persona || 'engineer'}</code></div>
+      <div class="ab-manifest-row" style="margin-bottom:4px; color:var(--text-dim);"><span>Repo Overlay:</span> <code style="color:var(--cyan);">${applied.repo || '(none)'}</code></div>
+      <div class="ab-manifest-row" style="margin-bottom:4px; color:var(--text-dim);"><span>Applied Rules:</span> <code style="color:var(--green);">${(applied.rules || []).join(', ') || '(none)'}</code></div>
+      <div class="ab-manifest-row" style="color:var(--text-dim);"><span>Applied Policies:</span> <code style="color:var(--yellow);">${(applied.policies || []).join(', ') || '(none)'}</code></div>
+    </div>`;
+
+    // Render the resolved prompt text
+    const promptBody = data.prompt || '';
+    const rendered = typeof marked !== 'undefined' ? marked.parse(promptBody) : promptBody;
+    html += `<div class="markdown-body" style="background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:8px; padding:20px;">${rendered}</div>`;
+
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state">Failed to resolve abilities: ${e.message}</div>`;
+  }
+}
+
 async function navigateToTask(taskId, workspaceId) {
   closeWsSearchResults();
   showLoadingScreen(async () => {
@@ -1369,4 +1426,3 @@ async function kbPurgeWorkspaceConfirm(wsId) {
 
 // Fetch workspaces on load for the filter dropdown
 fetchWorkspaces();
-

@@ -743,6 +743,28 @@ async function testMcpConnection(name, port, btn) {
   btn.disabled = false;
 }
 
+async function restartMcpServer(name, port, btn) {
+  if (!window.electronAPI || !window.electronAPI.restartMcp) {
+    alert('Restart only available in desktop app');
+    return;
+  }
+  const statusEl = document.getElementById('mcp-test-' + name);
+  btn.disabled = true;
+  statusEl.className = 'mcp-test-status loading';
+  statusEl.textContent = '● Restarting...';
+  try {
+    await window.electronAPI.restartMcp(name);
+    // Wait a bit for server to come up
+    setTimeout(() => {
+      testMcpConnection(name, port, btn);
+    }, 1500);
+  } catch (e) {
+    statusEl.className = 'mcp-test-status fail';
+    statusEl.textContent = '● Restart failed: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
 // ── Major Release Hero Modal ──
 
 function showHeroRelease(version) {
@@ -821,62 +843,92 @@ function dismissHeroRelease() {
 
 function getApiPrefix() {
   if (currentMode === 'claude') return '/api/claude';
+  if (currentMode === 'codex') return '/api/codex';
+  if (currentMode === 'gemini') return '/api/gemini';
   return '/api';
 }
 function getSessionsEndpoint() {
   if (currentMode === 'claude') return '/api/claude/sessions';
+  if (currentMode === 'codex') return '/api/codex/sessions';
+  if (currentMode === 'gemini') return '/api/gemini/sessions';
   return '/api/sessions';
 }
 function getSessionDetailEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}`;
+  if (currentMode === 'codex') return `/api/codex/session/${id}`;
+  if (currentMode === 'gemini') return `/api/gemini/session/${id}`;
   return `/api/session/${id}`;
 }
 function getConversationEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/conversation`;
+  if (currentMode === 'codex') return `/api/codex/session/${id}/conversation`;
+  if (currentMode === 'gemini') return `/api/gemini/session/${id}/conversation`;
   return `/api/session/${id}/conversation`;
 }
 function getSearchEndpoint() {
   if (currentMode === 'claude') return '/api/claude/search';
+  if (currentMode === 'codex') return '/api/codex/search';
+  if (currentMode === 'gemini') return '/api/gemini/search';
   return '/api/search';
 }
 function getUsageEndpoint() {
   if (currentMode === 'claude') return '/api/claude/usage';
+  if (currentMode === 'codex') return '/api/codex/usage';
+  if (currentMode === 'gemini') return '/api/gemini/usage';
   return '/api/usage';
 }
 function getBulkDeleteEndpoint() {
   if (currentMode === 'claude') return '/api/claude/sessions/bulk-delete';
+  if (currentMode === 'codex') return '/api/codex/sessions/bulk-delete';
+  if (currentMode === 'gemini') return '/api/gemini/sessions/bulk-delete';
   return '/api/sessions/bulk-delete';
 }
 function getDeleteEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}`;
+  if (currentMode === 'codex') return `/api/codex/session/${id}`;
+  if (currentMode === 'gemini') return `/api/gemini/session/${id}`;
   return `/api/session/${id}`;
 }
 function getRenameEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/rename`;
+  if (currentMode === 'codex') return `/api/codex/session/${id}/rename`;
+  if (currentMode === 'gemini') return `/api/gemini/session/${id}/rename`;
   return `/api/session/${id}/rename`;
 }
 function getStarEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/star`;
+  if (currentMode === 'codex') return `/api/codex/session/${id}/star`;
+  if (currentMode === 'gemini') return `/api/gemini/session/${id}/star`;
   return `/api/session/${id}/star`;
 }
 function getArchiveEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/archive`;
+  if (currentMode === 'codex') return `/api/codex/session/${id}/archive`;
+  if (currentMode === 'gemini') return `/api/gemini/session/${id}/archive`;
   return `/api/session/${id}/archive`;
 }
 function getDetailPageUrl(id) {
   if (currentMode === 'claude') return `/claude/session/${id}`;
+  if (currentMode === 'codex') return `/codex/session/${id}`;
+  if (currentMode === 'gemini') return `/gemini/session/${id}`;
   return `/session/${id}`;
 }
 function getProjectFilesEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/project-files`;
+  if (currentMode === 'codex') return `/api/codex/session/${id}/project-files`;
+  if (currentMode === 'gemini') return `/api/gemini/session/${id}/project-files`;
   return `/api/session/${id}/project-files`;
 }
 function getGitChangesEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/git-changes`;
+  if (currentMode === 'codex') return `/api/codex/session/${id}/git-changes`;
+  if (currentMode === 'gemini') return `/api/gemini/session/${id}/git-changes`;
   return `/api/session/${id}/git-changes`;
 }
 function getFileEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/file`;
+  if (currentMode === 'codex') return `/api/codex/session/${id}/file`;
+  if (currentMode === 'gemini') return `/api/gemini/session/${id}/file`;
   return `/api/session/${id}/file`;
 }
 
@@ -886,15 +938,19 @@ function _resolveProvider(sessionId) {
     const s = _wsDetailSessions.find(s => s.id === sessionId);
     if (s && s.provider) return s.provider;
   }
-  if (['copilot','claude'].includes(currentMode)) return currentMode;
+  if (['copilot','claude','codex','gemini'].includes(currentMode)) return currentMode;
   return 'copilot';
 }
 function _endpointFor(provider, id, action) {
   if (provider === 'claude') return `/api/claude/session/${id}/${action}`;
+  if (provider === 'codex') return `/api/codex/session/${id}/${action}`;
+  if (provider === 'gemini') return `/api/gemini/session/${id}/${action}`;
   return `/api/session/${id}/${action}`;
 }
 function _deleteEndpointFor(provider, id) {
   if (provider === 'claude') return `/api/claude/session/${id}`;
+  if (provider === 'codex') return `/api/codex/session/${id}`;
+  if (provider === 'gemini') return `/api/gemini/session/${id}`;
   return `/api/session/${id}`;
 }
 
@@ -910,6 +966,8 @@ function _renderWsStats(ws, wsTasks, statsEl) {
   // Provider counts
   const copilotCount = sessions.filter(s => s.provider === 'copilot').length;
   const claudeCount = sessions.filter(s => s.provider === 'claude').length;
+  const codexCount = sessions.filter(s => s.provider === 'codex').length;
+  const geminiCount = sessions.filter(s => s.provider === 'gemini').length;
 
   // Projects
   const projects = [...new Set(sessions.map(s => s.project).filter(Boolean))];
@@ -954,7 +1012,7 @@ function _renderWsStats(ws, wsTasks, statsEl) {
     <div class="ws-stat-card">
       <div class="ws-stat-label">Sessions</div>
       <div class="ws-stat-value" style="color:var(--cyan);">${totalSessions}</div>
-      <div class="ws-stat-sub">${copilotCount} copilot · ${claudeCount} claude</div>
+      <div class="ws-stat-sub">${copilotCount} copilot · ${claudeCount} claude · ${codexCount} codex · ${geminiCount} gemini</div>
       <div class="ws-stat-sub" style="margin-top:3px;">${activeCount} active · ${archivedCount} archived</div>
     </div>
     <div class="ws-stat-card">
@@ -1017,7 +1075,7 @@ async function _refreshWsDetailSessions() {
           No sessions assigned to this workspace yet.<br>Assign sessions from their detail page.</div>`;
       } else {
         container.innerHTML = _wsDetailSessions.map(s => {
-          const provIcon = s.provider === 'copilot' ? '⟐' : '🎭';
+          const provIcon = s.provider === 'copilot' ? '⟐' : s.provider === 'codex' ? '🧠' : s.provider === 'gemini' ? '♊' : '🎭';
           const provBadge = `<span class="provider-badge ${s.provider}">${provIcon} ${s.provider}</span>`;
           const cardHtml = buildCardHtml(s, s.provider);
           return cardHtml.replace(
@@ -1053,7 +1111,7 @@ function _applyTabUI() {
   const mcpBar = document.getElementById('mcp-subtabs');
   provBar.style.display = currentTab === 'sessions' ? '' : 'none';
   mcpBar.style.display = currentTab === 'abilities' ? '' : 'none';
-  ['copilot','claude'].forEach(p => {
+  ['copilot','claude','codex','gemini'].forEach(p => {
     const btn = document.getElementById('prov-' + p);
     if (btn) btn.classList.toggle('active', currentMode === p);
   });
@@ -1101,8 +1159,10 @@ function switchTab(tab) {
     if (_currentWsId) {
       _currentWsId = null;
       _wsDetailSessions = [];
-      document.getElementById('workspace-detail-view').style.display = 'none';
-      document.getElementById('ws-list-view').style.display = '';
+      const wsDetailView = document.getElementById('workspace-detail-view');
+      const wsListView = document.getElementById('workspace-view');
+      if (wsDetailView) wsDetailView.style.display = 'none';
+      if (wsListView) wsListView.style.display = 'block';
     }
     // Clear workspace KG HTML to avoid duplicate IDs with main KG
     const wsKg = document.getElementById('ws-detail-knowledge');
@@ -1119,7 +1179,7 @@ function _switchTabInner(tab) {
   if (tab === 'sessions') {
     // Restore last provider or default to first enabled
     const saved = localStorage.getItem('wf-mode') || 'copilot';
-    const ep = (_prefs && _prefs.enabled_providers) ? _prefs.enabled_providers : ['copilot','claude'];
+    const ep = (_prefs && _prefs.enabled_providers) ? _prefs.enabled_providers : ['copilot','claude','codex','gemini'];
     if (ep.includes(saved)) {
       currentMode = saved;
     } else {
@@ -1147,6 +1207,21 @@ function _switchTabInner(tab) {
 
 function switchProvider(provider) {
   if (provider === currentMode && currentTab === 'sessions') return;
+  
+  // Reset filters when changing provider
+  currentFilter = 'all';
+  currentProject = '';
+  timeRange = '';
+  searchQuery = '';
+  const filterStatus = document.getElementById('filter-status');
+  if (filterStatus) filterStatus.value = 'all';
+  const filterProj = document.getElementById('filter-project');
+  if (filterProj) filterProj.value = '';
+  const filterTime = document.getElementById('filter-timerange');
+  if (filterTime) filterTime.value = '';
+  const filterSearch = document.getElementById('session-search');
+  if (filterSearch) filterSearch.value = '';
+
   showLoadingScreen(() => {
     currentTab = 'sessions';
     currentMode = provider;
@@ -1162,7 +1237,12 @@ function _loadSessionProvider() {
   // Reset usage cache
   usageCache = null;
   document.getElementById('usage-body').innerHTML = '<div style="font-size:0.7rem; color:var(--text-dim);">Loading usage data...</div>';
-  const intTitles = { copilot: '🧠 COPILOT USAGE INTELLIGENCE', claude: '🧠 CLAUDE USAGE INTELLIGENCE' };
+  const intTitles = { 
+    copilot: '🧠 COPILOT USAGE INTELLIGENCE', 
+    claude: '🧠 CLAUDE USAGE INTELLIGENCE',
+    codex: '🧠 CODEX USAGE INTELLIGENCE',
+    gemini: '🧠 GEMINI USAGE INTELLIGENCE'
+  };
   document.querySelector('#usage-panel .analytics-toggle-title').textContent = intTitles[currentMode] || intTitles.copilot;
   // Clear grid and show loading spinner
   allSessions = [];
@@ -1170,7 +1250,7 @@ function _loadSessionProvider() {
   totalCount = 0;
   const container = document.getElementById('sessions-container');
   if (container) {
-    const modeLabel = currentMode === 'claude' ? 'CLAUDE' : 'COPILOT';
+    const modeLabel = currentMode === 'claude' ? 'CLAUDE' : currentMode === 'codex' ? 'CODEX' : currentMode === 'gemini' ? 'GEMINI' : 'COPILOT';
     container.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div style="color: var(--text-dim); font-size: 0.8rem;">LOADING ${modeLabel} DATA...</div></div>`;
   }
   const lmBtn = document.getElementById('load-more-btn');
@@ -1222,4 +1302,3 @@ function formatDuration(start, end) {
   const days = Math.floor(hrs / 24);
   return `${days}d ${hrs % 24}h`;
 }
-

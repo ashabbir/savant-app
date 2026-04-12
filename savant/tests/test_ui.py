@@ -145,7 +145,7 @@ class TestPageLoad:
         assert page.locator("#notif-bell").is_visible()
 
     def test_provider_subtabs_present(self, page):
-        for btn_id in ["prov-copilot", "prov-cline", "prov-claude"]:
+        for btn_id in ["prov-copilot", "prov-cline", "prov-claude", "prov-codex"]:
             assert page.locator(f"#{btn_id}").is_visible(), f"#{btn_id} missing"
 
     def test_api_health(self, flask_server):
@@ -215,7 +215,7 @@ class TestProviderSubtabs:
     def test_only_one_provider_active(self, page):
         page.locator("#prov-cline").click()
         page.wait_for_timeout(300)
-        active = [i for i in ["prov-copilot", "prov-cline", "prov-claude"] if _active(page, f"#{i}")]
+        active = [i for i in ["prov-copilot", "prov-cline", "prov-claude", "prov-codex"] if _active(page, f"#{i}")]
         assert len(active) == 1, f"Expected 1 active provider, got: {active}"
 
 

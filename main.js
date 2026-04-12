@@ -49,7 +49,7 @@ function getSavantDir() {
 
 // ── MCP auto-setup ──────────────────────────────────────────────────────────
 // On first launch, inject savant-workspace MCP server config into AI tool
-// config files (Copilot CLI, Claude Desktop). Merges without
+// config files (Copilot CLI, Claude Desktop, Codex CLI). Merges without
 // overwriting existing entries.
 function setupMcpConfigs() {
   const mcpServerPath = path.join(getSavantDir(), "mcp", "server.py");
@@ -78,7 +78,34 @@ function setupMcpConfigs() {
       path: path.join(app.getPath("home"), "Library", "Application Support", "Claude", "claude_desktop_config.json"),
       entryFn: (sse) => ({ ...sse, tools: ["*"] }),
     },
+    {
+      name: "Gemini CLI",
+      path: path.join(app.getPath("home"), ".gemini", "settings.json"),
+      entryFn: (sse) => ({ ...sse, autoApprove: ["*"], disabled: false }),
+    },
   ];
+
+  const patchCodexConfig = () => {
+    const codexPath = path.join(app.getPath("home"), ".codex", "config.toml");
+    if (!fs.existsSync(codexPath)) return;
+    const raw = fs.readFileSync(codexPath, "utf8");
+    const stdioPyPath = path.join(getSavantDir(), "mcp", "stdio.py");
+    const pythonCmd = _findMcpPython() || "python3";
+
+    let updated = raw;
+    for (const name of Object.keys(MCP_SERVERS)) {
+      const sectionHeader = `[mcp_servers."savant-${name}"]`;
+      if (raw.includes(sectionHeader)) continue;
+
+      const entry = `\n${sectionHeader}\ntype = "stdio"\ncommand = "${pythonCmd}"\nargs = ["${stdioPyPath}", "${name}"]\n`;
+      updated += entry;
+    }
+
+    if (updated !== raw) {
+      fs.writeFileSync(codexPath, updated, "utf8");
+      _log(`MCP: appended ${Object.keys(MCP_SERVERS).map(n => `savant-${n}`).join(' + ')} to Codex CLI config`);
+    }
+  };
 
   for (const cfg of configs) {
     try {
@@ -95,6 +122,12 @@ function setupMcpConfigs() {
     } catch (e) {
       _err(`MCP: failed to update ${cfg.name}:`, e.message);
     }
+  }
+
+  try {
+    patchCodexConfig();
+  } catch (e) {
+    _err(`MCP: failed to update Codex CLI:`, e.message);
   }
 }
 
@@ -352,22 +385,123 @@ function findFreePort() {
   });
 }
 
-// ── Start Flask ─────────────────────────────────────────────────────────────
-function startFlask(port) {
-  const savantDir = getSavantDir();
-  // Prefer Homebrew python (has Flask), fall back to system
-  const pythonPaths = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3", "python3"];
-  let pythonCmd = null;
+const EMBEDDING_MODEL_NAME = process.env.EMBEDDING_MODEL_NAME || "stsb-distilbert-base";
+const EMBEDDING_MODEL_VERSION = process.env.EMBEDDING_VERSION || "v1";
+let _flaskPythonCmd = undefined; // undefined = not probed, null = not found
 
+function _findPythonWithFlask() {
+  if (_flaskPythonCmd !== undefined) return _flaskPythonCmd;
+  const pythonPaths = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3", "python3"];
   for (const p of pythonPaths) {
     try {
       require("child_process").execSync(`${p} -c "import flask"`, { stdio: "ignore" });
-      pythonCmd = p;
-      break;
+      _flaskPythonCmd = p;
+      return p;
     } catch {
       // try next
     }
   }
+  _flaskPythonCmd = null;
+  return null;
+}
+
+function _hasEmbeddingModel(dir) {
+  if (!dir) return false;
+  try {
+    if (!fs.existsSync(dir)) return false;
+    if (fs.existsSync(path.join(dir, "config.json"))) return true;
+    const entries = fs.readdirSync(dir);
+    return entries.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function _bundledEmbeddingModelDir() {
+  return path.join(getSavantDir(), "models", EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_VERSION);
+}
+
+function _userEmbeddingModelDir() {
+  return path.join(app.getPath("home"), ".savant", "models", EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_VERSION);
+}
+
+function _downloadEmbeddingModel(pythonCmd, targetDir) {
+  return new Promise((resolve) => {
+    const script = [
+      "from context.embeddings import download_model",
+      "from pathlib import Path",
+      "import sys",
+      "dest = Path(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1] else None",
+      "download_model(dest)",
+    ].join("\n");
+
+    const args = ["-c", script];
+    if (targetDir) args.push(targetDir);
+
+    const child = spawn(pythonCmd, args, {
+      cwd: getSavantDir(),
+      env: {
+        ...process.env,
+        PYTHONDONTWRITEBYTECODE: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const logLine = (label, data) => {
+      const text = data.toString().trim();
+      if (!text) return;
+      _logDetail(`[model] ${text}`, label);
+    };
+
+    child.stdout.on("data", (d) => logLine("info", d));
+    child.stderr.on("data", (d) => logLine("warn", d));
+    child.on("exit", (code) => {
+      if (code === 0) {
+        _logDetail(`Embedding model ready at ${targetDir}`, "ok");
+        resolve(true);
+      } else {
+        _err(`Embedding model download failed with code ${code}`);
+        resolve(false);
+      }
+    });
+  });
+}
+
+async function ensureEmbeddingModel() {
+  const overrideDir = process.env.EMBEDDING_MODEL_DIR;
+  if (overrideDir && _hasEmbeddingModel(overrideDir)) {
+    _logDetail(`Embedding model already present at ${overrideDir}`, "ok");
+    return;
+  }
+
+  const bundledDir = _bundledEmbeddingModelDir();
+  if (!overrideDir && _hasEmbeddingModel(bundledDir)) {
+    _logDetail(`Embedding model bundled at ${bundledDir}`, "ok");
+    return;
+  }
+
+  const userDir = _userEmbeddingModelDir();
+  if (!overrideDir && _hasEmbeddingModel(userDir)) {
+    _logDetail(`Embedding model already downloaded at ${userDir}`, "ok");
+    return;
+  }
+
+  const targetDir = overrideDir || userDir;
+  const pythonCmd = _findPythonWithFlask();
+  if (!pythonCmd) {
+    _err("No Python with Flask found. Install Flask: pip3 install flask");
+    return;
+  }
+
+  setStatus("Downloading embedding model…");
+  _logDetail(`Embedding model missing, downloading to ${targetDir}`, "warn");
+  await _downloadEmbeddingModel(pythonCmd, targetDir);
+}
+
+// ── Start Flask ─────────────────────────────────────────────────────────────
+function startFlask(port) {
+  const savantDir = getSavantDir();
+  const pythonCmd = _findPythonWithFlask();
 
   if (!pythonCmd) {
     _err("No Python with Flask found. Install Flask: pip3 install flask");
@@ -1053,14 +1187,27 @@ app.on("ready", async () => {
       return result.filePaths[0];
     });
 
+    ipcMain.handle("mcp:restart", async (_event, name) => {
+      _log(`Manual restart requested for MCP: ${name}`);
+      _killMcpServer(name);
+      // Wait a bit for port to clear
+      await new Promise(r => setTimeout(r, 500));
+      _startMcpServer(name, flaskPort);
+      return { ok: true };
+    });
+
     // 1. Show window immediately
     createWindow();
     createTermView();
     _watchWindowResize();
-    setStatus("Allocating port…");
+    setStatus("Checking embedding model…");
     _logDetail(`Electron ${process.versions.electron} · Node ${process.versions.node}`, 'sys');
     _logDetail(`Platform: ${process.platform} ${process.arch}`, 'sys');
     _logDetail(`App path: ${app.getAppPath()}`, 'sys');
+
+    await ensureEmbeddingModel();
+
+    setStatus("Allocating port…");
 
     flaskPort = await findFreePort();
     _logDetail(`Flask port allocated: ${flaskPort}`, 'ok');

@@ -64,8 +64,15 @@ _IN_DOCKER = os.path.isfile("/.dockerenv") or bool(os.environ.get("RUNNING_IN_DO
 # --- Claude Code data directories ---
 CLAUDE_DIR = os.environ.get("CLAUDE_DIR",
     "/data/claude" if _IN_DOCKER else os.path.expanduser("~/.claude"))
+GEMINI_DIR = os.environ.get("GEMINI_DIR",
+    os.path.expanduser("~/.gemini"))
+GEMINI_CHATS_DIR = os.path.join(GEMINI_DIR, "tmp", "savant-app", "chats")
 META_DIR = os.environ.get("META_DIR",
     "/data/meta" if _IN_DOCKER else os.path.expanduser("~/.savant/meta"))
+CODEX_DIR = os.environ.get("CODEX_DIR",
+    "/data/codex" if _IN_DOCKER else os.path.expanduser("~/.codex"))
+CODEX_SESSIONS_DIR = os.path.join(CODEX_DIR, "sessions")
+CODEX_META_DIR = os.path.join(CODEX_DIR, ".savant-meta")
 
 # --- Host path mapping (container→host for file open/reveal) ---
 _HOST_PATH_MAP = []
@@ -99,8 +106,8 @@ def _unique_ts_id():
 # BACKGROUND CACHE — all list/usage data served from memory
 # ═══════════════════════════════════════════════════════════════════════════════
 _bg_cache = {
-    'copilot_sessions': None, 'claude_sessions': None,
-    'copilot_usage': None, 'claude_usage': None,
+    'copilot_sessions': None, 'claude_sessions': None, 'codex_sessions': None, 'gemini_sessions': None,
+    'copilot_usage': None, 'claude_usage': None, 'codex_usage': None, 'gemini_usage': None,
 }
 _bg_lock = threading.Lock()
 
@@ -757,12 +764,37 @@ def api_sessions():
     return jsonify({"sessions": sessions, "total": total, "has_more": False})
 
 
+@app.route("/api/codex/sessions")
+def api_codex_sessions():
+    with _bg_lock:
+        sessions = _bg_cache.get('codex_sessions')
+    if sessions is None:
+        sessions = codex_get_all_sessions()
+        with _bg_lock:
+            _bg_cache['codex_sessions'] = sessions
+    total = len(sessions)
+    limit = request.args.get("limit", 0, type=int)
+    offset = request.args.get("offset", 0, type=int)
+    if limit > 0:
+        page = sessions[offset:offset + limit]
+        return jsonify({"sessions": page, "total": total, "has_more": offset + limit < total})
+    return jsonify({"sessions": sessions, "total": total, "has_more": False})
+
+
 @app.route("/api/session/<session_id>")
 def api_session_detail(session_id):
     full = os.path.join(SESSION_DIR, session_id)
     if not os.path.isdir(full):
         return jsonify({"error": "Session not found"}), 404
     info = get_session_info(session_id, full, include_tree=True)
+    return jsonify(info)
+
+
+@app.route("/api/codex/session/<session_id>")
+def api_codex_session_detail(session_id):
+    info = codex_get_session_info(session_id, include_tree=True)
+    if not info:
+        return jsonify({"error": "Session not found"}), 404
     return jsonify(info)
 
 
@@ -1121,7 +1153,8 @@ def api_session_mr_delete(session_id, mr_id):
 def api_session_notes_get(session_id):
     try:
         # Get notes from SQLite for this session
-        notes_list = NoteDB.list_by_session(session_id)
+        full_session_id = session_id
+        notes_list = NoteDB.list_by_session(full_session_id)
         # Transform to legacy format for backward compatibility
         notes = [
             {
@@ -1144,6 +1177,11 @@ def api_session_notes_post(session_id):
         if not text:
             return jsonify({"error": "Note text required"}), 400
         
+        # Check if this is a prefixed session_id from an MCP call or standard Copilot
+        # If it's already prefixed (e.g. gemini_...) we use it.
+        # Otherwise we default to Copilot (unprefixed) logic.
+        full_session_id = session_id
+        
         # Create note in SQLite
         import uuid
         note_id = f"note_{uuid.uuid4().hex[:8]}"
@@ -1151,7 +1189,7 @@ def api_session_notes_post(session_id):
         
         NoteDB.create({
             "note_id": note_id,
-            "session_id": session_id,
+            "session_id": full_session_id,
             "workspace_id": "",
             "text": text,
             "created_at": now_iso,
@@ -1159,7 +1197,7 @@ def api_session_notes_post(session_id):
         })
         
         # Get all notes for this session
-        notes_list = NoteDB.list_by_session(session_id)
+        notes_list = NoteDB.list_by_session(full_session_id)
         
         _emit_event("note_created", f"Note added to session", {"session_id": session_id})
         return jsonify({"id": session_id, "note": {"text": text, "timestamp": now_iso}, "total": len(notes_list)})
@@ -1280,7 +1318,7 @@ def api_workspaces_list():
         ws.setdefault("status", "open")
         ws.setdefault("priority", "medium")
         ws.setdefault("start_date", None)
-        counts = {"copilot": 0, "claude": 0, "total": 0}
+        counts = {"copilot": 0, "claude": 0, "codex": 0, "gemini": 0, "total": 0}
         session_status_counts = {}
         projects = set()
         mr_urls = set()
@@ -1292,7 +1330,7 @@ def api_workspaces_list():
         archived_count = 0
         session_file_count = 0
         with _bg_lock:
-            for provider in ("copilot_sessions", "claude_sessions"):
+            for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
                 sessions = _bg_cache.get(provider) or []
                 for s in sessions:
                     if s.get("workspace") == ws_id:
@@ -1472,7 +1510,7 @@ def api_workspaces_delete(ws_id):
     
     # Remove workspace assignment from all sessions
     with _bg_lock:
-        for provider in ("copilot_sessions", "claude_sessions"):
+        for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
             sessions = _bg_cache.get(provider) or []
             for s in sessions:
                 if s.get("workspace") == ws_id:
@@ -1486,13 +1524,24 @@ def api_workspaces_sessions(ws_id):
     """Get all sessions across all providers for a workspace."""
     results = []
     with _bg_lock:
-        for provider in ("copilot_sessions", "claude_sessions"):
+        for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
             pkey = provider.replace("_sessions", "")
             sessions = _bg_cache.get(provider) or []
             for s in sessions:
                 if s.get("workspace") == ws_id:
                     session = dict(s)
+                    # pkey is 'gemini' here for gemini_sessions
                     session["provider"] = pkey
+                    # Ensure cwd and resume_command are present for terminal resume
+                    if not session.get("cwd") and session.get("project_path"):
+                        session["cwd"] = session["project_path"]
+                    if not session.get("resume_command"):
+                        if pkey == "gemini":
+                            c = session.get("cwd") or "~"
+                            session["resume_command"] = f"cd {c} && gemini --resume {session['id']}"
+                        elif pkey == "codex":
+                            c = session.get("cwd") or "~"
+                            session["resume_command"] = f"cd {c} && codex resume {session['id']}"
                     results.append(session)
     results.sort(key=lambda s: str(s.get("updated_at") or s.get("created_at") or ""), reverse=True)
     return jsonify({"sessions": results})
@@ -1503,7 +1552,7 @@ def api_workspaces_files(ws_id):
     grouped = []  # [{session_id, provider, summary, project, files: [...]}]
 
     with _bg_lock:
-        for provider_key in ("copilot_sessions", "claude_sessions"):
+        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
             pname = provider_key.replace("_sessions", "")
             for s in (_bg_cache.get(provider_key) or []):
                 if s.get("workspace") != ws_id:
@@ -1585,6 +1634,40 @@ def api_workspaces_files(ws_id):
                             if action in ("create", "edit"):
                                 files_seen[fpath]["action"] = action
 
+                elif pname == "codex":
+                    # Extract files from Codex JSONL via api_codex_session_project_files logic
+                    from flask import request
+                    res = api_codex_session_project_files(sid)
+                    data = res.get_json() if hasattr(res, 'get_json') else {}
+                    for fi in data.get("files", []):
+                        fpath = fi.get("path")
+                        if fpath not in files_seen:
+                            files_seen[fpath] = fi
+                        else:
+                            files_seen[fpath]["count"] += fi.get("count", 0)
+
+                elif pname == "gemini":
+                    # Parse tool calls from Gemini chat JSON
+                    messages = s.get("messages", [])
+                    for msg in messages:
+                        ts = msg.get("timestamp", "")
+                        tool_calls = msg.get("toolCalls", [])
+                        for tc in tool_calls:
+                            tool_name = tc.get("function", {}).get("name", "")
+                            inp = tc.get("function", {}).get("arguments", {})
+                            if not isinstance(inp, dict):
+                                continue
+                            fpath = inp.get("path", inp.get("file_path", ""))
+                            if not fpath or "/.gemini/" in fpath:
+                                continue
+                            action = "view"
+                            if tool_name in ("create", "write_file", "edit"):
+                                action = "edit"
+                            if fpath not in files_seen:
+                                files_seen[fpath] = {"path": fpath, "action": action, "count": 0, "first_seen": ts, "last_seen": ts}
+                            files_seen[fpath]["count"] += 1
+                            files_seen[fpath]["last_seen"] = ts
+
                 # Build file list for this session
                 file_list = []
                 for fpath, info in files_seen.items():
@@ -1612,7 +1695,7 @@ def api_workspaces_session_files(ws_id):
     """Get session artifact files (plan, checkpoints, files/, research/) grouped by session."""
     grouped = []
     with _bg_lock:
-        for provider_key in ("copilot_sessions", "claude_sessions"):
+        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
             pname = provider_key.replace("_sessions", "")
             for s in (_bg_cache.get(provider_key) or []):
                 if s.get("workspace") != ws_id:
@@ -1624,6 +1707,14 @@ def api_workspaces_session_files(ws_id):
                     session_path = os.path.join(SESSION_DIR, sid)
                 elif pname == "claude":
                     session_path = os.path.join(CLAUDE_DIR, sid) if os.path.isdir(os.path.join(CLAUDE_DIR, sid)) else ""
+                elif pname == "codex":
+                    session_dir = codex_find_session_dir(sid)
+                    session_path = session_dir if session_dir else ""
+                elif pname == "gemini":
+                    # Gemini sessions in chats/ are single files, but they might have artifact dirs
+                    session_path = os.path.join(GEMINI_DIR, "tmp", "savant-app", "chats", sid)
+                    if not os.path.isdir(session_path):
+                        session_path = ""
                 else:
                     continue
                 if not session_path or not os.path.isdir(session_path):
@@ -1658,7 +1749,7 @@ def api_workspaces_notes(ws_id):
 
     # 1. Notes from bg_cache (embedded in session file data)
     with _bg_lock:
-        for provider_key in ("copilot_sessions", "claude_sessions"):
+        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
             pname = provider_key.replace("_sessions", "")
             for s in (_bg_cache.get(provider_key) or []):
                 if s.get("workspace") != ws_id:
@@ -1728,7 +1819,7 @@ def api_workspaces_search():
     # Search sessions and notes within workspaces
     ws_by_id = {w["id"]: w for w in workspaces}
     with _bg_lock:
-        for provider_key in ("copilot_sessions", "claude_sessions"):
+        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
             pname = provider_key.replace("_sessions", "")
             for s in (_bg_cache.get(provider_key) or []):
                 ws_id = s.get("workspace")
@@ -1818,6 +1909,8 @@ def api_all_mrs():
         providers = [
             ("copilot", _bg_cache.get("copilot_sessions") or []),
             ("claude",  _bg_cache.get("claude_sessions") or []),
+            ("codex", _bg_cache.get("codex_sessions") or []),
+            ("gemini", _bg_cache.get("gemini_sessions") or []),
         ]
     for prov, sessions in providers:
         for s in sessions:
@@ -1890,6 +1983,8 @@ def api_all_jira_tickets():
         providers = [
             ("copilot", _bg_cache.get("copilot_sessions") or []),
             ("claude",  _bg_cache.get("claude_sessions") or []),
+            ("codex", _bg_cache.get("codex_sessions") or []),
+            ("gemini", _bg_cache.get("gemini_sessions") or []),
         ]
 
     ws_map = {}
@@ -1955,7 +2050,7 @@ def _collect_workspace_sessions(ws_id):
     """Gather all active (non-archived) sessions assigned to a workspace."""
     sessions = []
     with _bg_lock:
-        for provider in ("copilot_sessions", "claude_sessions"):
+        for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
             pkey = provider.replace("_sessions", "")
             for s in (_bg_cache.get(provider) or []):
                 if s.get("workspace") == ws_id and not s.get("archived"):
@@ -2243,6 +2338,15 @@ def api_preferences_get():
     defaults = _default_preferences()
     prefs = _read_preferences()
     merged = {**defaults, **prefs}
+    
+    # Migration: Ensure gemini is in enabled_providers if not explicitly disabled
+    if "enabled_providers" in merged:
+        if "gemini" not in merged["enabled_providers"]:
+            # If they have the old default list, add gemini
+            old_defaults = ["copilot", "claude", "codex"]
+            if all(p in merged["enabled_providers"] for p in old_defaults):
+                merged["enabled_providers"].append("gemini")
+                
     return jsonify(merged)
 
 
@@ -2453,7 +2557,7 @@ def _default_preferences():
     return {
         "name": "",
         "work_week": [1, 2, 3, 4, 5],
-        "enabled_providers": ["copilot", "claude"],
+        "enabled_providers": ["copilot", "claude", "codex", "gemini"],
         "theme": "dark",
     }
 
@@ -3062,6 +3166,54 @@ def _build_copilot_usage():
     }
 
 
+def _build_codex_usage():
+    """Build Codex usage data from session logs."""
+    tool_totals = Counter()
+    total_messages = 0
+    total_turns = 0
+    total_tool_calls = 0
+    total_events = 0
+    session_durations = []
+
+    sessions = codex_get_all_sessions()
+    for s in sessions:
+        total_messages += s.get("message_count", 0)
+        total_turns += s.get("turn_count", 0)
+        total_tool_calls += sum((s.get("tool_call_counts") or {}).values())
+        total_events += s.get("event_count", 0)
+        for name, count in (s.get("tool_call_counts") or {}).items():
+            tool_totals[name] += count
+        try:
+            t1 = datetime.fromisoformat(s.get("created_at")) if s.get("created_at") else None
+            t2 = datetime.fromisoformat(s.get("updated_at")) if s.get("updated_at") else None
+            if t1 and t2:
+                session_durations.append((t2 - t1).total_seconds() / 60)
+        except Exception:
+            pass
+
+    avg_tools_per_turn = round(total_tool_calls / max(total_turns, 1), 1)
+    avg_turns_per_msg = round(total_turns / max(total_messages, 1), 1)
+    total_hours = round(sum(session_durations) / 60.0, 1)
+    avg_session_min = round(sum(session_durations) / max(len(session_durations), 1), 0)
+
+    return {
+        "models": [],
+        "tools": [{"name": t, "calls": c} for t, c in tool_totals.most_common(25)],
+        "daily": [],
+        "totals": {
+            "sessions": len(sessions),
+            "messages": total_messages,
+            "turns": total_turns,
+            "tool_calls": total_tool_calls,
+            "events": total_events,
+            "total_hours": total_hours,
+            "avg_session_minutes": avg_session_min,
+            "avg_tools_per_turn": avg_tools_per_turn,
+            "avg_turns_per_message": avg_turns_per_msg,
+        },
+    }
+
+
 @app.route("/api/usage")
 def api_usage():
     with _bg_lock:
@@ -3089,6 +3241,21 @@ def api_session_convert_prompt(session_id):
     return jsonify({"prompt": prompt, "session_id": session_id, "char_count": len(prompt)})
 
 
+@app.route("/api/codex/session/<session_id>/convert-prompt")
+def api_codex_session_convert_prompt(session_id):
+    info = codex_get_session_info(session_id, include_tree=True)
+    if not info:
+        return jsonify({"error": "Session not found"}), 404
+    try:
+        conv_resp = api_codex_session_conversation(session_id)
+        conv_data = conv_resp.get_json() if hasattr(conv_resp, 'get_json') else {}
+        conv_stats = conv_data.get("stats", {})
+    except Exception:
+        conv_stats = {}
+    prompt = build_convert_prompt(info, conv_stats, provider="codex")
+    return jsonify({"prompt": prompt, "session_id": session_id, "char_count": len(prompt)})
+
+
 @app.route("/api/session/<session_id>/conversation")
 def api_session_conversation(session_id):
     """Return full parsed conversation for a session."""
@@ -3106,6 +3273,14 @@ def api_session_conversation(session_id):
         return jsonify({"error": str(e)}), 500
 
     _finalize_conversation_stats(stats)
+    return jsonify({"conversation": conversation, "tools": tool_map, "stats": stats})
+
+
+@app.route("/api/codex/session/<session_id>/conversation")
+def api_codex_session_conversation(session_id):
+    conversation, tool_map, stats = codex_parse_conversation(session_id)
+    if not conversation and not tool_map and not codex_find_session_jsonl(session_id):
+        return jsonify({"error": "Session not found"}), 404
     return jsonify({"conversation": conversation, "tools": tool_map, "stats": stats})
 
 
@@ -3279,7 +3454,7 @@ def api_search():
         nickname = meta.get("nickname") or ""
         orig_name = ""
         with _bg_lock:
-            for prov in ("copilot_sessions", "claude_sessions"):
+            for prov in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
                 for s in (_bg_cache.get(prov) or []):
                     if s.get("id") == entry:
                         if not nickname:
@@ -3357,7 +3532,7 @@ def api_search():
         n_nick = meta.get("nickname") or ""
         n_orig = ""
         with _bg_lock:
-            for prov in ("copilot_sessions", "claude_sessions"):
+            for prov in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
                 for s in (_bg_cache.get(prov) or []):
                     if s.get("id") == entry:
                         if not n_nick:
@@ -3702,6 +3877,58 @@ def claude_write_session_meta(session_id, meta):
     all_meta = claude_load_all_meta()
     all_meta[session_id] = meta
     claude_save_all_meta(all_meta)
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Codex metadata store (META_DIR + CODEX_META_DIR for MCP)
+# ───────────────────────────────────────────────────────────────────────────
+
+def codex_meta_path():
+    return os.path.join(META_DIR, "codex-meta.json")
+
+
+def codex_sessions_dir():
+    return os.path.join(CODEX_DIR, "sessions")
+
+
+def codex_workspace_meta_dir():
+    return os.path.join(CODEX_DIR, ".savant-meta")
+
+
+def codex_load_all_meta():
+    os.makedirs(META_DIR, exist_ok=True)
+    return claude_safe_read_json(codex_meta_path()) or {}
+
+
+def codex_save_all_meta(data):
+    os.makedirs(META_DIR, exist_ok=True)
+    with open(codex_meta_path(), "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def codex_read_session_meta(session_id):
+    return codex_load_all_meta().get(session_id, {})
+
+
+def codex_write_session_meta(session_id, meta):
+    all_meta = codex_load_all_meta()
+    all_meta[session_id] = meta
+    codex_save_all_meta(all_meta)
+
+
+def codex_write_workspace_meta(session_id, workspace_id):
+    meta_dir = codex_workspace_meta_dir()
+    os.makedirs(meta_dir, exist_ok=True)
+    meta_path = os.path.join(meta_dir, f"{session_id}.json")
+    if workspace_id is None:
+        try:
+            if os.path.exists(meta_path):
+                os.remove(meta_path)
+        except Exception:
+            pass
+        return
+    with open(meta_path, "w") as f:
+        json.dump({"workspace": workspace_id}, f)
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -4504,6 +4731,469 @@ def claude_get_session_detail(session_id):
 # ───────────────────────────────────────────────────────────────────────────
 # Claude API routes
 # ───────────────────────────────────────────────────────────────────────────
+
+# ── Gemini CLI detection & parsing ──────────────────────────────────────────
+
+def _gemini_read_session_meta(session_id: str) -> dict:
+    """Read Savant metadata for a Gemini session."""
+    meta_dir = os.path.join(GEMINI_DIR, ".savant-meta")
+    os.makedirs(meta_dir, exist_ok=True)
+    meta_path = os.path.join(meta_dir, f"{session_id}.json")
+    if not os.path.isfile(meta_path):
+        return {"workspace": None, "starred": False, "archived": False}
+    try:
+        with open(meta_path) as f:
+            return json.load(f)
+    except Exception:
+        return {"workspace": None, "starred": False, "archived": False}
+
+def _gemini_write_session_meta(session_id: str, meta: dict):
+    """Write Savant metadata for a Gemini session."""
+    meta_dir = os.path.join(GEMINI_DIR, ".savant-meta")
+    os.makedirs(meta_dir, exist_ok=True)
+    meta_path = os.path.join(meta_dir, f"{session_id}.json")
+    try:
+        with open(meta_path, "w") as f:
+            json.dump(meta, f)
+    except Exception as e:
+        logger.error(f"Error writing Gemini meta {session_id}: {e}")
+
+def _gemini_read_workspace(session_id: str) -> str | None:
+    """Read workspace assignment from savant meta for a Gemini session."""
+    return _gemini_read_session_meta(session_id).get("workspace")
+
+def gemini_get_all_sessions():
+    """Gather Gemini sessions from ~/.gemini/tmp/savant-app/chats/."""
+    if not os.path.isdir(GEMINI_CHATS_DIR):
+        return []
+
+    # Load project mapping to resolve project hashes
+    project_map = {} # hash -> {path, name}
+    projects_file = os.path.join(GEMINI_DIR, "projects.json")
+    if os.path.isfile(projects_file):
+        try:
+            with open(projects_file) as f:
+                pdata = json.load(f)
+                projects = pdata.get("projects", {})
+                for path, name in projects.items():
+                    import hashlib
+                    phash = hashlib.sha256(path.encode('utf-8')).hexdigest()
+                    project_map[phash] = {"path": path, "name": name}
+        except Exception:
+            pass
+
+    sessions = []
+    # Gemini sessions are stored as session-YYYY-MM-DDTHH-MM-ID.json
+    for filename in os.listdir(GEMINI_CHATS_DIR):
+        if not filename.endswith(".json") or not filename.startswith("session-"):
+            continue
+        
+        full_path = os.path.join(GEMINI_CHATS_DIR, filename)
+        try:
+            with open(full_path, 'r') as f:
+                data = json.load(f)
+                
+            session_id = data.get("sessionId")
+            if not session_id:
+                continue
+                
+            last_updated = data.get("lastUpdated")
+            start_time = data.get("startTime")
+            messages = data.get("messages", [])
+            project_hash = data.get("projectHash")
+            
+            pinfo = project_map.get(project_hash, {})
+            project_path = pinfo.get("path", data.get("projectPath", ""))
+            project_name = pinfo.get("name", os.path.basename(project_path) if project_path else "")
+
+            # Find user messages and summary
+            summary = ""
+            user_msgs = []
+            for msg in messages:
+                if msg.get("type") == "user":
+                    content = msg.get("content", [])
+                    text = ""
+                    if isinstance(content, list) and len(content) > 0:
+                        text = content[0].get("text", "")
+                    elif isinstance(content, str):
+                        text = content
+                    
+                    if text:
+                        user_msgs.append({"timestamp": msg.get("timestamp"), "content": text})
+                        if not summary:
+                            summary = text[:100]
+            
+            # Metadata
+            meta = _gemini_read_session_meta(session_id)
+            
+            # Status calculation
+            status = "COMPLETED"
+            is_open = False
+            if last_updated:
+                try:
+                    lu_dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
+                    if (datetime.now(timezone.utc) - lu_dt).total_seconds() < 3600:
+                        status = "RUNNING"
+                        is_open = True
+                except Exception:
+                    pass
+
+            sessions.append({
+                "id": session_id,
+                "provider": "gemini",
+                "project": project_name,
+                "project_path": project_path,
+                "cwd": project_path,
+                "summary": summary or "Gemini Session",
+                "modified": last_updated or start_time,
+                "created": start_time,
+                "updated_at": last_updated or start_time,
+                "created_at": start_time,
+                "path": full_path,
+                "message_count": len(messages),
+                "user_messages": user_msgs[:3],
+                "workspace": meta.get("workspace"),
+                "starred": meta.get("starred"),
+                "archived": meta.get("archived"),
+                "status": status,
+                "is_open": is_open,
+                "resume_command": f"cd {project_path} && gemini --resume {session_id}" if project_path else f"gemini --resume {session_id}",
+            })
+        except Exception as e:
+            logger.error(f"Error parsing Gemini session {filename}: {e}")
+            
+    # Sort by modified time descending
+    sessions.sort(key=lambda x: x.get("modified", ""), reverse=True)
+    return sessions
+
+def gemini_get_session_detail(session_id):
+    """Read full Gemini session JSON and return info/detail structure."""
+    all_sessions = _bg_cache.get('gemini_sessions') or []
+    info = next((s for s in all_sessions if s['id'] == session_id), None)
+    if not info:
+        # Try finding the file if not in cache
+        for filename in os.listdir(GEMINI_CHATS_DIR):
+            if session_id in filename and filename.endswith(".json"):
+                info = {"path": os.path.join(GEMINI_CHATS_DIR, filename), "id": session_id}
+                break
+    
+    if not info or not os.path.isfile(info.get("path", "")):
+        return None
+        
+    try:
+        with open(info["path"], 'r') as f:
+            data = json.load(f)
+            
+        messages = data.get("messages", [])
+        last_updated = data.get("lastUpdated")
+        start_time = data.get("startTime")
+        
+        # Build status/stats
+        status = "COMPLETED" # Default for Gemini sessions in chats/
+        
+        # Check if it was active recently
+        if last_updated:
+            lu_dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
+            if (datetime.now(timezone.utc) - lu_dt).total_seconds() < 600:
+                status = "RUNNING"
+                
+        # Look for workspace mapping
+        workspace_id = _gemini_read_workspace(session_id)
+        
+        return {
+            "id": session_id,
+            "provider": "gemini",
+            "summary": info.get("summary", "Gemini Session"),
+            "status": status,
+            "modified": last_updated or start_time,
+            "created": start_time,
+            "workspace_id": workspace_id,
+            "message_count": len(messages),
+            "project_path": data.get("projectPath", ""),
+            "cwd": data.get("projectPath", ""),
+            "resume_command": f"cd {data.get('projectPath', '~')} && gemini --resume {session_id}" if data.get("projectPath") else f"gemini --resume {session_id}",
+            "active_tools": [], # Gemini tool calls are inline
+        }
+    except Exception as e:
+        logger.error(f"Error reading Gemini detail {session_id}: {e}")
+        return None
+
+def gemini_parse_full_conversation(session_id):
+    """Parse messages from Gemini session JSON into UI-friendly conversation."""
+    all_sessions = _bg_cache.get('gemini_sessions') or []
+    info = next((s for s in all_sessions if s['id'] == session_id), None)
+    if not info:
+        for filename in os.listdir(GEMINI_CHATS_DIR):
+            if session_id in filename and filename.endswith(".json"):
+                info = {"path": os.path.join(GEMINI_CHATS_DIR, filename), "id": session_id}
+                break
+    
+    if not info or not os.path.isfile(info.get("path", "")):
+        return [], {}, {}
+        
+    try:
+        with open(info["path"], 'r') as f:
+            data = json.load(f)
+            
+        messages = data.get("messages", [])
+        conversation = []
+        tool_map = {}
+        stats = {"user_messages": 0, "assistant_messages": 0, "tool_calls": 0}
+        
+        for msg in messages:
+            m_type = msg.get("type")
+            content = msg.get("content", "")
+            if isinstance(content, list) and len(content) > 0:
+                content = content[0].get("text", "")
+                
+            entry = {
+                "type": m_type,
+                "content": content,
+                "timestamp": msg.get("timestamp"),
+                "thoughts": msg.get("thoughts", [])
+            }
+            
+            if m_type == "user":
+                stats["user_messages"] += 1
+            elif m_type == "gemini":
+                entry["type"] = "assistant" # UI expects assistant
+                stats["assistant_messages"] += 1
+                
+                # Check for tool calls
+                if msg.get("toolCalls"):
+                    entry["tool_calls"] = msg["toolCalls"]
+                    stats["tool_calls"] += len(msg["toolCalls"])
+                    for tc in msg["toolCalls"]:
+                        tool_map[tc["id"]] = tc
+            
+            conversation.append(entry)
+            
+        return conversation, tool_map, stats
+    except Exception as e:
+        logger.error(f"Error parsing Gemini conversation {session_id}: {e}")
+        return [], {}, {}
+
+@app.route("/api/gemini/sessions")
+def api_gemini_sessions():
+    with _bg_lock:
+        all_sessions = _bg_cache.get('gemini_sessions')
+    
+    if all_sessions is None:
+        # First-time load: trigger a manual scan to avoid waiting 30s
+        all_sessions = gemini_get_all_sessions()
+        with _bg_lock:
+            _bg_cache['gemini_sessions'] = all_sessions
+    
+    # Simple pagination
+    limit = safe_limit(request.args.get("limit", 20, type=int), 100)
+    offset = safe_limit(request.args.get("offset", 0, type=int), 100000)
+    
+    paginated = all_sessions[offset : offset + limit]
+    return jsonify({
+        "sessions": paginated,
+        "total": len(all_sessions),
+        "has_more": len(all_sessions) > (offset + limit)
+    })
+
+@app.route("/api/gemini/session/<session_id>")
+def api_gemini_session_detail(session_id):
+    info = gemini_get_session_detail(session_id)
+    if not info:
+        return jsonify({"error": "Session not found"}), 404
+    return jsonify(info)
+
+@app.route("/api/gemini/session/<session_id>/convert-prompt")
+def api_gemini_convert_prompt(session_id):
+    """Generate a handoff prompt from a Gemini session."""
+    info = gemini_get_session_detail(session_id)
+    if not info:
+        return jsonify({"error": "Session not found"}), 404
+    # Get conversation stats
+    try:
+        _, _, stats = gemini_parse_full_conversation(session_id)
+    except Exception:
+        stats = {}
+    prompt = build_convert_prompt(info, stats, provider="gemini")
+    return jsonify({"prompt": prompt, "session_id": session_id, "char_count": len(prompt)})
+
+@app.route("/api/gemini/session/<session_id>/conversation")
+def api_gemini_session_conversation(session_id):
+    """Full parsed conversation with stats for Gemini."""
+    conversation, tool_map, stats = gemini_parse_full_conversation(session_id)
+    return jsonify({
+        "conversation": conversation,
+        "tools": tool_map,
+        "stats": stats,
+    })
+
+@app.route("/api/gemini/session/<session_id>/workspace", methods=["POST"])
+def api_gemini_session_workspace(session_id):
+    data = request.get_json(force=True)
+    ws_id = data.get("workspace_id")
+    meta = _gemini_read_session_meta(session_id)
+    meta["workspace"] = ws_id
+    _gemini_write_session_meta(session_id, meta)
+    # Update cache
+    with _bg_lock:
+        if _bg_cache.get('gemini_sessions') is not None:
+            for s in _bg_cache['gemini_sessions']:
+                if s['id'] == session_id:
+                    s['workspace'] = ws_id
+                    break
+    return jsonify({"id": session_id, "workspace_id": ws_id})
+
+@app.route("/api/gemini/session/<session_id>/star", methods=["POST"])
+def api_gemini_session_star(session_id):
+    data = request.get_json(force=True)
+    starred = data.get("starred", True)
+    meta = _gemini_read_session_meta(session_id)
+    meta["starred"] = starred
+    _gemini_write_session_meta(session_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('gemini_sessions') is not None:
+            for s in _bg_cache['gemini_sessions']:
+                if s['id'] == session_id:
+                    s['starred'] = starred
+                    break
+    return jsonify({"id": session_id, "starred": starred})
+
+@app.route("/api/gemini/session/<session_id>/archive", methods=["POST"])
+def api_gemini_session_archive(session_id):
+    data = request.get_json(force=True)
+    archived = data.get("archived", True)
+    meta = _gemini_read_session_meta(session_id)
+    meta["archived"] = archived
+    _gemini_write_session_meta(session_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('gemini_sessions') is not None:
+            for s in _bg_cache['gemini_sessions']:
+                if s['id'] == session_id:
+                    s['archived'] = archived
+                    break
+    return jsonify({"id": session_id, "archived": archived})
+
+@app.route("/api/gemini/session/<session_id>/notes", methods=["GET"])
+def api_gemini_session_notes_get(session_id):
+    try:
+        # Get notes from SQLite for this gemini session
+        full_session_id = f"gemini_{session_id}"
+        notes_list = NoteDB.list_by_session(full_session_id)
+        notes = [
+            {
+                "text": n.get("text", ""),
+                "timestamp": n.get("created_at", "").isoformat() if isinstance(n.get("created_at"), datetime) else n.get("created_at", "")
+            }
+            for n in notes_list
+        ]
+        return jsonify({"notes": notes})
+    except Exception as e:
+        logger.error(f"Error getting gemini session notes: {e}")
+        return jsonify({"error": "Failed to get notes"}), 500
+
+@app.route("/api/gemini/session/<session_id>/notes", methods=["POST"])
+def api_gemini_session_notes_post(session_id):
+    try:
+        data = request.get_json(force=True)
+        text = (data.get("text") or "").strip()
+        if not text:
+            return jsonify({"error": "Note text required"}), 400
+        import uuid
+        note_id = f"note_{uuid.uuid4().hex[:8]}"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        full_session_id = f"gemini_{session_id}"
+        NoteDB.create({
+            "note_id": note_id,
+            "session_id": full_session_id,
+            "workspace_id": "",
+            "text": text,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        })
+        notes_list = NoteDB.list_by_session(full_session_id)
+        _emit_event("note_created", f"Note added to gemini session", {"session_id": session_id})
+        return jsonify({"id": session_id, "note": {"text": text, "timestamp": now_iso}, "total": len(notes_list)})
+    except Exception as e:
+        logger.error(f"Error creating gemini session note: {e}")
+        return jsonify({"error": "Failed to create note"}), 500
+
+@app.route("/api/gemini/session/<session_id>/notes", methods=["DELETE"])
+def api_gemini_session_notes_delete(session_id):
+    try:
+        data = request.get_json(force=True)
+        idx = data.get("index")
+        if idx is None:
+            return jsonify({"error": "index required"}), 400
+        full_session_id = f"gemini_{session_id}"
+        notes_list = NoteDB.list_by_session(full_session_id)
+        if idx < 0 or idx >= len(notes_list):
+            return jsonify({"error": "index out of range"}), 400
+        note_id = notes_list[idx].get("note_id")
+        if note_id:
+            NoteDB.delete(note_id)
+        return jsonify({"id": session_id, "deleted": True})
+    except Exception as e:
+        logger.error(f"Error deleting gemini session note: {e}")
+        return jsonify({"error": "Failed to delete note"}), 500
+
+@app.route("/api/gemini/session/<session_id>/file")
+def api_gemini_session_file(session_id):
+    """Read a file from a Gemini session artifact directory."""
+    rel_path = request.args.get("path", "")
+    if not rel_path or ".." in rel_path:
+        return jsonify({"error": "Invalid path"}), 400
+    session_dir = os.path.join(GEMINI_CHATS_DIR, session_id)
+    if not os.path.isdir(session_dir):
+        return jsonify({"error": "Session directory not found"}), 404
+    full = os.path.realpath(os.path.join(session_dir, rel_path))
+    if not full.startswith(os.path.realpath(session_dir)) or not os.path.isfile(full):
+        return jsonify({"error": "File not found"}), 404
+    try:
+        with open(full, "r", errors="replace") as f:
+            content = f.read(500_000)
+        return jsonify({
+            "path": rel_path,
+            "content": content,
+            "size": os.path.getsize(full),
+            "truncated": os.path.getsize(full) > 500_000,
+            "host_path": container_to_host_path(full),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/gemini/session/<session_id>/file/raw")
+def api_gemini_session_file_raw(session_id):
+    """Serve a Gemini session file raw."""
+    rel_path = request.args.get("path", "")
+    if not rel_path or ".." in rel_path:
+        return "Invalid path", 400
+    session_dir = os.path.join(GEMINI_CHATS_DIR, session_id)
+    if not os.path.isdir(session_dir):
+        return "Session not found", 404
+    full = os.path.realpath(os.path.join(session_dir, rel_path))
+    if not full.startswith(os.path.realpath(session_dir)) or not os.path.isfile(full):
+        return "File not found", 404
+    return send_file(full)
+
+@app.route("/api/gemini/session/<session_id>/file", methods=["PUT"])
+def api_gemini_session_file_write(session_id):
+    """Write content to a Gemini session file."""
+    data = request.get_json(force=True)
+    rel_path = data.get("path", "")
+    content = data.get("content")
+    if not rel_path or ".." in rel_path or content is None:
+        return jsonify({"error": "Invalid path or missing content"}), 400
+    session_dir = os.path.join(GEMINI_CHATS_DIR, session_id)
+    if not os.path.isdir(session_dir):
+        return jsonify({"error": "Session directory not found"}), 404
+    full = os.path.realpath(os.path.join(session_dir, rel_path))
+    if not full.startswith(os.path.realpath(session_dir)) or not os.path.isfile(full):
+        return jsonify({"error": "File not found"}), 404
+    try:
+        with open(full, "w") as f:
+            f.write(content)
+        return jsonify({"ok": True, "size": len(content)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/claude/sessions")
 def api_claude_sessions():
@@ -5388,10 +6078,104 @@ def _build_claude_usage():
     }
 
 
+def _build_gemini_usage():
+    """Build Gemini usage data from chat JSONs."""
+    model_totals = Counter()
+    tool_totals = Counter()
+    total_turns = 0
+    total_messages = 0
+    total_tool_calls = 0
+    total_events = 0
+    daily_stats = {} # day -> {sessions, messages, tools}
+    
+    if not os.path.isdir(GEMINI_CHATS_DIR):
+        return {"models": [], "tools": [], "daily": [], "totals": {}, "loading": False}
+
+    for filename in os.listdir(GEMINI_CHATS_DIR):
+        if not filename.endswith(".json") or not filename.startswith("session-"):
+            continue
+        
+        full_path = os.path.join(GEMINI_CHATS_DIR, filename)
+        try:
+            with open(full_path, 'r') as f:
+                data = json.load(f)
+            
+            messages = data.get("messages", [])
+            start_time = data.get("startTime")
+            day = start_time[:10] if start_time and len(start_time) >= 10 else None
+            
+            if day:
+                if day not in daily_stats:
+                    daily_stats[day] = {"day": day, "sessions": 0, "messages": 0, "tools": 0}
+                daily_stats[day]["sessions"] += 1
+            
+            for msg in messages:
+                total_events += 1
+                m_type = msg.get("type")
+                if m_type == "user":
+                    total_messages += 1
+                    if day: daily_stats[day]["messages"] += 1
+                elif m_type == "gemini":
+                    total_turns += 1
+                    model = msg.get("model", "unknown")
+                    model_totals[model] += 1
+                    
+                    if msg.get("toolCalls"):
+                        tcalls = msg["toolCalls"]
+                        total_tool_calls += len(tcalls)
+                        if day: daily_stats[day]["tools"] += len(tcalls)
+                        for tc in tcalls:
+                            t_name = tc.get("function", {}).get("name", "unknown")
+                            tool_totals[t_name] += 1
+        except Exception:
+            continue
+
+    # Format for UI
+    models_list = [{"name": m, "count": c} for m, c in model_totals.items()]
+    tools_list = [{"name": t, "count": c} for t, c in tool_totals.items()]
+    daily_list = sorted(daily_stats.values(), key=lambda x: x["day"])
+    
+    return {
+        "models": models_list,
+        "tools": tools_list,
+        "daily": daily_list,
+        "totals": {
+            "sessions": len([f for f in os.listdir(GEMINI_CHATS_DIR) if f.startswith("session-")]),
+            "messages": total_messages,
+            "turns": total_turns,
+            "tool_calls": total_tool_calls,
+            "events": total_events,
+        }
+    }
+
+
+@app.route("/api/gemini/usage")
+def api_gemini_usage():
+    with _bg_lock:
+        data = _bg_cache.get('gemini_usage')
+    if data is None:
+        return jsonify({"models": [], "tools": [], "daily": [], "totals": {}, "loading": True})
+    return jsonify(data)
+
+
+@app.route("/gemini/session/<session_id>")
+def gemini_session_detail_page(session_id):
+    return render_template("detail.html", session_id=session_id, mode="gemini")
+
+
 @app.route("/api/claude/usage")
 def api_claude_usage():
     with _bg_lock:
         data = _bg_cache.get('claude_usage')
+    if data is None:
+        return jsonify({"models": [], "tools": [], "daily": [], "totals": {}, "loading": True})
+    return jsonify(data)
+
+
+@app.route("/api/codex/usage")
+def api_codex_usage():
+    with _bg_lock:
+        data = _bg_cache.get('codex_usage')
     if data is None:
         return jsonify({"models": [], "tools": [], "daily": [], "totals": {}, "loading": True})
     return jsonify(data)
@@ -5402,9 +6186,385 @@ def claude_session_detail_page(session_id):
     return render_template("detail.html", session_id=session_id, mode="claude")
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# Codex session parsing
+# ───────────────────────────────────────────────────────────────────────────
+
+def codex_safe_read_jsonl(path):
+    entries = []
+    try:
+        with open(path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return entries
+
+
+def codex_session_files():
+    sessions_dir = codex_sessions_dir()
+    if not os.path.isdir(sessions_dir):
+        return []
+    return glob.glob(os.path.join(sessions_dir, "**", "*.jsonl"), recursive=True)
+
+
+def codex_find_session_jsonl(session_id):
+    if not session_id:
+        return None
+    pattern = os.path.join(codex_sessions_dir(), "**", f"*{session_id}*.jsonl")
+    matches = glob.glob(pattern, recursive=True)
+    return matches[0] if matches else None
+
+
+def codex_find_session_dir(session_id):
+    """Return a Codex session artifact directory when one exists."""
+    jsonl_path = codex_find_session_jsonl(session_id)
+    if not jsonl_path:
+        return None
+
+    base_dir = os.path.dirname(jsonl_path)
+    stem = os.path.splitext(os.path.basename(jsonl_path))[0]
+    candidates = [
+        os.path.join(base_dir, session_id),
+        os.path.join(base_dir, stem),
+        os.path.join(base_dir, "artifacts", session_id),
+    ]
+    for candidate in candidates:
+        if os.path.isdir(candidate):
+            return candidate
+    return None
+
+
+def codex_list_session_tree(session_id):
+    """List files inside a Codex session artifact directory, if present."""
+    session_dir = codex_find_session_dir(session_id)
+    result = {"files": [], "plan": None, "research": [], "checkpoints": [], "rewind_snapshots": []}
+    if not session_dir or not os.path.isdir(session_dir):
+        return result
+
+    for root, _dirs, files in os.walk(session_dir):
+        for fname in files:
+            fp = os.path.join(root, fname)
+            rel = os.path.relpath(fp, session_dir)
+            try:
+                size = os.path.getsize(fp)
+            except OSError:
+                size = 0
+            try:
+                mtime = datetime.fromtimestamp(
+                    os.path.getmtime(fp), tz=timezone.utc
+                ).isoformat()
+            except Exception:
+                mtime = ""
+            item = {
+                "name": fname,
+                "path": rel,
+                "size": size,
+                "mtime": mtime,
+            }
+            lower_rel = rel.lower()
+            lower_name = fname.lower()
+            if lower_name == "plan.md":
+                result["plan"] = item
+            elif lower_rel.startswith("research/"):
+                result["research"].append(item)
+            elif lower_rel.startswith("checkpoints/"):
+                result["checkpoints"].append(item)
+            else:
+                result["files"].append(item)
+
+    return result
+
+
+def _codex_parse_arguments(args):
+    if isinstance(args, dict):
+        return args
+    if isinstance(args, str):
+        try:
+            parsed = json.loads(args)
+            return parsed if isinstance(parsed, dict) else {"raw": args}
+        except Exception:
+            return {"raw": args}
+    return {}
+
+
+def _codex_extract_tool_path(args):
+    if not isinstance(args, dict):
+        return ""
+    for key in ("path", "file_path", "target_file", "target_path", "filename"):
+        val = args.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""
+
+
+def _codex_extract_command_string(args):
+    if not isinstance(args, dict):
+        return ""
+    for key in ("command", "cmd", "input", "raw_command"):
+        val = args.get(key)
+        if isinstance(val, list):
+            return " ".join(str(x) for x in val)
+        if isinstance(val, str):
+            return val
+    return ""
+
+
+def _codex_resolve_file(session_id, rel_path):
+    """Resolve a relative file path within the Codex session scope."""
+    if not rel_path or ".." in rel_path:
+        return None, None
+
+    jsonl_path = codex_find_session_jsonl(session_id)
+    if not jsonl_path:
+        return None, None
+
+    basename = os.path.basename(jsonl_path)
+    if rel_path == basename:
+        return jsonl_path, "jsonl"
+
+    session_dir = codex_find_session_dir(session_id)
+    if session_dir:
+        full = os.path.realpath(os.path.join(session_dir, rel_path))
+        if full.startswith(os.path.realpath(session_dir)):
+            return full, "artifact"
+
+    return None, None
+
+
+def _codex_extract_session_id(path, first_entry):
+    sid = (first_entry or {}).get("id")
+    if sid:
+        return sid
+    match = re.search(r"[0-9a-fA-F-]{36}", os.path.basename(path))
+    return match.group(0) if match else os.path.basename(path)
+
+
+def _codex_message_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("content") or item.get("input_text") or item.get("output_text")
+                if text:
+                    parts.append(text)
+        return "\n".join(parts)
+    return ""
+
+
+def _codex_extract_env_context(text):
+    match = re.search(r"<cwd>(.*?)</cwd>", text or "", flags=re.DOTALL)
+    return (match.group(1).strip() if match else "")
+
+
+def _codex_extract_summary(entries):
+    for entry in entries:
+        if entry.get("type") == "message" and entry.get("role") == "user":
+            text = _codex_message_text(entry.get("content"))
+            if "<environment_context>" in text:
+                continue
+            text = text.strip()
+            if text:
+                return text.splitlines()[0][:140]
+    first = entries[0] if entries else {}
+    instructions = first.get("instructions", "") if isinstance(first, dict) else ""
+    if instructions:
+        return instructions.strip().splitlines()[0][:140]
+    return ""
+
+
+def codex_get_session_info(session_id, include_tree=False):
+    path = codex_find_session_jsonl(session_id)
+    if not path:
+        return None
+    return _codex_build_session_info(path, include_tree=include_tree)
+
+
+def _codex_build_session_info(path, include_tree=False):
+    entries = codex_safe_read_jsonl(path)
+    if not entries:
+        return None
+    first = entries[0]
+    session_id = _codex_extract_session_id(path, first)
+    meta = codex_read_session_meta(session_id)
+
+    created_at = first.get("timestamp") or datetime.fromtimestamp(
+        os.path.getmtime(path), tz=timezone.utc
+    ).isoformat()
+    updated_at = datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc).isoformat()
+
+    cwd = ""
+    for entry in entries:
+        if entry.get("type") == "message" and entry.get("role") == "user":
+            text = _codex_message_text(entry.get("content"))
+            if "<environment_context>" in text:
+                cwd = _codex_extract_env_context(text)
+                if cwd:
+                    break
+
+    summary = meta.get("nickname") or _codex_extract_summary(entries)
+    tool_counts = Counter()
+    user_messages = []
+    message_count = 0
+    turn_count = 0
+    last_event_type = None
+    for entry in entries:
+        last_event_type = entry.get("type") or last_event_type
+        if entry.get("type") == "message":
+            message_count += 1
+            if entry.get("role") == "user":
+                turn_count += 1
+                text = _codex_message_text(entry.get("content")).strip()
+                if text:
+                    user_messages.append({"timestamp": entry.get("timestamp", created_at), "content": text[:500]})
+        if entry.get("type") == "function_call":
+            tool_counts[entry.get("name", "unknown")] += 1
+
+    git_info = first.get("git") if isinstance(first, dict) else {}
+    repo_url = (git_info or {}).get("repository_url") or ""
+    branch = (git_info or {}).get("branch") or ""
+    project = meta.get("project") or (Path(cwd).name if cwd else "")
+    resume_command = f"cd {cwd} && codex resume {session_id}" if cwd else f"codex resume {session_id}"
+
+    # Standardize resume_command to use resume keyword as requested.
+
+    tree = codex_list_session_tree(session_id)
+    notes_list = NoteDB.list_by_session(session_id)
+    notes = [
+        {
+            "text": n.get("text", ""),
+            "timestamp": n.get("created_at", "").isoformat() if isinstance(n.get("created_at"), datetime) else n.get("created_at", "")
+        }
+        for n in notes_list
+    ]
+
+    info = {
+        "id": session_id,
+        "provider": "codex",
+        "summary": summary,
+        "nickname": meta.get("nickname") or "",
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "last_event_time": updated_at,
+        "last_event_type": last_event_type or "",
+        "message_count": message_count,
+        "turn_count": turn_count,
+        "event_count": len(entries),
+        "tools_used": list(tool_counts.keys()),
+        "tool_call_counts": dict(tool_counts),
+        "model_call_counts": {},
+        "models": [],
+        "workspace": meta.get("workspace"),
+        "project": project,
+        "cwd": cwd,
+        "git_root": repo_url,
+        "branch": branch,
+        "session_path": path,
+        "status": meta.get("status") or "IDLE",
+        "is_open": False,
+        "starred": bool(meta.get("starred")),
+        "archived": bool(meta.get("archived")),
+        "resume_command": resume_command,
+        "user_messages": user_messages[:6],
+        "notes": notes,
+        "mrs": _enrich_session_mrs(meta.get("mrs", [])),
+        "jira_tickets": meta.get("jira_tickets", []),
+    }
+    if include_tree:
+        info["tree"] = tree
+    return info
+
+
+def codex_get_all_sessions():
+    sessions = []
+    for path in codex_session_files():
+        info = _codex_build_session_info(path, include_tree=False)
+        if info:
+            sessions.append(info)
+    sessions.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
+    return sessions
+
+
+def codex_parse_conversation(session_id):
+    path = codex_find_session_jsonl(session_id)
+    if not path:
+        return [], {}, _new_conversation_stats()
+    entries = codex_safe_read_jsonl(path)
+    conversation = []
+    tool_map = {}
+    stats = _new_conversation_stats()
+
+    for entry in entries:
+        etype = entry.get("type")
+        ts = entry.get("timestamp")
+        if etype == "message":
+            text = _codex_message_text(entry.get("content")).strip()
+            if entry.get("role") == "user":
+                stats["user_messages"] += 1
+                conversation.append({"type": "user_message", "timestamp": ts, "content": text})
+            elif entry.get("role") == "assistant":
+                stats["assistant_messages"] += 1
+                stats["assistant_chars"] += len(text)
+                conversation.append({"type": "assistant_message", "timestamp": ts, "content": text, "reasoning": "", "tool_requests": []})
+        elif etype == "function_call":
+            stats["tool_calls"] += 1
+            tool_name = entry.get("name", "unknown")
+            call_id = entry.get("call_id") or ""
+            args = entry.get("arguments")
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {"raw": args[:500]}
+            tool_map[call_id] = {"name": tool_name, "args": args or {}, "start_ts": ts, "end_ts": None, "result": None, "success": None, "model": None}
+            conversation.append({"type": "tool_start", "timestamp": ts, "call_id": call_id, "tool_name": tool_name})
+        elif etype == "function_call_output":
+            call_id = entry.get("call_id") or ""
+            output = entry.get("output")
+            result = output
+            success = None
+            if isinstance(output, str):
+                try:
+                    parsed = json.loads(output)
+                    result = parsed.get("output", parsed)
+                    meta = parsed.get("metadata", {}) if isinstance(parsed, dict) else {}
+                    if isinstance(meta, dict) and meta.get("exit_code") is not None:
+                        success = meta.get("exit_code") == 0
+                except Exception:
+                    result = output
+            if call_id in tool_map:
+                tool_map[call_id]["result"] = result
+                tool_map[call_id]["success"] = success
+                tool_map[call_id]["end_ts"] = ts
+            if success is True:
+                stats["tool_successes"] += 1
+            elif success is False:
+                stats["tool_failures"] += 1
+
+    _finalize_conversation_stats(stats)
+    return conversation, tool_map, stats
+
+
+@app.route("/codex/session/<session_id>")
+def codex_session_detail_page(session_id):
+    return render_template("detail.html", session_id=session_id, mode="codex")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKGROUND CACHE WORKER
 # ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _bg_build_codex_sessions():
+    return codex_get_all_sessions()
 
 
 def _bg_build_copilot_sessions():
@@ -5436,13 +6596,17 @@ def _bg_worker():
     _usage_ts = 0
     while True:
         # Build all session caches in parallel
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        with ThreadPoolExecutor(max_workers=4) as pool:
             f_copilot = pool.submit(_bg_build_copilot_sessions)
             f_claude = pool.submit(claude_get_all_sessions)
+            f_codex = pool.submit(_bg_build_codex_sessions)
+            f_gemini = pool.submit(gemini_get_all_sessions)
 
         for name, future, key in [
             ("copilot", f_copilot, "copilot_sessions"),
             ("claude", f_claude, "claude_sessions"),
+            ("codex", f_codex, "codex_sessions"),
+            ("gemini", f_gemini, "gemini_sessions"),
         ]:
             try:
                 data = future.result()
@@ -5455,13 +6619,17 @@ def _bg_worker():
         now = _time.time()
         if now - _usage_ts >= 120:
             _usage_ts = now
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            with ThreadPoolExecutor(max_workers=4) as pool:
                 f_cu = pool.submit(_build_copilot_usage)
                 f_clau = pool.submit(_build_claude_usage)
+                f_codex = pool.submit(_build_codex_usage)
+                f_gemini = pool.submit(_build_gemini_usage)
 
             for name, future, key in [
                 ("copilot", f_cu, "copilot_usage"),
                 ("claude", f_clau, "claude_usage"),
+                ("codex", f_codex, "codex_usage"),
+                ("gemini", f_gemini, "gemini_usage"),
             ]:
                 try:
                     data = future.result()
@@ -6441,6 +7609,568 @@ def api_claude_session_jira_ticket_delete(session_id, ticket_id):
                     s['jira_tickets'] = tickets
                     break
     return jsonify({"id": session_id, "deleted": True})
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Codex session endpoints
+# ───────────────────────────────────────────────────────────────────────────
+
+def _codex_session_exists(session_id):
+    return codex_find_session_jsonl(session_id) is not None
+
+
+@app.route("/api/codex/sessions/bulk-delete", methods=["POST"])
+def api_codex_bulk_delete():
+    data = request.get_json(force=True)
+    ids = data.get("ids", [])
+    if not ids:
+        return jsonify({"error": "No session IDs provided"}), 400
+
+    deleted = []
+    errors = []
+    for sid in ids:
+        path = codex_find_session_jsonl(sid)
+        if not path:
+            deleted.append(sid)
+            continue
+        try:
+            os.remove(path)
+            deleted.append(sid)
+        except Exception as e:
+            errors.append({"id": sid, "error": str(e)})
+
+    if deleted:
+        with _bg_lock:
+            if _bg_cache.get('codex_sessions') is not None:
+                _bg_cache['codex_sessions'] = [s for s in _bg_cache['codex_sessions'] if s['id'] not in deleted]
+        meta = codex_load_all_meta()
+        for sid in deleted:
+            meta.pop(sid, None)
+        codex_save_all_meta(meta)
+    return jsonify({"deleted": deleted, "errors": errors})
+
+
+@app.route("/api/codex/session/<session_id>", methods=["DELETE"])
+def api_codex_session_delete(session_id):
+    path = codex_find_session_jsonl(session_id)
+    if path:
+        try:
+            os.remove(path)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    with _bg_lock:
+        if _bg_cache.get('codex_sessions') is not None:
+            _bg_cache['codex_sessions'] = [s for s in _bg_cache['codex_sessions'] if s['id'] != session_id]
+    meta = codex_load_all_meta()
+    meta.pop(session_id, None)
+    codex_save_all_meta(meta)
+    return jsonify({"deleted": session_id})
+
+
+@app.route("/api/codex/session/<session_id>/rename", methods=["POST"])
+def api_codex_session_rename(session_id):
+    if not _codex_session_exists(session_id):
+        return jsonify({"error": "Not a Codex session"}), 404
+    data = request.get_json(force=True)
+    nickname = (data.get("nickname") or "").strip()
+    meta = codex_read_session_meta(session_id)
+    meta["nickname"] = nickname
+    codex_write_session_meta(session_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('codex_sessions') is not None:
+            for s in _bg_cache['codex_sessions']:
+                if s['id'] == session_id:
+                    s['nickname'] = nickname
+                    if nickname:
+                        s['summary'] = nickname
+                    break
+    return jsonify({"id": session_id, "nickname": nickname})
+
+
+@app.route("/api/codex/session/<session_id>/star", methods=["POST"])
+def api_codex_session_star(session_id):
+    if not _codex_session_exists(session_id):
+        return jsonify({"error": "Not a Codex session"}), 404
+    meta = codex_read_session_meta(session_id)
+    meta["starred"] = not meta.get("starred", False)
+    codex_write_session_meta(session_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('codex_sessions') is not None:
+            for s in _bg_cache['codex_sessions']:
+                if s['id'] == session_id:
+                    s['starred'] = meta["starred"]
+                    break
+    return jsonify({"id": session_id, "starred": meta["starred"]})
+
+
+@app.route("/api/codex/session/<session_id>/archive", methods=["POST"])
+def api_codex_session_archive(session_id):
+    if not _codex_session_exists(session_id):
+        return jsonify({"error": "Not a Codex session"}), 404
+    meta = codex_read_session_meta(session_id)
+    meta["archived"] = not meta.get("archived", False)
+    codex_write_session_meta(session_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('codex_sessions') is not None:
+            for s in _bg_cache['codex_sessions']:
+                if s['id'] == session_id:
+                    s['archived'] = meta["archived"]
+                    break
+    return jsonify({"id": session_id, "archived": meta["archived"]})
+
+
+@app.route("/api/codex/session/<session_id>/workspace", methods=["POST"])
+def api_codex_session_workspace_set(session_id):
+    if not _codex_session_exists(session_id):
+        return jsonify({"error": "Not a Codex session"}), 404
+    data = request.get_json(force=True)
+    ws_id = data.get("workspace_id")
+    meta = codex_read_session_meta(session_id)
+    meta["workspace"] = ws_id
+    codex_write_session_meta(session_id, meta)
+    codex_write_workspace_meta(session_id, ws_id)
+    with _bg_lock:
+        if _bg_cache.get('codex_sessions') is not None:
+            for s in _bg_cache['codex_sessions']:
+                if s['id'] == session_id:
+                    s['workspace'] = ws_id
+                    break
+    if ws_id:
+        _emit_event("session_assigned", "Session assigned to workspace", {"session_id": session_id, "workspace_id": ws_id})
+    return jsonify({"id": session_id, "workspace": ws_id})
+
+
+@app.route("/api/codex/session/<session_id>/notes", methods=["GET"])
+def api_codex_session_notes_get(session_id):
+    notes_list = NoteDB.list_by_session(session_id)
+    notes = [
+        {
+            "text": n.get("text", ""),
+            "timestamp": n.get("created_at", "").isoformat() if isinstance(n.get("created_at"), datetime) else n.get("created_at", "")
+        }
+        for n in notes_list
+    ]
+    return jsonify({"notes": notes})
+
+
+@app.route("/api/codex/session/<session_id>/notes", methods=["POST"])
+def api_codex_session_notes_post(session_id):
+    data = request.get_json(force=True)
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "Note text required"}), 400
+    import uuid
+    note_id = f"note_{uuid.uuid4().hex[:8]}"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    NoteDB.create({
+        "note_id": note_id,
+        "session_id": session_id,
+        "workspace_id": "",
+        "text": text,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    })
+    notes_list = NoteDB.list_by_session(session_id)
+    _emit_event("note_created", "Note added to session", {"session_id": session_id})
+    return jsonify({"id": session_id, "note": {"text": text, "timestamp": now_iso}, "total": len(notes_list)})
+
+
+@app.route("/api/codex/session/<session_id>/notes", methods=["DELETE"])
+def api_codex_session_notes_delete(session_id):
+    data = request.get_json(force=True)
+    idx = data.get("index")
+    if idx is None:
+        return jsonify({"error": "index required"}), 400
+    notes_list = NoteDB.list_by_session(session_id)
+    if idx < 0 or idx >= len(notes_list):
+        return jsonify({"error": "index out of range"}), 400
+    note_id = notes_list[idx].get("note_id")
+    if note_id:
+        NoteDB.delete(note_id)
+    notes_list = NoteDB.list_by_session(session_id)
+    return jsonify({"id": session_id, "deleted": True, "total": len(notes_list)})
+
+
+@app.route("/api/codex/session/<session_id>/mr", methods=["GET"])
+def api_codex_session_mr_get(session_id):
+    meta = codex_read_session_meta(session_id)
+    mrs = _enrich_session_mrs(meta.get("mrs", []))
+    return jsonify({"id": session_id, "mrs": mrs})
+
+
+@app.route("/api/codex/session/<session_id>/mr", methods=["POST"])
+def api_codex_session_mr_post(session_id):
+    if not _codex_session_exists(session_id):
+        return jsonify({"error": "Not a Codex session"}), 404
+    data = request.get_json(force=True)
+    mr_data = data.get("mr") or {}
+    if not mr_data:
+        return jsonify({"error": "MR data required"}), 400
+    meta = codex_read_session_meta(session_id)
+    mrs = meta.get("mrs", [])
+    mrs.append(mr_data)
+    meta["mrs"] = mrs
+    codex_write_session_meta(session_id, meta)
+    enriched = _enrich_session_mrs(mrs)
+    with _bg_lock:
+        if _bg_cache.get('codex_sessions') is not None:
+            for s in _bg_cache['codex_sessions']:
+                if s['id'] == session_id:
+                    s['mrs'] = enriched
+                    break
+    return jsonify({"id": session_id, "mrs": enriched})
+
+
+@app.route("/api/codex/session/<session_id>/mr/<mr_id>", methods=["DELETE"])
+def api_codex_session_mr_delete(session_id, mr_id):
+    meta = codex_read_session_meta(session_id)
+    mrs = meta.get("mrs", [])
+    mrs = [mr for mr in mrs if mr.get("id") != mr_id and mr.get("mr_id") != mr_id]
+    meta["mrs"] = mrs
+    codex_write_session_meta(session_id, meta)
+    enriched = _enrich_session_mrs(mrs)
+    with _bg_lock:
+        if _bg_cache.get('codex_sessions') is not None:
+            for s in _bg_cache['codex_sessions']:
+                if s['id'] == session_id:
+                    s['mrs'] = enriched
+                    break
+    return jsonify({"id": session_id, "deleted": True})
+
+
+@app.route("/api/codex/session/<session_id>/jira-ticket", methods=["GET"])
+def api_codex_session_jira_ticket_get(session_id):
+    meta = codex_read_session_meta(session_id)
+    tickets = meta.get("jira_tickets", [])
+    return jsonify({"id": session_id, "jira_tickets": tickets})
+
+
+@app.route("/api/codex/session/<session_id>/jira-ticket", methods=["POST"])
+def api_codex_session_jira_ticket_post(session_id):
+    data = request.get_json(force=True)
+    ticket_data = data.get("ticket") or {}
+    if not ticket_data:
+        return jsonify({"error": "Ticket data required"}), 400
+    meta = codex_read_session_meta(session_id)
+    tickets = meta.get("jira_tickets", [])
+    found = False
+    for i, t in enumerate(tickets):
+        if t.get("id") == ticket_data.get("id"):
+            tickets[i] = ticket_data
+            found = True
+            break
+    if not found:
+        tickets.append(ticket_data)
+    meta["jira_tickets"] = tickets
+    codex_write_session_meta(session_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('codex_sessions') is not None:
+            for s in _bg_cache['codex_sessions']:
+                if s['id'] == session_id:
+                    s['jira_tickets'] = tickets
+                    break
+    return jsonify({"id": session_id, "jira_tickets": tickets})
+
+
+@app.route("/api/codex/session/<session_id>/jira-ticket/<ticket_id>", methods=["DELETE"])
+def api_codex_session_jira_ticket_delete(session_id, ticket_id):
+    meta = codex_read_session_meta(session_id)
+    tickets = [t for t in meta.get("jira_tickets", []) if t.get("id") != ticket_id]
+    meta["jira_tickets"] = tickets
+    codex_write_session_meta(session_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('codex_sessions') is not None:
+            for s in _bg_cache['codex_sessions']:
+                if s['id'] == session_id:
+                    s['jira_tickets'] = tickets
+                    break
+    return jsonify({"id": session_id, "deleted": True})
+
+
+@app.route("/api/codex/session/<session_id>/file")
+def api_codex_session_file(session_id):
+    """Read a file from a Codex session artifact directory."""
+    rel_path = request.args.get("path", "")
+    full, scope = _codex_resolve_file(session_id, rel_path)
+    if not full:
+        return jsonify({"error": "File not found"}), 404
+    if not os.path.isfile(full):
+        return jsonify({"error": "File not found"}), 404
+    try:
+        with open(full, "r", errors="replace") as f:
+            content = f.read(500_000)
+        return jsonify({
+            "path": rel_path,
+            "content": content,
+            "size": os.path.getsize(full),
+            "truncated": os.path.getsize(full) > 500_000,
+            "host_path": container_to_host_path(full),
+            "editable": scope == "artifact",
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/codex/session/<session_id>/file/raw")
+def api_codex_session_file_raw(session_id):
+    """Serve a Codex session file raw."""
+    rel_path = request.args.get("path", "")
+    full, _scope = _codex_resolve_file(session_id, rel_path)
+    if not full or not os.path.isfile(full):
+        return "File not found", 404
+    return send_file(full)
+
+
+@app.route("/api/codex/session/<session_id>/file", methods=["PUT"])
+def api_codex_session_file_write(session_id):
+    """Write content to a Codex session artifact file."""
+    data = request.get_json(force=True)
+    rel_path = data.get("path", "")
+    content = data.get("content")
+    full, scope = _codex_resolve_file(session_id, rel_path)
+    if not full or scope != "artifact" or content is None:
+        return jsonify({"error": "Invalid path or missing content"}), 400
+    if not os.path.isfile(full):
+        return jsonify({"error": "File not found"}), 404
+    try:
+        with open(full, "w") as f:
+            f.write(content)
+        return jsonify({"ok": True, "size": len(content)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/codex/session/<session_id>/project-files")
+def api_codex_session_project_files(session_id):
+    """Extract files created/edited/read during a Codex session from JSONL."""
+    path = codex_find_session_jsonl(session_id)
+    if not path:
+        return jsonify({"error": "Session not found"}), 404
+
+    entries = codex_safe_read_jsonl(path)
+    if not entries:
+        return jsonify({"files": [], "cwd": ""})
+
+    cwd = ""
+    files_seen = {}
+
+    for entry in entries:
+        if entry.get("type") != "message" or entry.get("role") != "user":
+            continue
+        text = _codex_message_text(entry.get("content"))
+        if "<environment_context>" in text:
+            cwd = _codex_extract_env_context(text) or cwd
+            if cwd:
+                break
+
+    for entry in entries:
+        if entry.get("type") != "function_call":
+            continue
+        tool_name = (entry.get("name") or "").lower()
+        args = _codex_parse_arguments(entry.get("arguments"))
+        ts = entry.get("timestamp", "")
+        fpath = _codex_extract_tool_path(args)
+        if not fpath or "/.codex/" in fpath or "/.claude/" in fpath or "/.copilot/" in fpath:
+            continue
+
+        action = "view"
+        if any(k in tool_name for k in ("write", "create")):
+            action = "create"
+        elif any(k in tool_name for k in ("edit", "patch", "replace")):
+            action = "edit"
+        elif any(k in tool_name for k in ("read", "view", "open")):
+            action = "view"
+        else:
+            action = tool_name or "view"
+
+        if fpath not in files_seen:
+            files_seen[fpath] = {
+                "path": fpath,
+                "action": action,
+                "count": 0,
+                "first_seen": ts,
+                "last_seen": ts,
+            }
+        files_seen[fpath]["count"] += 1
+        files_seen[fpath]["last_seen"] = ts
+        if action in ("create", "edit", "write"):
+            files_seen[fpath]["action"] = action
+
+    file_list = []
+    for fpath, info in files_seen.items():
+        info["name"] = os.path.basename(fpath)
+        info["relative"] = (
+            os.path.relpath(fpath, cwd) if cwd and fpath.startswith(cwd) else fpath
+        )
+        file_list.append(info)
+
+    file_list.sort(key=lambda x: x.get("last_seen", ""), reverse=True)
+    return jsonify({"files": file_list, "cwd": cwd})
+
+
+@app.route("/api/codex/session/<session_id>/git-changes")
+def api_codex_session_git_changes(session_id):
+    """Extract git commands, commits, and file changes from Codex JSONL."""
+    path = codex_find_session_jsonl(session_id)
+    if not path:
+        return jsonify({"error": "Session not found"}), 404
+
+    entries = codex_safe_read_jsonl(path)
+    if not entries:
+        return jsonify({"commits": [], "file_changes": [], "git_commands": [], "file_summary": []})
+
+    tool_starts = {}
+    tool_results = {}
+    commits = []
+    file_changes = []
+    git_commands = []
+
+    for entry in entries:
+        etype = entry.get("type", "")
+        ts = entry.get("timestamp", "")
+
+        if etype == "function_call":
+            tool_name = (entry.get("name") or "").lower()
+            args = _codex_parse_arguments(entry.get("arguments"))
+            call_id = entry.get("call_id") or ""
+            tool_starts[call_id] = {"name": tool_name, "args": args, "ts": ts}
+
+            fpath = _codex_extract_tool_path(args)
+            if fpath:
+                if any(k in tool_name for k in ("write", "create")):
+                    file_changes.append({"type": "create", "path": fpath, "timestamp": ts})
+                elif any(k in tool_name for k in ("edit", "patch", "replace")):
+                    file_changes.append({"type": "edit", "path": fpath, "timestamp": ts})
+
+        elif etype == "function_call_output":
+            call_id = entry.get("call_id") or ""
+            output = entry.get("output")
+            result_text = ""
+            success = None
+            if isinstance(output, dict):
+                result_text = json.dumps(output)
+            elif isinstance(output, str):
+                try:
+                    parsed = json.loads(output)
+                    if isinstance(parsed, dict):
+                        result_text = str(parsed.get("output", parsed))
+                        meta = parsed.get("metadata", {})
+                        if isinstance(meta, dict) and meta.get("exit_code") is not None:
+                            success = meta.get("exit_code") == 0
+                    else:
+                        result_text = str(parsed)
+                except Exception:
+                    result_text = output
+            tool_results[call_id] = {"result": result_text, "ts": ts, "success": success}
+
+    git_cmd_pattern = re.compile(
+        r"\bgit\s+(--no-pager\s+)?(commit|push|pull|add|diff|status|checkout|switch|log|merge|rebase|stash|reset|branch|tag|fetch|clone|remote)"
+    )
+    for call_id, start in tool_starts.items():
+        tool_name = start["name"]
+        if tool_name not in ("shell", "bash", "exec_command"):
+            continue
+
+        cmd = _codex_extract_command_string(start["args"])
+        if not cmd or not git_cmd_pattern.search(cmd):
+            continue
+
+        result_info = tool_results.get(call_id, {})
+        result_text = result_info.get("result", "")
+
+        is_commit = "git" in cmd and "commit" in cmd
+        is_push = "git" in cmd and "push" in cmd
+        is_diff = "git" in cmd and "diff" in cmd
+        is_status = "git" in cmd and "status" in cmd
+        is_add = "git" in cmd and "add " in cmd
+        is_checkout = "git" in cmd and ("checkout" in cmd or "switch" in cmd)
+
+        git_commands.append({
+            "command": cmd[:500],
+            "timestamp": start["ts"],
+            "result": result_text[:3000],
+            "type": "commit" if is_commit else "push" if is_push else "diff" if is_diff else "status" if is_status else "add" if is_add else "checkout" if is_checkout else "other",
+        })
+
+        if is_commit and result_text:
+            match = re.search(r"\[(\S+)\s+([a-f0-9]+)\]\s+(.*?)(?:\n|$)", result_text)
+            if match:
+                branch = match.group(1)
+                sha = match.group(2)
+                message = match.group(3)
+                files_match = re.search(r"(\d+)\s+files?\s+changed", result_text)
+                ins_match = re.search(r"(\d+)\s+insertions?", result_text)
+                del_match = re.search(r"(\d+)\s+deletions?", result_text)
+                commits.append({
+                    "sha": sha,
+                    "branch": branch,
+                    "message": message,
+                    "timestamp": start["ts"],
+                    "files_changed": int(files_match.group(1)) if files_match else 0,
+                    "insertions": int(ins_match.group(1)) if ins_match else 0,
+                    "deletions": int(del_match.group(1)) if del_match else 0,
+                })
+
+    unique_files = {}
+    for fc in file_changes:
+        path_key = fc["path"]
+        if path_key not in unique_files:
+            unique_files[path_key] = {
+                "path": path_key,
+                "creates": 0,
+                "edits": 0,
+                "first_seen": fc["timestamp"],
+                "last_seen": fc["timestamp"],
+            }
+        if fc["type"] == "create":
+            unique_files[path_key]["creates"] += 1
+        else:
+            unique_files[path_key]["edits"] += 1
+        unique_files[path_key]["last_seen"] = fc["timestamp"]
+
+    return jsonify({
+        "commits": commits,
+        "file_changes": file_changes,
+        "file_summary": sorted(unique_files.values(), key=lambda x: x["last_seen"], reverse=True),
+        "git_commands": git_commands,
+    })
+
+
+@app.route("/api/codex/search")
+def api_codex_search():
+    query = request.args.get("q", "").strip().lower()
+    if not query or len(query) < 2:
+        return jsonify({"results": [], "error": "Query too short"})
+    results = []
+    limit = int(request.args.get("limit", 50))
+    for path in codex_session_files():
+        entries = codex_safe_read_jsonl(path)
+        if not entries:
+            continue
+        session_id = _codex_extract_session_id(path, entries[0])
+        meta = codex_read_session_meta(session_id)
+        summary = meta.get("nickname") or _codex_extract_summary(entries) or session_id[:8]
+        for entry in entries:
+            if entry.get("type") != "message":
+                continue
+            text = _codex_message_text(entry.get("content"))
+            if query in text.lower():
+                idx = text.lower().index(query)
+                start = max(0, idx - 80)
+                snippet = text[start:start + 200]
+                results.append({
+                    "session_id": session_id,
+                    "summary": summary,
+                    "provider": "codex",
+                    "timestamp": entry.get("timestamp", ""),
+                    "content": snippet,
+                })
+                if len(results) >= limit:
+                    break
+        if len(results) >= limit:
+            break
+    results.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+    return jsonify({"results": results})
 
 
 if __name__ == "__main__":

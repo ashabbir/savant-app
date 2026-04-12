@@ -8,7 +8,7 @@ Savant is an **Electron + Flask + MCP** desktop app for monitoring AI coding ses
 
 1. **Electron shell** (`main.js`) — BrowserWindow that shows a loading screen, spawns Flask, spawns MCP, then navigates to `http://127.0.0.1:<port>`. Hides to system tray on close (macOS).
 2. **Flask backend** (`savant/app.py`) — REST API + Jinja2-rendered dashboard. Reads AI session data from the filesystem (`~/.copilot/`, `~/.claude/`, Cline globalStorage). Background thread caches session lists in memory (`_bg_cache`).
-3. **MCP server** (`savant/mcp/server.py`) — FastMCP bridge that proxies workspace/task tools to the Flask API over HTTP. Runs as SSE on port 8091. Auto-injects its config into Copilot CLI, Claude Desktop, and Cline config files on each launch.
+3. **MCP server** (`savant/mcp/server.py`) — FastMCP bridge that proxies workspace/task tools to the Flask API over HTTP. Runs as SSE on port 8091. Auto-injects its config into Copilot CLI, Claude Desktop, and Codex CLI config files on each launch.
 
 ### Data flow
 
@@ -113,7 +113,7 @@ Only `main.js`, `icon.png`, and `loading.html` go into Electron's `files`. The e
 
 ### MCP auto-setup
 
-On each launch, `setupMcpConfigs()` in `main.js` patches `~/.copilot/config.json`, Claude Desktop config, and Cline MCP settings with the current SSE URL. It only patches files that already exist.
+On each launch, `setupMcpConfigs()` in `main.js` patches `~/.copilot/config.json`, Claude Desktop config, and Codex CLI MCP settings with the current SSE URL. It only patches files that already exist.
 
 ---
 
@@ -385,7 +385,7 @@ kill<Name>Mcp();
     <div class="info-row"><span class="info-label">Transport</span><span class="info-value">SSE</span></div>
     <div class="info-row"><span class="info-label">Port</span><span class="info-value"><PORT></span></div>
     <div class="info-row"><span class="info-label">URL</span><span class="info-value">http://127.0.0.1:<PORT>/sse</span></div>
-    <div class="info-row" style="margin-top:8px;"><span class="info-label">Setup</span><span class="info-value" style="color:#aaa;">Auto-configured by Savant on launch into<br>~/.copilot/config.json, Claude Desktop, and Cline</span></div>
+    <div class="info-row" style="margin-top:8px;"><span class="info-label">Setup</span><span class="info-value" style="color:#aaa;">Auto-configured by Savant on launch into<br>~/.copilot/config.json, Claude Desktop, and Codex CLI</span></div>
     <div class="mcp-test-row">
       <button class="mcp-test-btn" onclick="testMcpConnection('<name>', <PORT>, this)">⚡ TEST CONNECTION</button>
       <span id="mcp-test-<name>" class="mcp-test-status"></span>

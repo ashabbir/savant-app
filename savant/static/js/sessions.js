@@ -293,7 +293,11 @@ function renderGroupedView(container, filtered) {
     </div>`;
     html += `<div class="project-group-grid">`;
     for (const s of sessions) {
-      html += buildCardHtml(s);
+      try {
+        html += buildCardHtml(s);
+      } catch (e) {
+        console.error('Failed to render session card:', s, e);
+      }
     }
     html += `</div></div>`;
   }
@@ -1021,8 +1025,8 @@ async function fetchSessions(append = false) {
     const gen = fetchGeneration;
     const offset = append ? allSessions.length : 0;
     let url = getSessionsEndpoint();
-    // Claude uses pagination; Copilot returns all (small count)
-    if (currentMode === 'claude') {
+    // Claude/Gemini use pagination; Copilot returns all
+    if (currentMode === 'claude' || currentMode === 'gemini') {
       url += `?limit=${PAGE_SIZE}&offset=${offset}&_=${Date.now()}`;
     } else {
       url += `?_=${Date.now()}`;
@@ -1036,9 +1040,8 @@ async function fetchSessions(append = false) {
     if (data.loading) {
       const container = document.getElementById('sessions-container');
       if (container && !append) {
-        const modeLabel = currentMode === 'claude' ? 'CLAUDE' : 'COPILOT';
-        container.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div style="color: var(--text-dim); font-size: 0.8rem;">BUILDING ${modeLabel} CACHE...</div></div>`;
-      }
+      const modeLabel = currentMode === 'claude' ? 'CLAUDE' : currentMode === 'codex' ? 'CODEX' : currentMode === 'gemini' ? 'GEMINI' : 'COPILOT';
+      container.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div style="color: var(--text-dim); font-size: 0.8rem;">BUILDING ${modeLabel} CACHE...</div></div>`;      }
       setTimeout(() => fetchSessions(false), 3000);
       return;
     }
@@ -1068,7 +1071,7 @@ async function fetchSessions(append = false) {
     renderPinnedRail(allSessions);
     renderAnalytics(allSessions);
     // Update mode count badge
-    const countId = currentMode === 'claude' ? 'mode-claude-count' : 'mode-copilot-count';
+    const countId = currentMode === 'claude' ? 'mode-claude-count' : currentMode === 'codex' ? 'mode-codex-count' : currentMode === 'gemini' ? 'mode-gemini-count' : 'mode-copilot-count';
     const countEl = document.getElementById(countId);
     if (countEl) countEl.textContent = totalCount || allSessions.length;
     // Also update the parent Sessions tab count
@@ -1250,7 +1253,7 @@ function renderWsSearchPopup(overlay, data, query) {
   } else {
     html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">';
     sessList.forEach(s => {
-      const provIcon = {copilot:'⟐',claude:'🎭'}[s.provider]||'⟐';
+      const provIcon = {copilot:'⟐',claude:'🎭',codex:'🧠',gemini:'♊'}[s.provider]||'⟐';
       html += `<div onclick="closeWsSearchResults();navigateToSessionDirect('${s.session_id}','${s.provider}')" style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;flex:0 0 calc(50% - 3px);box-sizing:border-box;transition:border-color 0.15s;" onmouseover="this.style.borderColor='var(--magenta)'" onmouseout="this.style.borderColor='var(--border)'">
         <div style="display:flex;align-items:center;gap:6px;">
           <span style="font-size:0.7rem;">${provIcon}</span>
@@ -1324,18 +1327,18 @@ function renderWsSearchPopup(overlay, data, query) {
   const navMode = hashParams.get('mode') || urlParams.get('mode');
   const navOpenWs = hashParams.get('ws') || urlParams.get('openWs');
 
-  const ep = (_prefs && _prefs.enabled_providers) ? _prefs.enabled_providers : ['copilot','claude'];
-  if (navMode && ['copilot','claude','workspaces','tasks'].includes(navMode)) {
+  const ep = (_prefs && _prefs.enabled_providers) ? _prefs.enabled_providers : ['copilot','claude','codex','gemini'];
+  if (navMode && ['copilot','claude','codex','gemini','workspaces','tasks'].includes(navMode)) {
     currentMode = ep.includes(navMode) ? navMode : (ep[0] || 'copilot');
     localStorage.setItem('wf-mode', currentMode);
   } else {
     // Ensure saved mode is still enabled
-    if (!ep.includes(currentMode) && ['copilot','claude'].includes(currentMode)) {
+    if (!ep.includes(currentMode) && ['copilot','claude','codex','gemini'].includes(currentMode)) {
       currentMode = ep[0] || 'copilot';
       localStorage.setItem('wf-mode', currentMode);
     }
   }
-  if (navTab && ['sessions','workspaces','tasks'].includes(navTab)) {
+  if (navTab && ['sessions','workspaces','tasks','abilities'].includes(navTab)) {
     currentTab = navTab;
   }
   // Convert legacy query params to hash and clean query string
@@ -1362,7 +1365,7 @@ function renderWsSearchPopup(overlay, data, query) {
   }
 
   // Sessions tab — set usage intelligence title
-  const intTitles = { copilot: '🧠 COPILOT USAGE INTELLIGENCE', claude: '🧠 CLAUDE USAGE INTELLIGENCE' };
+  const intTitles = { copilot: '🧠 COPILOT USAGE INTELLIGENCE', claude: '🧠 CLAUDE USAGE INTELLIGENCE', codex: '🧠 CODEX USAGE INTELLIGENCE', gemini: '🧠 GEMINI USAGE INTELLIGENCE' };
   const titleEl = document.querySelector('#usage-panel .analytics-toggle-title');
   if (titleEl) titleEl.textContent = intTitles[currentMode] || intTitles.copilot;
   try {
@@ -1375,7 +1378,8 @@ function renderWsSearchPopup(overlay, data, query) {
       renderSessions(allSessions);
       renderPinnedRail(allSessions);
       renderAnalytics(allSessions);
-      const countEl = document.getElementById('mode-copilot-count');
+      const countId = currentMode === 'claude' ? 'mode-claude-count' : currentMode === 'codex' ? 'mode-codex-count' : currentMode === 'gemini' ? 'mode-gemini-count' : 'mode-copilot-count';
+      const countEl = document.getElementById(countId);
       if (countEl) countEl.textContent = totalCount || allSessions.length;
       updateLoadMoreButton();
     }
@@ -1391,8 +1395,8 @@ async function fetchMcp() {
   const mcpPanel = document.getElementById('mcp-bar');
   const content = document.getElementById('mcp-bar-content');
 
-  if (currentMode === 'claude') {
-    // Show MCP servers from Claude usage data
+  if (currentMode === 'claude' || currentMode === 'gemini') {
+    // Show MCP servers from provider usage data
     if (mcpPanel) mcpPanel.style.display = '';
     try {
       const res = await fetch(getUsageEndpoint());
@@ -1405,8 +1409,8 @@ async function fetchMcp() {
         if (m) {
           const srv = m[1], tool = m[2];
           if (!serverMap[srv]) serverMap[srv] = { name: srv, tools: [], totalCalls: 0 };
-          serverMap[srv].tools.push({ name: tool, calls: t.calls || 0 });
-          serverMap[srv].totalCalls += (t.calls || 0);
+          serverMap[srv].tools.push({ name: tool, calls: t.count || t.calls || 0 });
+          serverMap[srv].totalCalls += (t.count || t.calls || 0);
         }
       }
       const servers = Object.values(serverMap).sort((a,b) => b.totalCalls - a.totalCalls);
@@ -1489,6 +1493,8 @@ function navigateToSession(event, sessionId, provider) {
   let url;
   if (provider && provider !== 'copilot') {
     if (provider === 'claude') url = `/claude/session/${sessionId}`;
+    else if (provider === 'codex') url = `/codex/session/${sessionId}`;
+    else if (provider === 'gemini') url = `/gemini/session/${sessionId}`;
     else url = getDetailPageUrl(sessionId);
   } else {
     url = getDetailPageUrl(sessionId);
@@ -2025,4 +2031,3 @@ document.getElementById('confirm-delete-btn').addEventListener('click', async ()
     alert('Failed to delete session.');
   }
 });
-

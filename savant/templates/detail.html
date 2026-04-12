@@ -2194,6 +2194,8 @@ function goBack(event) {
 function apiBase() {
   if (MODE === 'cline') return `/api/cline/task/${SESSION_ID}`;
   if (MODE === 'claude') return `/api/claude/session/${SESSION_ID}`;
+  if (MODE === 'codex') return `/api/codex/session/${SESSION_ID}`;
+  if (MODE === 'gemini') return `/api/gemini/session/${SESSION_ID}`;
   return `/api/session/${SESSION_ID}`;
 }
 function homeUrl() {
@@ -2302,6 +2304,8 @@ async function copyHandoffPrompt() {
     let url;
     if (MODE === 'cline') url = `/api/cline/task/${SESSION_ID}/convert-prompt`;
     else if (MODE === 'claude') url = `/api/claude/session/${SESSION_ID}/convert-prompt`;
+    else if (MODE === 'codex') url = `/api/codex/session/${SESSION_ID}/convert-prompt`;
+    else if (MODE === 'gemini') url = `/api/gemini/session/${SESSION_ID}/convert-prompt`;
     else url = `/api/session/${SESSION_ID}/convert-prompt`;
     const res = await fetch(url);
     if (!res.ok) throw new Error('Failed to generate prompt');
@@ -2782,7 +2786,7 @@ function renderConversation(conv) {
           const rid = 'r-' + i;
           reasoningHtml = `<div class="reasoning-toggle" onclick="document.getElementById('${rid}').classList.toggle('show')">💭 Show thinking</div><div class="reasoning-content" id="${rid}">${escapeHtml(e.reasoning)}</div>`;
         }
-        html += `<div class="msg-bubble assistant" data-idx="${i}"><div class="msg-label">${MODE === 'cline' ? 'CLINE' : MODE === 'claude' ? 'CLAUDE' : 'COPILOT'}</div><div class="msg-ts">${ts}</div><div class="md-content">${rendered}</div>${reasoningHtml}</div>`;
+        html += `<div class="msg-bubble assistant" data-idx="${i}"><div class="msg-label">${MODE === 'cline' ? 'CLINE' : MODE === 'claude' ? 'CLAUDE' : MODE === 'codex' ? 'CODEX' : MODE === 'gemini' ? 'GEMINI' : 'COPILOT'}</div><div class="msg-ts">${ts}</div><div class="md-content">${rendered}</div>${reasoningHtml}</div>`;
       }
     } else if (e.type === 'tool_start') {
       const toolInfo = allTools[e.call_id] || {};
@@ -3935,6 +3939,8 @@ async function assignWorkspace(wsId) {
     let url;
     if (MODE === 'cline') url = `/api/cline/task/${SESSION_ID}/workspace`;
     else if (MODE === 'claude') url = `/api/claude/session/${SESSION_ID}/workspace`;
+    else if (MODE === 'codex') url = `/api/codex/session/${SESSION_ID}/workspace`;
+    else if (MODE === 'gemini') url = `/api/gemini/session/${SESSION_ID}/workspace`;
     else url = `/api/session/${SESSION_ID}/workspace`;
     await fetch(url, {
       method: 'POST',
@@ -3991,6 +3997,8 @@ function copyNewSessionCmd() {
 function getNotesEndpoint() {
   if (MODE === 'cline') return `/api/cline/task/${SESSION_ID}/notes`;
   if (MODE === 'claude') return `/api/claude/session/${SESSION_ID}/notes`;
+  if (MODE === 'codex') return `/api/codex/session/${SESSION_ID}/notes`;
+  if (MODE === 'gemini') return `/api/gemini/session/${SESSION_ID}/notes`;
   return `/api/session/${SESSION_ID}/notes`;
 }
 

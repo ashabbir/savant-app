@@ -58,4 +58,5 @@ contextBridge.exposeInMainWorld("terminalAPI", {
 contextBridge.exposeInMainWorld("electronAPI", {
   pickDirectory: () => ipcRenderer.invoke("pick-directory"),
   openPath: (filePath) => ipcRenderer.invoke("shell:openPath", filePath),
+  restartMcp: (name) => ipcRenderer.invoke("mcp:restart", name),
 });

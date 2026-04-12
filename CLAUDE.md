@@ -47,7 +47,7 @@ open /Applications/Savant.app
 
 ### Startup Sequence
 
-`main.js`: find free port → spawn Flask → poll `GET /api/db/health` → kill orphans on MCP ports (lsof) → spawn 4 MCP servers → `setupMcpConfigs()` patches Copilot/Claude Desktop/Cline configs → navigate BrowserWindow to Flask.
+`main.js`: find free port → spawn Flask → poll `GET /api/db/health` → kill orphans on MCP ports (lsof) → spawn 4 MCP servers → `setupMcpConfigs()` patches Copilot CLI, Claude Desktop, and Codex CLI configs → navigate BrowserWindow to Flask.
 
 ### Data Layer
 

@@ -132,7 +132,12 @@ def _get_session_info() -> dict:
 
 def _detect_session_provider(session_id: str) -> str:
     """Determine which provider owns a session ID by checking Flask endpoints."""
-    for prefix in (f"/api/claude/session/{session_id}", f"/api/session/{session_id}"):
+    for prefix in (
+        f"/api/claude/session/{session_id}",
+        f"/api/codex/session/{session_id}",
+        f"/api/gemini/session/{session_id}",
+        f"/api/session/{session_id}",
+    ):
         try:
             resp = requests.get(f"{API_BASE}{prefix}", timeout=REQUEST_TIMEOUT)
             if resp.status_code == 200:
@@ -147,6 +152,10 @@ def _session_api_prefix(provider: str | None, session_id: str) -> str:
     """Return the correct API path prefix for a session based on its provider."""
     if provider == "claude":
         return f"/api/claude/session/{session_id}"
+    if provider == "codex":
+        return f"/api/codex/session/{session_id}"
+    if provider == "gemini":
+        return f"/api/gemini/session/{session_id}"
     if provider == "copilot":
         return f"/api/session/{session_id}"
     # Unknown provider — look it up
@@ -259,11 +268,13 @@ def assign_session_to_workspace(workspace_id: str, session_id: str = "") -> dict
     # When session_id is provided explicitly, try Claude route first then Copilot
     provider = info.get("provider") if not session_id else None
     if not provider and session_id:
-        # Try Claude first (check if it exists as a claude session)
-        try:
-            return _api("POST", f"/api/claude/session/{sid}/workspace", json={"workspace_id": workspace_id})
-        except RuntimeError:
-            return _api("POST", f"/api/session/{sid}/workspace", json={"workspace_id": workspace_id})
+        # Try providers in order
+        for p_prefix in ["/api/claude", "/api/codex", "/api/gemini", "/api"]:
+            try:
+                return _api("POST", f"{p_prefix}/session/{sid}/workspace", json={"workspace_id": workspace_id})
+            except RuntimeError:
+                continue
+        raise RuntimeError(f"Session {sid} not found in any provider.")
     prefix = _session_api_prefix(provider, sid)
     return _api("POST", f"{prefix}/workspace", json={"workspace_id": workspace_id})
 

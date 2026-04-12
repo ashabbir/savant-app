@@ -326,6 +326,7 @@ a:hover { text-decoration: underline; }
 /* Color-coded sub-tab variants (provider-specific) */
 .savant-subtab.active.copilot  { color: var(--cyan);  border-bottom-color: var(--cyan); }
 .savant-subtab.active.claude   { color: #e8a04c;      border-bottom-color: #e8a04c; }
+.savant-subtab.active.gemini   { color: #4285F4;      border-bottom-color: #4285F4; }
 .savant-subtab.active.mcp-ab   { color: #a855f7;      border-bottom-color: #a855f7; }
 .savant-subtab.active.mcp-ws   { color: #22c55e;      border-bottom-color: #22c55e; }
 .savant-subtab.active.mcp-ctx  { color: #22d3ee;      border-bottom-color: #22d3ee; }

@@ -1145,8 +1145,8 @@ async function loadPreferences() {
 }
 
 function _applyProviderVisibility() {
-  const ep = _prefs.enabled_providers || ['copilot','claude'];
-  ['copilot','claude'].forEach(p => {
+  const ep = _prefs.enabled_providers || ['copilot','claude','codex','gemini'];
+  ['copilot','claude','codex','gemini'].forEach(p => {
     const btn = document.getElementById('prov-' + p);
     if (btn) btn.style.display = ep.includes(p) ? '' : 'none';
   });
@@ -1176,7 +1176,7 @@ async function openPreferences() {
   document.querySelectorAll('.pref-day-cb').forEach(cb => {
     cb.checked = ww.includes(parseInt(cb.value));
   });
-  const ep = _prefs.enabled_providers || ['copilot','claude'];
+  const ep = _prefs.enabled_providers || ['copilot','claude','codex','gemini'];
   document.querySelectorAll('.pref-provider-cb').forEach(cb => {
     cb.checked = ep.includes(cb.value);
   });
@@ -1255,7 +1255,7 @@ async function openAllMrsModal() {
     }
     const sortedProjects = Object.keys(groups).sort((a, b) => a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b));
     const sc = {draft:'#ffc700',open:'#00a6ff',review:'#a855f7',reviewing:'#a855f7',approved:'#22c55e',testing:'#ff8c00','on-hold':'#ef4444',merged:'#00ff88',closed:'#6b7280'};
-    const provIcons = {copilot:'⟐',claude:'🎭'};
+    const provIcons = {copilot:'⟐',claude:'🎭',codex:'🧠',gemini:'♊'};
     let html = `<div style="font-family:var(--font-mono);font-size:0.5rem;color:var(--text-dim);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border);">${mrs.length} merge request${mrs.length!==1?'s':''} across ${sortedProjects.length} project${sortedProjects.length!==1?'s':''}</div>`;
     let grpIdx = 0;
     for (const proj of sortedProjects) {
@@ -1332,7 +1332,7 @@ async function loadAllJiraTickets() {
     const sc = {'todo':'#ffc700','in-progress':'#00a6ff','in-review':'#a855f7','done':'#00ff88','blocked':'#ef4444'};
     const sl = {'todo':'Todo','in-progress':'In Progress','in-review':'In Review','done':'Done','blocked':'Blocked'};
     const prioIcons = { critical: '🔴', high: '🟠', medium: '🟡', low: '🟢' };
-    const provIcons = {copilot:'⟐',claude:'🎭'};
+    const provIcons = {copilot:'⟐',claude:'🎭',codex:'🧠',gemini:'♊'};
 
     let html = `<div style="font-family:var(--font-mono);font-size:0.5rem;color:var(--text-dim);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border);">${tickets.length} ticket${tickets.length!==1?'s':''}</div>`;
 
@@ -1542,4 +1542,3 @@ document.addEventListener('keydown', (e) => {
       break;
   }
 });
-
