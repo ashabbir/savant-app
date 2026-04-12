@@ -6339,11 +6339,23 @@ def _codex_resolve_file(session_id, rel_path):
 
 
 def _codex_extract_session_id(path, first_entry):
-    sid = (first_entry or {}).get("id")
-    if sid:
-        return sid
-    match = re.search(r"[0-9a-fA-F-]{36}", os.path.basename(path))
-    return match.group(0) if match else os.path.basename(path)
+    first_entry = first_entry or {}
+    sid = first_entry.get("id")
+    if isinstance(sid, str) and sid.strip():
+        return sid.strip()
+
+    payload = first_entry.get("payload")
+    if isinstance(payload, dict):
+        payload_id = payload.get("id")
+        if isinstance(payload_id, str) and payload_id.strip():
+            return payload_id.strip()
+
+    basename = os.path.basename(path)
+    match = re.search(
+        r"(?:^|[^0-9a-fA-F])([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:[^0-9a-fA-F]|$)",
+        basename,
+    )
+    return match.group(1) if match else os.path.splitext(basename)[0]
 
 
 def _codex_message_text(content):
