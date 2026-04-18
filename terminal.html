@@ -1424,6 +1424,30 @@ function _initCommandListener() {
         break;
       }
 
+      case 'run-in-fresh-tab': {
+        const { cwd: runCwd, command: runCmd, followup = '', followupDelayMs = 900 } = arg || {};
+        termAddTab(runCwd).then(() => {
+          setTimeout(() => {
+            const leaf = _focusedLeafId ? _findLeaf(_focusedLeafId) : null;
+            if (!leaf || !leaf.tabId || !_termApi) return;
+            const ENTER = '\r';
+            if (runCmd) _termApi.write(leaf.tabId, runCmd + ENTER);
+            if (followup) {
+              setTimeout(() => {
+                const latestLeaf = _focusedLeafId ? _findLeaf(_focusedLeafId) : null;
+                if (latestLeaf && latestLeaf.tabId && _termApi) {
+                  _termApi.write(latestLeaf.tabId, followup + ENTER);
+                  // Some REPLs don't execute pasted multiline input on first newline;
+                  // send one extra Enter to force submission reliably.
+                  setTimeout(() => _termApi.write(latestLeaf.tabId, ENTER), 120);
+                }
+              }, Math.max(200, Number(followupDelayMs) || 900));
+            }
+          }, 450);
+        });
+        break;
+      }
+
       case 'init':
         _reconnect();
         break;

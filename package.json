@@ -1,6 +1,6 @@
 {
   "name": "savant",
-  "version": "6.9.0",
+  "version": "7.0.0-beta",
   "description": "Savant — AI Session Dashboard",
   "main": "main.js",
   "scripts": {
@@ -18,7 +18,7 @@
     "appId": "com.icapital.savant",
     "productName": "Savant",
     "releaseInfo": {
-      "releaseNotes": "Configurable ports with smart fallback, System Status tab, AI Agent MCP auto-setup from Preferences and dashboard, and automatic Hermes SSE transport patching."
+      "releaseNotes": "v7.0.0-beta: Configurable ports with smart fallback, System Status tab, AI Agent MCP auto-setup from Preferences and dashboard, and automatic Hermes SSE transport patching."
     },
     "mac": {
       "category": "public.app-category.developer-tools",

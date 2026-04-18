@@ -7394,6 +7394,39 @@ def claude_session_detail_page(session_id):
 # Hermes session parsing
 # ───────────────────────────────────────────────────────────────────────────
 
+_SAVANT_SEED_MARKER_RE = re.compile(
+    r"\[\[SAVANT:WS=(?P<ws>[^;\]]+)(?:;NAME=(?P<name>[^;\]]+))?(?:;LAUNCH=(?P<launch>[^\]]+))?\]\]"
+)
+
+
+def _hermes_extract_savant_seed_marker(text: str) -> tuple[str, dict | None]:
+    """Return (clean_text, marker_info) if a Savant seed marker exists in text.
+
+    Marker format:
+      [[SAVANT:WS=<workspace_id>;NAME=<session_name>;LAUNCH=<launch_id>]]
+
+    NAME and LAUNCH are optional. The marker is stripped from returned text.
+    """
+    if not isinstance(text, str) or not text:
+        return text, None
+
+    m = _SAVANT_SEED_MARKER_RE.search(text)
+    if not m:
+        return text, None
+
+    ws_id = (m.group("ws") or "").strip()
+    name = (m.group("name") or "").strip()
+    launch_id = (m.group("launch") or "").strip()
+
+    cleaned = _SAVANT_SEED_MARKER_RE.sub("", text).strip()
+    marker = {
+        "workspace_id": ws_id,
+        "name": name,
+        "launch_id": launch_id,
+    }
+    return cleaned, marker
+
+
 def _hermes_read_session_meta(session_id: str) -> dict:
     """Read Savant metadata for a Hermes session."""
     os.makedirs(HERMES_META_DIR, exist_ok=True)
@@ -7780,6 +7813,8 @@ def hermes_get_all_sessions() -> list[dict]:
         last_intent = None
         has_abort = False
         last_event_type = None
+        seed_workspace_id = ""
+        seed_session_name = ""
 
         for sid in chain_ids:
             sdata = _hermes_load_session(sid) if sid != tip_id else tip_data
@@ -7800,11 +7835,17 @@ def hermes_get_all_sessions() -> list[dict]:
                 role = msg.get("role", "")
                 if role == "user":
                     content = msg.get("content", "")
-                    if isinstance(content, str) and content.strip():
+                    clean_content, marker = _hermes_extract_savant_seed_marker(content)
+                    if marker:
+                        if marker.get("workspace_id") and not seed_workspace_id:
+                            seed_workspace_id = marker["workspace_id"]
+                        if marker.get("name") and not seed_session_name:
+                            seed_session_name = marker["name"]
+                    if isinstance(clean_content, str) and clean_content.strip():
                         if not summary:
-                            summary = content[:140]
-                        user_msgs.append({"content": content[:200], "timestamp": sdata.get("session_start", "")})
-                        last_intent = content.strip()[:200]
+                            summary = clean_content[:140]
+                        user_msgs.append({"content": clean_content[:200], "timestamp": sdata.get("session_start", "")})
+                        last_intent = clean_content.strip()[:200]
                     total_user_count += 1
                 elif role == "assistant":
                     m_name = sdata.get("model", "unknown")
@@ -7841,6 +7882,19 @@ def hermes_get_all_sessions() -> list[dict]:
 
         # Meta is stored under root_id
         meta = _hermes_read_session_meta(root_id)
+
+        # Auto-attach workspace/nickname from Savant seed marker when present.
+        # This allows "create session from workspace" to bind new sessions without
+        # requiring a second manual assignment step.
+        meta_changed = False
+        if seed_workspace_id and not meta.get("workspace") and WorkspaceDB.get_by_id(seed_workspace_id):
+            meta["workspace"] = seed_workspace_id
+            meta_changed = True
+        if seed_session_name and not meta.get("nickname"):
+            meta["nickname"] = seed_session_name
+            meta_changed = True
+        if meta_changed:
+            _hermes_write_session_meta(root_id, meta)
 
         # Determine status from tip's last_updated
         status = "COMPLETED"
@@ -8033,6 +8087,8 @@ def hermes_get_session_detail(session_id: str) -> dict | None:
     last_intent = None
     has_abort = False
     last_event_type = None
+    seed_workspace_id = ""
+    seed_session_name = ""
 
     for sid in chain_ids:
         if sid == tip_id:
@@ -8056,11 +8112,17 @@ def hermes_get_session_detail(session_id: str) -> dict | None:
             role = msg.get("role", "")
             if role == "user":
                 content = msg.get("content", "")
-                if isinstance(content, str) and content.strip():
+                clean_content, marker = _hermes_extract_savant_seed_marker(content)
+                if marker:
+                    if marker.get("workspace_id") and not seed_workspace_id:
+                        seed_workspace_id = marker["workspace_id"]
+                    if marker.get("name") and not seed_session_name:
+                        seed_session_name = marker["name"]
+                if isinstance(clean_content, str) and clean_content.strip():
                     if not summary:
-                        summary = content[:140]
-                    user_msgs.append({"content": content[:200], "timestamp": sdata.get("session_start", "")})
-                    last_intent = content.strip()[:200]
+                        summary = clean_content[:140]
+                    user_msgs.append({"content": clean_content[:200], "timestamp": sdata.get("session_start", "")})
+                    last_intent = clean_content.strip()[:200]
                 total_user_count += 1
             elif role == "assistant":
                 total_assistant_count += 1
@@ -8097,6 +8159,17 @@ def hermes_get_session_detail(session_id: str) -> dict | None:
             summary = f"Hermes Session ({model})"
 
     meta = _hermes_read_session_meta(root_id)
+
+    # Mirror auto-attach logic used in list view so detail view stays consistent.
+    meta_changed = False
+    if seed_workspace_id and not meta.get("workspace") and WorkspaceDB.get_by_id(seed_workspace_id):
+        meta["workspace"] = seed_workspace_id
+        meta_changed = True
+    if seed_session_name and not meta.get("nickname"):
+        meta["nickname"] = seed_session_name
+        meta_changed = True
+    if meta_changed:
+        _hermes_write_session_meta(root_id, meta)
 
     status = "COMPLETED"
     lu_dt = parse_timestamp(last_updated)
