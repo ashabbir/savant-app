@@ -136,6 +136,7 @@ def _detect_session_provider(session_id: str) -> str:
         f"/api/claude/session/{session_id}",
         f"/api/codex/session/{session_id}",
         f"/api/gemini/session/{session_id}",
+        f"/api/hermes/session/{session_id}",
         f"/api/session/{session_id}",
     ):
         try:
@@ -156,6 +157,8 @@ def _session_api_prefix(provider: str | None, session_id: str) -> str:
         return f"/api/codex/session/{session_id}"
     if provider == "gemini":
         return f"/api/gemini/session/{session_id}"
+    if provider == "hermes":
+        return f"/api/hermes/session/{session_id}"
     if provider == "copilot":
         return f"/api/session/{session_id}"
     # Unknown provider — look it up
@@ -269,7 +272,7 @@ def assign_session_to_workspace(workspace_id: str, session_id: str = "") -> dict
     provider = info.get("provider") if not session_id else None
     if not provider and session_id:
         # Try providers in order
-        for p_prefix in ["/api/claude", "/api/codex", "/api/gemini", "/api"]:
+        for p_prefix in ["/api/claude", "/api/codex", "/api/gemini", "/api/hermes", "/api"]:
             try:
                 return _api("POST", f"{p_prefix}/session/{sid}/workspace", json={"workspace_id": workspace_id})
             except RuntimeError:

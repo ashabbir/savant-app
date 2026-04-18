@@ -1160,8 +1160,8 @@ async function loadPreferences() {
 }
 
 function _applyProviderVisibility() {
-  const ep = _prefs.enabled_providers || ['copilot','claude','codex','gemini'];
-  ['copilot','claude','codex','gemini'].forEach(p => {
+  const ep = _prefs.enabled_providers || ['hermes','copilot','claude','codex','gemini'];
+  ['hermes','copilot','claude','codex','gemini'].forEach(p => {
     const btn = document.getElementById('prov-' + p);
     if (btn) btn.style.display = ep.includes(p) ? '' : 'none';
   });
@@ -1191,7 +1191,7 @@ async function openPreferences() {
   document.querySelectorAll('.pref-day-cb').forEach(cb => {
     cb.checked = ww.includes(parseInt(cb.value));
   });
-  const ep = _prefs.enabled_providers || ['copilot','claude','codex','gemini'];
+  const ep = _prefs.enabled_providers || ['hermes','copilot','claude','codex','gemini'];
   document.querySelectorAll('.pref-provider-cb').forEach(cb => {
     cb.checked = ep.includes(cb.value);
   });
@@ -1270,7 +1270,7 @@ async function openAllMrsModal() {
     }
     const sortedProjects = Object.keys(groups).sort((a, b) => a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b));
     const sc = {draft:'#ffc700',open:'#00a6ff',review:'#a855f7',reviewing:'#a855f7',approved:'#22c55e',testing:'#ff8c00','on-hold':'#ef4444',merged:'#00ff88',closed:'#6b7280'};
-    const provIcons = {copilot:'⟐',claude:'🎭',codex:'🧠',gemini:'♊'};
+    const provIcons = {copilot:'⟐',claude:'🎭',codex:'🧠',gemini:'♊',hermes:'🪶'};
     let html = `<div style="font-family:var(--font-mono);font-size:0.5rem;color:var(--text-dim);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border);">${mrs.length} merge request${mrs.length!==1?'s':''} across ${sortedProjects.length} project${sortedProjects.length!==1?'s':''}</div>`;
     let grpIdx = 0;
     for (const proj of sortedProjects) {
@@ -1347,7 +1347,7 @@ async function loadAllJiraTickets() {
     const sc = {'todo':'#ffc700','in-progress':'#00a6ff','in-review':'#a855f7','done':'#00ff88','blocked':'#ef4444'};
     const sl = {'todo':'Todo','in-progress':'In Progress','in-review':'In Review','done':'Done','blocked':'Blocked'};
     const prioIcons = { critical: '🔴', high: '🟠', medium: '🟡', low: '🟢' };
-    const provIcons = {copilot:'⟐',claude:'🎭',codex:'🧠',gemini:'♊'};
+    const provIcons = {copilot:'⟐',claude:'🎭',codex:'🧠',gemini:'♊',hermes:'🪶'};
 
     let html = `<div style="font-family:var(--font-mono);font-size:0.5rem;color:var(--text-dim);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border);">${tickets.length} ticket${tickets.length!==1?'s':''}</div>`;
 
@@ -1406,6 +1406,11 @@ async function savePreferences() {
     scrollback: parseInt(document.getElementById('pref-term-scrollback').value) || 5000,
     customCommand: document.getElementById('pref-custom-cmd').value.trim(),
   };
+
+  // Detect newly enabled providers (compare with previous prefs)
+  const prevEnabled = (_prefs && _prefs.enabled_providers) || [];
+  const newlyEnabled = enabled_providers.filter(p => !prevEnabled.includes(p));
+
   try {
     const res = await fetch('/api/preferences', {
       method: 'POST',
@@ -1425,7 +1430,61 @@ async function savePreferences() {
       });
     }
     closePreferences();
+
+    // Auto-setup MCP for newly enabled providers (skip if already configured)
+    if (newlyEnabled.length > 0) {
+      _setupMcpForProviders(newlyEnabled);
+    }
   } catch(e) { alert('Failed to save: ' + e.message); }
+}
+
+async function _setupMcpForProviders(providers) {
+  try {
+    const res = await fetch('/api/setup-mcp', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ providers })
+    });
+    const data = await res.json();
+    const results = data.results || [];
+    const configured = results.filter(r => r.status === 'configured');
+    const already = results.filter(r => r.status === 'already_configured');
+    const skipped = results.filter(r => r.status === 'skipped');
+    const errors = results.filter(r => r.status === 'error');
+
+    if (configured.length > 0) {
+      const names = configured.map(r => r.label).join(', ');
+      showToast('success', `Savant MCP servers configured for: ${names}`, 8000);
+    }
+    if (already.length > 0) {
+      const names = already.map(r => r.label).join(', ');
+      showToast('info', `MCP already configured for: ${names}`, 5000);
+    }
+
+    // Show Hermes SSE patch results
+    const hermesPatchResults = results.filter(r => r.sse_patch);
+    for (const r of hermesPatchResults) {
+      const sp = r.sse_patch;
+      if (sp.patches_applied && sp.patches_applied.length > 0) {
+        showToast('success', `Hermes SSE patches applied: ${sp.patches_applied.join(', ')}`, 10000);
+      } else if (sp.all_good) {
+        showToast('info', `Hermes SSE support already present`, 5000);
+      }
+      if (sp.errors && sp.errors.length > 0) {
+        showToast('warning', `Hermes SSE patch issues: ${sp.errors.join(', ')}`, 10000);
+      }
+    }
+    if (skipped.length > 0) {
+      const names = skipped.map(r => `${r.label || r.provider} (${r.reason})`).join(', ');
+      showToast('warning', `MCP setup skipped: ${names}`, 6000);
+    }
+    if (errors.length > 0) {
+      const names = errors.map(r => `${r.label}: ${r.error}`).join(', ');
+      showToast('error', `MCP setup failed: ${names}`, 10000);
+    }
+  } catch (e) {
+    showToast('error', `MCP setup error: ${e.message}`, 8000);
+  }
 }
 
 // ── Task keyboard shortcuts ──────────────────────────────────────────

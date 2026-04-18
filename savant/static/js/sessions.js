@@ -953,6 +953,7 @@ function exportSession(sessionId) {
 // --- Pinned Sessions Rail ---
 function renderPinnedRail(sessions) {
   const rail = document.getElementById('pinned-rail');
+  if (!rail) return;
   const statusColors = {
     RUNNING: 'var(--green)', PROCESSING: 'var(--green)', ACTIVE: 'var(--cyan)',
     WAITING: 'var(--yellow)', IDLE: 'var(--text-dim)', DORMANT: '#2a3a4a',
@@ -1026,7 +1027,7 @@ async function fetchSessions(append = false) {
     const offset = append ? allSessions.length : 0;
     let url = getSessionsEndpoint();
     // Claude/Gemini use pagination; Copilot returns all
-    if (currentMode === 'claude' || currentMode === 'gemini') {
+    if (currentMode === 'claude' || currentMode === 'gemini' || currentMode === 'hermes') {
       url += `?limit=${PAGE_SIZE}&offset=${offset}&_=${Date.now()}`;
     } else {
       url += `?_=${Date.now()}`;
@@ -1040,7 +1041,7 @@ async function fetchSessions(append = false) {
     if (data.loading) {
       const container = document.getElementById('sessions-container');
       if (container && !append) {
-      const modeLabel = currentMode === 'claude' ? 'CLAUDE' : currentMode === 'codex' ? 'CODEX' : currentMode === 'gemini' ? 'GEMINI' : 'COPILOT';
+      const modeLabel = currentMode === 'claude' ? 'CLAUDE' : currentMode === 'codex' ? 'CODEX' : currentMode === 'gemini' ? 'GEMINI' : currentMode === 'hermes' ? 'HERMES' : 'COPILOT';
       container.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div style="color: var(--text-dim); font-size: 0.8rem;">BUILDING ${modeLabel} CACHE...</div></div>`;      }
       setTimeout(() => fetchSessions(false), 3000);
       return;
@@ -1071,7 +1072,7 @@ async function fetchSessions(append = false) {
     renderPinnedRail(allSessions);
     renderAnalytics(allSessions);
     // Update mode count badge
-    const countId = currentMode === 'claude' ? 'mode-claude-count' : currentMode === 'codex' ? 'mode-codex-count' : currentMode === 'gemini' ? 'mode-gemini-count' : 'mode-copilot-count';
+    const countId = currentMode === 'claude' ? 'mode-claude-count' : currentMode === 'codex' ? 'mode-codex-count' : currentMode === 'gemini' ? 'mode-gemini-count' : currentMode === 'hermes' ? 'mode-hermes-count' : 'mode-copilot-count';
     const countEl = document.getElementById(countId);
     if (countEl) countEl.textContent = totalCount || allSessions.length;
     // Also update the parent Sessions tab count
@@ -1253,7 +1254,7 @@ function renderWsSearchPopup(overlay, data, query) {
   } else {
     html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">';
     sessList.forEach(s => {
-      const provIcon = {copilot:'⟐',claude:'🎭',codex:'🧠',gemini:'♊'}[s.provider]||'⟐';
+      const provIcon = {copilot:'⟐',claude:'🎭',codex:'🧠',gemini:'♊',hermes:'🪶'}[s.provider]||'⟐';
       html += `<div onclick="closeWsSearchResults();navigateToSessionDirect('${s.session_id}','${s.provider}')" style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;flex:0 0 calc(50% - 3px);box-sizing:border-box;transition:border-color 0.15s;" onmouseover="this.style.borderColor='var(--magenta)'" onmouseout="this.style.borderColor='var(--border)'">
         <div style="display:flex;align-items:center;gap:6px;">
           <span style="font-size:0.7rem;">${provIcon}</span>
@@ -1327,13 +1328,13 @@ function renderWsSearchPopup(overlay, data, query) {
   const navMode = hashParams.get('mode') || urlParams.get('mode');
   const navOpenWs = hashParams.get('ws') || urlParams.get('openWs');
 
-  const ep = (_prefs && _prefs.enabled_providers) ? _prefs.enabled_providers : ['copilot','claude','codex','gemini'];
-  if (navMode && ['copilot','claude','codex','gemini','workspaces','tasks'].includes(navMode)) {
+  const ep = (_prefs && _prefs.enabled_providers) ? _prefs.enabled_providers : ['copilot','claude','codex','gemini','hermes'];
+  if (navMode && ['copilot','claude','codex','gemini','hermes','workspaces','tasks'].includes(navMode)) {
     currentMode = ep.includes(navMode) ? navMode : (ep[0] || 'copilot');
     localStorage.setItem('wf-mode', currentMode);
   } else {
     // Ensure saved mode is still enabled
-    if (!ep.includes(currentMode) && ['copilot','claude','codex','gemini'].includes(currentMode)) {
+    if (!ep.includes(currentMode) && ['copilot','claude','codex','gemini','hermes'].includes(currentMode)) {
       currentMode = ep[0] || 'copilot';
       localStorage.setItem('wf-mode', currentMode);
     }
@@ -1365,7 +1366,7 @@ function renderWsSearchPopup(overlay, data, query) {
   }
 
   // Sessions tab — set usage intelligence title
-  const intTitles = { copilot: '🧠 COPILOT USAGE INTELLIGENCE', claude: '🧠 CLAUDE USAGE INTELLIGENCE', codex: '🧠 CODEX USAGE INTELLIGENCE', gemini: '🧠 GEMINI USAGE INTELLIGENCE' };
+  const intTitles = { copilot: '🧠 COPILOT USAGE INTELLIGENCE', claude: '🧠 CLAUDE USAGE INTELLIGENCE', codex: '🧠 CODEX USAGE INTELLIGENCE', gemini: '🧠 GEMINI USAGE INTELLIGENCE', hermes: '🧠 HERMES USAGE INTELLIGENCE' };
   const titleEl = document.querySelector('#usage-panel .analytics-toggle-title');
   if (titleEl) titleEl.textContent = intTitles[currentMode] || intTitles.copilot;
   try {
@@ -1378,7 +1379,7 @@ function renderWsSearchPopup(overlay, data, query) {
       renderSessions(allSessions);
       renderPinnedRail(allSessions);
       renderAnalytics(allSessions);
-      const countId = currentMode === 'claude' ? 'mode-claude-count' : currentMode === 'codex' ? 'mode-codex-count' : currentMode === 'gemini' ? 'mode-gemini-count' : 'mode-copilot-count';
+      const countId = currentMode === 'claude' ? 'mode-claude-count' : currentMode === 'codex' ? 'mode-codex-count' : currentMode === 'gemini' ? 'mode-gemini-count' : currentMode === 'hermes' ? 'mode-hermes-count' : 'mode-copilot-count';
       const countEl = document.getElementById(countId);
       if (countEl) countEl.textContent = totalCount || allSessions.length;
       updateLoadMoreButton();
@@ -1395,22 +1396,36 @@ async function fetchMcp() {
   const mcpPanel = document.getElementById('mcp-bar');
   const content = document.getElementById('mcp-bar-content');
 
-  if (currentMode === 'claude' || currentMode === 'gemini') {
+  if (currentMode === 'claude' || currentMode === 'gemini' || currentMode === 'hermes') {
     // Show MCP servers from provider usage data
     if (mcpPanel) mcpPanel.style.display = '';
     try {
       const res = await fetch(getUsageEndpoint());
       const data = await res.json();
       const tools = data.tools || [];
-      // Extract MCP servers from tool names like "mcp:serverName/toolName"
+      // Extract MCP servers from tool names:
+      //   Claude/Gemini style: "mcp:serverName/toolName"
+      //   Hermes style: "mcp_serverName_toolName" (underscores, server has 2 parts like savant_workspace)
       const serverMap = {};
       for (const t of tools) {
-        const m = (t.name || '').match(/^mcp:([^/]+)\/(.+)$/);
+        const name = t.name || '';
+        const calls = t.calls || t.count || 0;
+        // Try Claude/Gemini format first: mcp:server/tool
+        let m = name.match(/^mcp:([^/]+)\/(.+)$/);
         if (m) {
           const srv = m[1], tool = m[2];
           if (!serverMap[srv]) serverMap[srv] = { name: srv, tools: [], totalCalls: 0 };
-          serverMap[srv].tools.push({ name: tool, calls: t.count || t.calls || 0 });
-          serverMap[srv].totalCalls += (t.count || t.calls || 0);
+          serverMap[srv].tools.push({ name: tool, calls });
+          serverMap[srv].totalCalls += calls;
+          continue;
+        }
+        // Try Hermes format: mcp_server_subserver_toolName (e.g. mcp_savant_workspace_list_tasks)
+        m = name.match(/^mcp_([^_]+_[^_]+)_(.+)$/);
+        if (m) {
+          const srv = m[1].replace(/_/g, '-'), tool = m[2].replace(/_/g, '-');
+          if (!serverMap[srv]) serverMap[srv] = { name: srv, tools: [], totalCalls: 0 };
+          serverMap[srv].tools.push({ name: tool, calls });
+          serverMap[srv].totalCalls += calls;
         }
       }
       const servers = Object.values(serverMap).sort((a,b) => b.totalCalls - a.totalCalls);
@@ -1491,10 +1506,11 @@ function navigateToSession(event, sessionId, provider) {
   // Build a return-to descriptor for the current page state
   _pushNavState();
   let url;
-  if (provider && provider !== 'copilot') {
+    if (provider && provider !== 'copilot') {
     if (provider === 'claude') url = `/claude/session/${sessionId}`;
     else if (provider === 'codex') url = `/codex/session/${sessionId}`;
     else if (provider === 'gemini') url = `/gemini/session/${sessionId}`;
+    else if (provider === 'hermes') url = `/hermes/session/${sessionId}`;
     else url = getDetailPageUrl(sessionId);
   } else {
     url = getDetailPageUrl(sessionId);

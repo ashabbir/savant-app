@@ -133,10 +133,12 @@ function setupMcpConfigs() {
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const HEALTH_PATH = "/api/db/health";
-const MCP_PORT = 8091; // Fixed port so AI tool configs never go stale
-const ABILITIES_MCP_PORT = 8092; // Fixed port for abilities MCP
-const CONTEXT_MCP_PORT = 8093; // Fixed port for context MCP
-const KNOWLEDGE_MCP_PORT = 8094; // Fixed port for knowledge MCP
+const DEFAULT_FLASK_PORT = parseInt(process.env.SAVANT_FLASK_PORT || "8090", 10);
+const DEFAULT_MCP_PORT = parseInt(process.env.SAVANT_MCP_PORT || "8091", 10);
+const DEFAULT_ABILITIES_MCP_PORT = parseInt(process.env.SAVANT_ABILITIES_MCP_PORT || "8092", 10);
+const DEFAULT_CONTEXT_MCP_PORT = parseInt(process.env.SAVANT_CONTEXT_MCP_PORT || "8093", 10);
+const DEFAULT_KNOWLEDGE_MCP_PORT = parseInt(process.env.SAVANT_KNOWLEDGE_MCP_PORT || "8094", 10);
+const PORT_INCREMENT = 100; // If desired port is busy, try port + 100
 const MAX_WAIT_MS = 20000;
 
 // ── Port cleanup (kill orphaned processes on fixed MCP ports) ───────────────
@@ -373,8 +375,24 @@ function _setPort(key, val) {
   }
 }
 
-// ── Find a free port ────────────────────────────────────────────────────────
-function findFreePort() {
+// ── Find an available port (prefer desired, fallback to +100) ────────────
+function _isPortFree(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once("error", () => resolve(false));
+    srv.listen(port, "127.0.0.1", () => {
+      srv.close(() => resolve(true));
+    });
+  });
+}
+
+async function findAvailablePort(desiredPort) {
+  if (await _isPortFree(desiredPort)) return desiredPort;
+  const fallback = desiredPort + PORT_INCREMENT;
+  _log(`Port ${desiredPort} busy, trying ${fallback}`);
+  if (await _isPortFree(fallback)) return fallback;
+  // Last resort: OS-assigned free port
+  _log(`Port ${fallback} also busy, using OS-assigned port`);
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
     srv.listen(0, "127.0.0.1", () => {
@@ -570,11 +588,12 @@ function killFlask() {
 
 // ── Generic MCP Server Manager ──────────────────────────────────────────────
 // Registry of all MCP servers: name → { port, serverFile, process, extraArgs?, extraEnv? }
+// Ports are resolved at startup via findAvailablePort() and stored here.
 const MCP_SERVERS = {
-  workspace:  { port: MCP_PORT,           file: "server.py" },
-  abilities:  { port: ABILITIES_MCP_PORT, file: "abilities_server.py" },
-  context:    { port: CONTEXT_MCP_PORT,   file: "context_server.py" },
-  knowledge:  { port: KNOWLEDGE_MCP_PORT, file: "knowledge_server.py" },
+  workspace:  { port: DEFAULT_MCP_PORT,           file: "server.py" },
+  abilities:  { port: DEFAULT_ABILITIES_MCP_PORT, file: "abilities_server.py" },
+  context:    { port: DEFAULT_CONTEXT_MCP_PORT,   file: "context_server.py" },
+  knowledge:  { port: DEFAULT_KNOWLEDGE_MCP_PORT, file: "knowledge_server.py" },
 };
 
 // Cached Python binary path (resolved once, reused for all MCP servers)
@@ -676,10 +695,15 @@ function _killAllMcpServers() {
   }
 }
 
-function _startAllMcpServers(apiPort) {
-  // Kill orphans on all fixed ports
-  for (const cfg of Object.values(MCP_SERVERS)) {
+async function _startAllMcpServers(apiPort) {
+  // Resolve available ports for each MCP server (prefer default, fallback +100)
+  for (const [name, cfg] of Object.entries(MCP_SERVERS)) {
     killProcessOnPort(cfg.port);
+    const resolved = await findAvailablePort(cfg.port);
+    if (resolved !== cfg.port) {
+      _log(`${name} MCP: port ${cfg.port} busy, using ${resolved}`);
+      cfg.port = resolved;
+    }
   }
 
   _startMcpServer("workspace", apiPort);
@@ -1230,8 +1254,8 @@ app.on("ready", async () => {
 
     setStatus("Allocating port…");
 
-    flaskPort = await findFreePort();
-    _logDetail(`Flask port allocated: ${flaskPort}`, 'ok');
+    flaskPort = await findAvailablePort(DEFAULT_FLASK_PORT);
+    _logDetail(`Flask port allocated: ${flaskPort}${flaskPort !== DEFAULT_FLASK_PORT ? ` (default ${DEFAULT_FLASK_PORT} was busy)` : ''}`, 'ok');
     _setPort('flask', flaskPort);
     setStatus("Starting Python server…");
 
@@ -1267,7 +1291,7 @@ app.on("ready", async () => {
       }
       const req = http.get(
         `http://127.0.0.1:${flaskPort}${HEALTH_PATH}`,
-        (res) => {
+        async (res) => {
           if (setupDone) return;
           _logDetail(`Health check → HTTP ${res.statusCode} (${Date.now() - start}ms)`, res.statusCode === 200 ? 'ok' : 'warn');
           if (res.statusCode === 200) {
@@ -1279,15 +1303,31 @@ app.on("ready", async () => {
             // 5. Start MCP SSE servers
             setStatus("Starting MCP servers…");
             _logDetail('Starting all MCP servers (workspace, abilities, context, knowledge)', 'mcp');
-            _startAllMcpServers(flaskPort);
+            await _startAllMcpServers(flaskPort);
             for (const [name, cfg] of Object.entries(MCP_SERVERS)) {
               _logDetail(`savant-${name} MCP on port ${cfg.port}`, 'mcp');
             }
 
-            // 6. Auto-configure AI tool MCP configs
-            _logDetail('Patching ~/.copilot/config.json, Claude Desktop with MCP URLs', 'sys');
-            setupMcpConfigs();
-            _logDetail('MCP configs updated in all AI tools', 'ok');
+            // 5b. Push resolved MCP ports to Flask so /api/system/info is accurate
+            try {
+              const portPayload = JSON.stringify(
+                Object.fromEntries(Object.entries(MCP_SERVERS).map(([n, c]) => [n, c.port]))
+              );
+              const postReq = http.request(
+                `http://127.0.0.1:${flaskPort}/api/system/ports`,
+                { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(portPayload) } },
+                (r) => r.resume()
+              );
+              postReq.write(portPayload);
+              postReq.end();
+              _logDetail('Pushed resolved MCP ports to Flask', 'ok');
+            } catch (e) {
+              _logDetail(`Failed to push MCP ports to Flask: ${e.message}`, 'warn');
+            }
+
+            // 6. MCP config setup is now triggered only when the user
+            //    enables a provider in Preferences (via POST /api/setup-mcp).
+            //    No auto-setup on startup — user controls when configs are written.
 
             // 7. Set up app menu with New Window shortcut
             const appMenu = Menu.buildFromTemplate([

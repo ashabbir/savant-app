@@ -41,6 +41,82 @@ function _peekNavState() {
 // Release notes
 const RELEASES = [
   {
+    version: 'v6.9.0',
+    date: '2026-04-17',
+    tag: 'minor',
+    tagline: 'Hermes is now the default provider. Auto-installed skills. Comprehensive in-app guide for AI agent setup.',
+    description: 'SAVANT v6.9.0 makes Hermes the recommended and default AI agent. The Sessions tab now opens to Hermes first, with automatic fallback to the first enabled provider. Savant auto-installs 4 Hermes skills covering the full platform when MCP is set up. The in-app guide gets a new AI Agent Setup section with provider docs, MCP server reference, environment variable guide, and a full Hermes onboarding walkthrough. Stdio MCP servers (GitLab, Atlassian) are auto-configured for all 5 providers.',
+    abilities: [
+      { icon: '🪶', name: 'Hermes First', desc: 'Hermes is the default provider — first tab, first in all dropdown/selection order. Sessions tab always lands on the first enabled provider.' },
+      { icon: '📚', name: 'Auto-Installed Skills', desc: '4 Hermes skills (platform, gitlab-mr-review, session-provider, test-runner) auto-installed to ~/.hermes/skills/savant/ during MCP setup.' },
+      { icon: '📖', name: 'AI Agent Setup Guide', desc: 'New guide section covering setup flow, all 5 providers, MCP servers, Hermes skills, env vars, and a full Using Hermes walkthrough.' },
+      { icon: '🔧', name: 'Stdio MCP Servers', desc: 'GitLab and Atlassian CLI tools auto-configured as stdio MCP servers for all providers when binaries are detected.' },
+    ],
+    items: [
+      { type: 'feat', text: 'Hermes is now the default/first provider in session selector tab order' },
+      { type: 'feat', text: 'Sessions tab always selects the first enabled provider in display order (hermes > copilot > claude > codex > gemini)' },
+      { type: 'feat', text: 'Auto-install 4 Hermes skill files to ~/.hermes/skills/savant/ during POST /api/setup-mcp (content-based dedup)' },
+      { type: 'feat', text: 'Stdio MCP servers (gitlab-mcp, mcp-atlassian) auto-added to all 5 agent configs when binary is found via shutil.which()' },
+      { type: 'feat', text: 'In-app guide: AI Agent Setup section with 6 sub-sections covering full agent onboarding' },
+      { type: 'feat', text: 'In-app guide: Using Hermes page with install steps, CLI commands, slash commands, workflow examples, and tips' },
+      { type: 'feat', text: 'In-app guide: Environment Variables reference for GitLab and Atlassian MCP auth' },
+      { type: 'docs', text: 'Updated guide stats to show 5 AI Tools Supported (added Hermes)' },
+      { type: 'docs', text: 'README AI Agent MCP Setup section with provider table, env vars, and skill descriptions' },
+    ],
+  },
+  {
+    version: 'v6.8.0',
+    date: '2026-04-15',
+    tag: 'major',
+    tagline: 'Configurable ports. System Status dashboard. One-click MCP setup. Hermes SSE auto-patching.',
+    description: 'SAVANT v6.8.0 makes the app more portable and self-configuring. Flask and MCP server ports are now configurable via environment variables with smart fallback (try default → default+100 → OS-assigned). A new System Status tab in the MCP Tool Guide shows live server health, build info, version/branch/worktree details, and per-agent MCP configuration status with one-click setup buttons. Enabling an AI provider in Preferences now auto-configures its MCP settings. Hermes gets special treatment — enabling it also patches hermes-agent with SSE transport support so Savant MCP servers work out of the box.',
+    abilities: [
+      { icon: '🔌', name: 'Configurable Ports', desc: 'Flask defaults to 8090, MCP servers to 8091–8094. Override via SAVANT_PORT, SAVANT_MCP_WORKSPACE_PORT, etc. Smart fallback: try port → port+100 → OS-assigned.' },
+      { icon: '📊', name: 'System Status Tab', desc: 'New first tab in MCP Tool Guide — live MCP server health, build info (version, branch, worktree, commit), and AI Agent MCP config status cards.' },
+      { icon: '⚡', name: 'One-Click MCP Setup', desc: 'Setup buttons in System Status and auto-setup on Preferences toggle configure Savant MCP servers for Copilot, Claude, Gemini, Codex, and Hermes.' },
+      { icon: '🪶', name: 'Hermes SSE Patching', desc: 'When Hermes is enabled, Savant auto-patches hermes-agent with SSE transport support — adds _is_sse(), _run_sse(), and routing so Savant MCP servers connect without manual edits.' },
+    ],
+    items: [
+      { type: 'feat', text: 'Default Flask port 8090, configurable via SAVANT_PORT env var with +100 fallback if busy' },
+      { type: 'feat', text: 'MCP servers (workspace, abilities, context, knowledge) get same port fallback logic — defaults 8091–8094' },
+      { type: 'feat', text: 'System Status tab as first tab in MCP Tool Guide popup — live health checks with test buttons per MCP server' },
+      { type: 'feat', text: 'Build info card in System Status — shows version, git branch, worktree path, and latest commit' },
+      { type: 'feat', text: 'AI Agent MCP Config status cards — shows configured/not-configured/no-config-file per agent with Setup button' },
+      { type: 'feat', text: 'POST /api/setup-mcp endpoint — configures Savant MCP servers in agent config files (JSON, YAML, TOML formats)' },
+      { type: 'feat', text: 'GET /api/check-mcp endpoint — returns MCP configuration status for all known AI agents' },
+      { type: 'feat', text: 'Preferences auto-triggers MCP setup when enabling a new AI provider, with toast notifications' },
+      { type: 'feat', text: 'Hermes SSE auto-patching — detects and patches mcp_tool.py (SSE flag, _is_sse, _run_sse, routing) and mcp_config.py (SSE display label)' },
+      { type: 'feat', text: 'SSE patching is idempotent with .bak backups, runs on both fresh setup and force re-setup' },
+      { type: 'fix', text: 'Hermes resume button now cd\'s into the correct project directory before launching' },
+      { type: 'fix', text: 'Session ID extraction uses filesystem only (no env var dependency)' },
+      { type: 'chore', text: 'Removed startup MCP auto-setup from main.js — setup only via Preferences toggle or System Status button' },
+    ],
+  },
+  {
+    version: 'v6.6.0',
+    date: '2026-04-15',
+    tag: 'major',
+    tagline: 'Hermes Agent is now a first-class session provider alongside Copilot, Claude, Codex, and Gemini.',
+    description: 'SAVANT v6.6.0 adds full Hermes Agent session support. Hermes sessions are discovered from ~/.hermes/sessions/, parsed from OpenAI-format JSON, and rendered as first-class Savant sessions with the same workflow as every other provider — search, star, archive, rename, notes, workspace assignment, project files, git changes, and usage analytics.',
+    abilities: [
+      { icon: '🪶', name: 'Full Hermes Session Support', desc: 'Hermes Agent sessions are discovered, parsed, and rendered as first-class Savant sessions with full conversation history.' },
+      { icon: '🔍', name: 'Hermes Search & Analytics', desc: 'Search across Hermes sessions, view usage intelligence, and inspect tool calls and model details.' },
+      { icon: '🗂', name: 'Workspace Integration', desc: 'Assign Hermes sessions to workspaces, star, archive, rename, and manage notes — same unified workflow as all providers.' },
+      { icon: '🧩', name: 'MCP Session Detection', desc: 'Active Hermes sessions detected via HERMES_SESSION_ID env var and surfaced through MCP session provider chain.' },
+    ],
+    items: [
+      { type: 'feat', text: 'Hermes provider with 18 API routes: sessions list, detail, conversation, search, usage, star, archive, rename, notes CRUD, workspace, project-files, git-changes, convert-prompt, bulk-delete' },
+      { type: 'feat', text: 'Hermes session detection via HERMES_SESSION_ID env var integrated into MCP session provider chain' },
+      { type: 'feat', text: 'Background cache worker includes hermes sessions for fast dashboard loading' },
+      { type: 'feat', text: 'Workspace aggregation counts hermes sessions alongside all other providers' },
+      { type: 'feat', text: 'Hermes tab (🪶) in session dashboard with purple (#a78bfa) theme, provider badges, and workspace chips' },
+      { type: 'feat', text: 'Detail page fully supports hermes mode — conversation view, workspace assign, notes, convert-prompt' },
+      { type: 'feat', text: 'Preferences checkbox for enabling/disabling Hermes provider visibility' },
+      { type: 'feat', text: 'Guide updated with Hermes session directory documentation' },
+      { type: 'chore', text: '31 new tests (6 unit + 25 integration) covering all hermes API routes and session detection' },
+    ],
+  },
+  {
     version: 'v6.5.0',
     date: '2026-04-12',
     tag: 'major',
@@ -736,7 +812,9 @@ function toggleReleaseNotes() {
 
 function toggleTutorial() {
   const modal = document.getElementById('tutorial-modal');
-  modal.style.display = modal.style.display === 'flex' ? 'none' : 'flex';
+  const showing = modal.style.display !== 'flex';
+  modal.style.display = showing ? 'flex' : 'none';
+  if (showing) fetchSystemStatus();
 }
 
 function switchTutorialTab(tabName) {
@@ -745,6 +823,166 @@ function switchTutorialTab(tabName) {
   container.querySelectorAll('.tutorial-tab-panel').forEach(p => p.classList.remove('active'));
   event.target.classList.add('active');
   document.getElementById('tutorial-panel-' + tabName).classList.add('active');
+  if (tabName === 'system') fetchSystemStatus();
+}
+
+function _fmtBytes(bytes) {
+  if (!bytes && bytes !== 0) return '—';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+async function fetchSystemStatus() {
+  const el = document.getElementById('sys-status-content');
+  if (!el) return;
+  el.className = 'sys-status-loading';
+  el.textContent = 'Loading system status…';
+  try {
+    const [sysRes, mcpCfgRes] = await Promise.all([
+      fetch('/api/system/info', { signal: AbortSignal.timeout(8000) }),
+      fetch('/api/check-mcp', { signal: AbortSignal.timeout(8000) }),
+    ]);
+    const d = await sysRes.json();
+    const mcpCfg = await mcpCfgRes.json();
+
+    // Build MCP server rows
+    const mcpRows = Object.entries(d.mcp_servers || {}).map(([name, info]) => {
+      const ok = info.status === 'ok';
+      return `<div class="sys-row">
+        <span class="sys-label">savant-${name}</span>
+        <span class="sys-val ${ok ? 'ok' : 'err'}">${ok ? '● Online' : '○ Offline'} — port ${info.port}</span>
+      </div>`;
+    }).join('');
+
+    // Build blueprints list
+    const bpList = (d.blueprints || []).map(b => `<span style="color:var(--cyan);">${b}</span>`).join(', ') || '—';
+
+    // Build AI Agent MCP config rows
+    const agentIcons = { copilot: '🤖', claude: '🧠', gemini: '💎', codex: '📦', hermes: '🪶' };
+    const agentConfigRows = Object.entries(mcpCfg).map(([provider, info]) => {
+      const icon = agentIcons[provider] || '⚙️';
+      const configured = info.savant_configured;
+      const exists = info.config_exists;
+      let statusHtml;
+      if (configured) {
+        statusHtml = '<span class="sys-val ok">● Configured</span>';
+      } else if (exists) {
+        statusHtml = `<span class="sys-val err">○ Not configured</span>
+          <button class="mcp-setup-btn" onclick="setupMcpAgent('${provider}', this)" title="Configure Savant MCP servers for ${info.label}">Setup</button>`;
+      } else {
+        statusHtml = '<span class="sys-val" style="color:var(--text-dim);">— No config file</span>';
+      }
+      return `<div class="sys-row" style="align-items:center;">
+        <span class="sys-label">${icon} ${info.label}</span>
+        <span style="display:flex;align-items:center;gap:8px;">${statusHtml}</span>
+      </div>`;
+    }).join('');
+
+    el.className = '';
+    // Build version/branch header
+    const ver = d.version || '?';
+    const branch = d.build?.branch || '?';
+    const commit = d.build?.commit || '';
+    const wt = d.build?.worktree;
+    const branchLabel = wt ? `${branch} <span style="color:var(--magenta);">(worktree: ${wt})</span>` : branch;
+    const versionLine = `<div class="sys-version-bar">v${ver} · <span style="color:var(--yellow);">${branchLabel}</span>${commit ? ` · <span style="color:var(--text-dim);">${commit}</span>` : ''}</div>`;
+
+    el.innerHTML = `
+      ${versionLine}
+      <div class="sys-status-grid">
+        <div class="sys-status-card">
+          <h5>Flask Server</h5>
+          <div class="sys-row"><span class="sys-label">Status</span><span class="sys-val ok">● Running</span></div>
+          <div class="sys-row"><span class="sys-label">Port</span><span class="sys-val port">${d.flask.port}</span></div>
+          <div class="sys-row"><span class="sys-label">PID</span><span class="sys-val">${d.flask.pid}</span></div>
+        </div>
+        <div class="sys-status-card">
+          <h5>Database</h5>
+          <div class="sys-row"><span class="sys-label">Status</span><span class="sys-val ${d.database.status === 'healthy' ? 'ok' : 'err'}">${d.database.status === 'healthy' ? '● Healthy' : '○ Unhealthy'}</span></div>
+          <div class="sys-row"><span class="sys-label">Size</span><span class="sys-val">${_fmtBytes(d.database.size_bytes)}</span></div>
+          <div class="sys-row"><span class="sys-label">Path</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${d.database.path}</span></div>
+        </div>
+        <div class="sys-status-card full-width">
+          <h5>MCP Servers</h5>
+          ${mcpRows}
+        </div>
+        <div class="sys-status-card full-width">
+          <h5>AI Agent MCP Config</h5>
+          ${agentConfigRows}
+        </div>
+        <div class="sys-status-card">
+          <h5>Environment</h5>
+          <div class="sys-row"><span class="sys-label">Python</span><span class="sys-val">${d.environment.python}</span></div>
+          <div class="sys-row"><span class="sys-label">Platform</span><span class="sys-val">${d.environment.platform}</span></div>
+        </div>
+        <div class="sys-status-card">
+          <h5>Directories</h5>
+          <div class="sys-row"><span class="sys-label">App</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${d.directories.savant_app}</span></div>
+          <div class="sys-row"><span class="sys-label">Data</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${d.directories.data_dir}</span></div>
+        </div>
+        <div class="sys-status-card full-width">
+          <h5>Loaded Blueprints</h5>
+          <div style="color:var(--text-dim);line-height:1.6;">${bpList}</div>
+        </div>
+      </div>`;
+  } catch (e) {
+    el.className = 'sys-status-loading';
+    el.innerHTML = `<span style="color:#ff4466;">Failed to load system info: ${e.message}</span>`;
+  }
+}
+
+async function setupMcpAgent(provider, btn) {
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const res = await fetch('/api/setup-mcp', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ providers: [provider], force: true })
+    });
+    const data = await res.json();
+    const r = (data.results || [])[0];
+    if (r && r.status === 'configured') {
+      showToast('success', `Savant MCP servers configured for ${r.label}`, 6000);
+      // Show Hermes SSE patch results if present
+      if (r.sse_patch) {
+        if (r.sse_patch.patches_applied && r.sse_patch.patches_applied.length > 0) {
+          showToast('success', `Hermes SSE patches applied: ${r.sse_patch.patches_applied.join(', ')}`, 10000);
+        } else if (r.sse_patch.all_good) {
+          showToast('info', `Hermes SSE support already present`, 5000);
+        }
+        if (r.sse_patch.errors && r.sse_patch.errors.length > 0) {
+          showToast('warning', `Hermes SSE patch issues: ${r.sse_patch.errors.join(', ')}`, 10000);
+        }
+      }
+      // Refresh the system status to update the card
+      fetchSystemStatus();
+    } else if (r && r.status === 'already_configured') {
+      showToast('info', `MCP already configured for ${r.label}`, 5000);
+      // Show Hermes SSE patch results
+      if (r.sse_patch) {
+        if (r.sse_patch.patches_applied && r.sse_patch.patches_applied.length > 0) {
+          showToast('success', `Hermes SSE patches applied: ${r.sse_patch.patches_applied.join(', ')}`, 10000);
+        } else if (r.sse_patch.all_good) {
+          showToast('info', `Hermes SSE support already present`, 5000);
+        }
+        if (r.sse_patch.errors && r.sse_patch.errors.length > 0) {
+          showToast('warning', `Hermes SSE patch issues: ${r.sse_patch.errors.join(', ')}`, 10000);
+        }
+      }
+      fetchSystemStatus();
+    } else {
+      const msg = r ? (r.error || r.reason || r.status) : 'unknown error';
+      showToast('error', `MCP setup failed: ${msg}`, 8000);
+      btn.disabled = false;
+      btn.textContent = 'Setup';
+    }
+  } catch (e) {
+    showToast('error', `MCP setup error: ${e.message}`, 8000);
+    btn.disabled = false;
+    btn.textContent = 'Setup';
+  }
 }
 
 async function testMcpConnection(name, port, btn) {
@@ -871,90 +1109,105 @@ function getApiPrefix() {
   if (currentMode === 'claude') return '/api/claude';
   if (currentMode === 'codex') return '/api/codex';
   if (currentMode === 'gemini') return '/api/gemini';
+  if (currentMode === 'hermes') return '/api/hermes';
   return '/api';
 }
 function getSessionsEndpoint() {
   if (currentMode === 'claude') return '/api/claude/sessions';
   if (currentMode === 'codex') return '/api/codex/sessions';
   if (currentMode === 'gemini') return '/api/gemini/sessions';
+  if (currentMode === 'hermes') return '/api/hermes/sessions';
   return '/api/sessions';
 }
 function getSessionDetailEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}`;
   if (currentMode === 'codex') return `/api/codex/session/${id}`;
   if (currentMode === 'gemini') return `/api/gemini/session/${id}`;
+  if (currentMode === 'hermes') return `/api/hermes/session/${id}`;
   return `/api/session/${id}`;
 }
 function getConversationEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/conversation`;
   if (currentMode === 'codex') return `/api/codex/session/${id}/conversation`;
   if (currentMode === 'gemini') return `/api/gemini/session/${id}/conversation`;
+  if (currentMode === 'hermes') return `/api/hermes/session/${id}/conversation`;
   return `/api/session/${id}/conversation`;
 }
 function getSearchEndpoint() {
   if (currentMode === 'claude') return '/api/claude/search';
   if (currentMode === 'codex') return '/api/codex/search';
   if (currentMode === 'gemini') return '/api/gemini/search';
+  if (currentMode === 'hermes') return '/api/hermes/search';
   return '/api/search';
 }
 function getUsageEndpoint() {
   if (currentMode === 'claude') return '/api/claude/usage';
   if (currentMode === 'codex') return '/api/codex/usage';
   if (currentMode === 'gemini') return '/api/gemini/usage';
+  if (currentMode === 'hermes') return '/api/hermes/usage';
   return '/api/usage';
 }
 function getBulkDeleteEndpoint() {
   if (currentMode === 'claude') return '/api/claude/sessions/bulk-delete';
   if (currentMode === 'codex') return '/api/codex/sessions/bulk-delete';
   if (currentMode === 'gemini') return '/api/gemini/sessions/bulk-delete';
+  if (currentMode === 'hermes') return '/api/hermes/sessions/bulk-delete';
   return '/api/sessions/bulk-delete';
 }
 function getDeleteEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}`;
   if (currentMode === 'codex') return `/api/codex/session/${id}`;
   if (currentMode === 'gemini') return `/api/gemini/session/${id}`;
+  if (currentMode === 'hermes') return `/api/hermes/session/${id}`;
   return `/api/session/${id}`;
 }
 function getRenameEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/rename`;
   if (currentMode === 'codex') return `/api/codex/session/${id}/rename`;
   if (currentMode === 'gemini') return `/api/gemini/session/${id}/rename`;
+  if (currentMode === 'hermes') return `/api/hermes/session/${id}/rename`;
   return `/api/session/${id}/rename`;
 }
 function getStarEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/star`;
   if (currentMode === 'codex') return `/api/codex/session/${id}/star`;
   if (currentMode === 'gemini') return `/api/gemini/session/${id}/star`;
+  if (currentMode === 'hermes') return `/api/hermes/session/${id}/star`;
   return `/api/session/${id}/star`;
 }
 function getArchiveEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/archive`;
   if (currentMode === 'codex') return `/api/codex/session/${id}/archive`;
   if (currentMode === 'gemini') return `/api/gemini/session/${id}/archive`;
+  if (currentMode === 'hermes') return `/api/hermes/session/${id}/archive`;
   return `/api/session/${id}/archive`;
 }
 function getDetailPageUrl(id) {
   if (currentMode === 'claude') return `/claude/session/${id}`;
   if (currentMode === 'codex') return `/codex/session/${id}`;
   if (currentMode === 'gemini') return `/gemini/session/${id}`;
+  if (currentMode === 'hermes') return `/hermes/session/${id}`;
   return `/session/${id}`;
 }
 function getProjectFilesEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/project-files`;
   if (currentMode === 'codex') return `/api/codex/session/${id}/project-files`;
   if (currentMode === 'gemini') return `/api/gemini/session/${id}/project-files`;
+  if (currentMode === 'hermes') return `/api/hermes/session/${id}/project-files`;
   return `/api/session/${id}/project-files`;
 }
 function getGitChangesEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/git-changes`;
   if (currentMode === 'codex') return `/api/codex/session/${id}/git-changes`;
   if (currentMode === 'gemini') return `/api/gemini/session/${id}/git-changes`;
+  if (currentMode === 'hermes') return `/api/hermes/session/${id}/git-changes`;
   return `/api/session/${id}/git-changes`;
 }
 function getFileEndpoint(id) {
   if (currentMode === 'claude') return `/api/claude/session/${id}/file`;
   if (currentMode === 'codex') return `/api/codex/session/${id}/file`;
   if (currentMode === 'gemini') return `/api/gemini/session/${id}/file`;
+  if (currentMode === 'hermes') return `/api/hermes/session/${id}/file`;
   return `/api/session/${id}/file`;
 }
 
@@ -964,19 +1217,21 @@ function _resolveProvider(sessionId) {
     const s = _wsDetailSessions.find(s => s.id === sessionId);
     if (s && s.provider) return s.provider;
   }
-  if (['copilot','claude','codex','gemini'].includes(currentMode)) return currentMode;
+  if (['copilot','claude','codex','gemini','hermes'].includes(currentMode)) return currentMode;
   return 'copilot';
 }
 function _endpointFor(provider, id, action) {
   if (provider === 'claude') return `/api/claude/session/${id}/${action}`;
   if (provider === 'codex') return `/api/codex/session/${id}/${action}`;
   if (provider === 'gemini') return `/api/gemini/session/${id}/${action}`;
+  if (provider === 'hermes') return `/api/hermes/session/${id}/${action}`;
   return `/api/session/${id}/${action}`;
 }
 function _deleteEndpointFor(provider, id) {
   if (provider === 'claude') return `/api/claude/session/${id}`;
   if (provider === 'codex') return `/api/codex/session/${id}`;
   if (provider === 'gemini') return `/api/gemini/session/${id}`;
+  if (provider === 'hermes') return `/api/hermes/session/${id}`;
   return `/api/session/${id}`;
 }
 
@@ -994,6 +1249,7 @@ function _renderWsStats(ws, wsTasks, statsEl) {
   const claudeCount = sessions.filter(s => s.provider === 'claude').length;
   const codexCount = sessions.filter(s => s.provider === 'codex').length;
   const geminiCount = sessions.filter(s => s.provider === 'gemini').length;
+  const hermesCount = sessions.filter(s => s.provider === 'hermes').length;
 
   // Projects
   const projects = [...new Set(sessions.map(s => s.project).filter(Boolean))];
@@ -1038,7 +1294,7 @@ function _renderWsStats(ws, wsTasks, statsEl) {
     <div class="ws-stat-card">
       <div class="ws-stat-label">Sessions</div>
       <div class="ws-stat-value" style="color:var(--cyan);">${totalSessions}</div>
-      <div class="ws-stat-sub">${copilotCount} copilot · ${claudeCount} claude · ${codexCount} codex · ${geminiCount} gemini</div>
+      <div class="ws-stat-sub">${copilotCount} copilot · ${claudeCount} claude · ${codexCount} codex · ${geminiCount} gemini · ${hermesCount} hermes</div>
       <div class="ws-stat-sub" style="margin-top:3px;">${activeCount} active · ${archivedCount} archived</div>
     </div>
     <div class="ws-stat-card">
@@ -1101,7 +1357,7 @@ async function _refreshWsDetailSessions() {
           No sessions assigned to this workspace yet.<br>Assign sessions from their detail page.</div>`;
       } else {
         container.innerHTML = _wsDetailSessions.map(s => {
-          const provIcon = s.provider === 'copilot' ? '⟐' : s.provider === 'codex' ? '🧠' : s.provider === 'gemini' ? '♊' : '🎭';
+          const provIcon = s.provider === 'copilot' ? '⟐' : s.provider === 'codex' ? '🧠' : s.provider === 'gemini' ? '♊' : s.provider === 'hermes' ? '🪶' : '🎭';
           const provBadge = `<span class="provider-badge ${s.provider}">${provIcon} ${s.provider}</span>`;
           const cardHtml = buildCardHtml(s, s.provider);
           return cardHtml.replace(
@@ -1137,7 +1393,7 @@ function _applyTabUI() {
   const mcpBar = document.getElementById('mcp-subtabs');
   provBar.style.display = currentTab === 'sessions' ? '' : 'none';
   mcpBar.style.display = currentTab === 'abilities' ? '' : 'none';
-  ['copilot','claude','codex','gemini'].forEach(p => {
+  ['copilot','claude','codex','gemini','hermes'].forEach(p => {
     const btn = document.getElementById('prov-' + p);
     if (btn) btn.classList.toggle('active', currentMode === p);
   });
@@ -1204,12 +1460,15 @@ function _switchTabInner(tab) {
 
   if (tab === 'sessions') {
     // Restore last provider or default to first enabled
-    const saved = localStorage.getItem('wf-mode') || 'copilot';
-    const ep = (_prefs && _prefs.enabled_providers) ? _prefs.enabled_providers : ['copilot','claude','codex','gemini'];
-    if (ep.includes(saved)) {
+    const saved = localStorage.getItem('wf-mode') || 'hermes';
+    const ep = (_prefs && _prefs.enabled_providers) ? _prefs.enabled_providers : ['hermes','copilot','claude','codex','gemini'];
+    // Provider tab order as displayed in the UI
+    const tabOrder = ['hermes','copilot','claude','codex','gemini'];
+    const enabledInOrder = tabOrder.filter(p => ep.includes(p));
+    if (enabledInOrder.includes(saved)) {
       currentMode = saved;
     } else {
-      currentMode = ep[0] || 'copilot';
+      currentMode = enabledInOrder[0] || 'hermes';
     }
   } else {
     // For non-session tabs, store the tab name as mode
@@ -1267,7 +1526,8 @@ function _loadSessionProvider() {
     copilot: '🧠 COPILOT USAGE INTELLIGENCE', 
     claude: '🧠 CLAUDE USAGE INTELLIGENCE',
     codex: '🧠 CODEX USAGE INTELLIGENCE',
-    gemini: '🧠 GEMINI USAGE INTELLIGENCE'
+    gemini: '🧠 GEMINI USAGE INTELLIGENCE',
+    hermes: '🧠 HERMES USAGE INTELLIGENCE'
   };
   document.querySelector('#usage-panel .analytics-toggle-title').textContent = intTitles[currentMode] || intTitles.copilot;
   // Clear grid and show loading spinner
@@ -1276,7 +1536,7 @@ function _loadSessionProvider() {
   totalCount = 0;
   const container = document.getElementById('sessions-container');
   if (container) {
-    const modeLabel = currentMode === 'claude' ? 'CLAUDE' : currentMode === 'codex' ? 'CODEX' : currentMode === 'gemini' ? 'GEMINI' : 'COPILOT';
+    const modeLabel = currentMode === 'claude' ? 'CLAUDE' : currentMode === 'codex' ? 'CODEX' : currentMode === 'gemini' ? 'GEMINI' : currentMode === 'hermes' ? 'HERMES' : 'COPILOT';
     container.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div style="color: var(--text-dim); font-size: 0.8rem;">LOADING ${modeLabel} DATA...</div></div>`;
   }
   const lmBtn = document.getElementById('load-more-btn');

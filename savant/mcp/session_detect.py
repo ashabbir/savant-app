@@ -8,6 +8,8 @@ Supports:
     Claude Code CLI, then looks up workspace from savant meta files.
   - Codex CLI: uses env vars (CODEX_SESSION_ID / CODEX_SESSION_PATH) and
     workspace metadata stored under ~/.codex/.savant-meta/.
+  - Hermes Agent: uses env vars (HERMES_SESSION_ID) and workspace metadata
+    stored under ~/.hermes/.savant-meta/.
 """
 
 import glob
@@ -20,6 +22,7 @@ CLAUDE_SESSIONS_DIR = os.path.expanduser("~/.claude/sessions")
 CLAUDE_DIR = os.path.expanduser("~/.claude")
 CODEX_DIR = os.path.expanduser("~/.codex")
 GEMINI_DIR = os.path.expanduser("~/.gemini")
+HERMES_DIR = os.path.expanduser("~/.hermes")
 
 
 def _codex_dir() -> str:
@@ -179,6 +182,40 @@ def _find_gemini_session_by_pid(pid: int) -> dict | None:
     }
 
 
+# ── Hermes detection ─────────────────────────────────────────────────────────
+
+def _hermes_dir() -> str:
+    return os.environ.get("HERMES_DIR", HERMES_DIR)
+
+
+def _hermes_meta_dir() -> str:
+    return os.path.join(_hermes_dir(), ".savant-meta")
+
+
+def _hermes_read_workspace(session_id: str) -> str | None:
+    """Read workspace assignment from Savant meta for a Hermes session."""
+    meta_path = os.path.join(_hermes_meta_dir(), f"{session_id}.json")
+    if not os.path.isfile(meta_path):
+        return None
+    try:
+        with open(meta_path) as f:
+            return json.load(f).get("workspace")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _find_hermes_session_by_env() -> dict | None:
+    """Match a Hermes session using env vars (HERMES_SESSION_ID)."""
+    session_id = os.environ.get("HERMES_SESSION_ID")
+    if not session_id:
+        return None
+    return {
+        "session_id": session_id,
+        "workspace_id": _hermes_read_workspace(session_id),
+        "provider": "hermes",
+    }
+
+
 # ── Unified detection ────────────────────────────────────────────────────────
 
 def detect_session() -> dict:
@@ -186,10 +223,11 @@ def detect_session() -> dict:
     Auto-detect the current AI coding session and its workspace.
 
     Tries Copilot CLI first (PID lock files), then Claude Code
-    (~/.claude/sessions/<pid>.json), then env var fallback.
+    (~/.claude/sessions/<pid>.json), then Codex, Gemini, Hermes,
+    then env var fallback.
 
     Returns dict with keys: session_id, workspace_id (may be None),
-    provider ('copilot' | 'claude' | None).
+    provider ('copilot' | 'claude' | 'codex' | 'gemini' | 'hermes' | None).
     Raises RuntimeError if no session can be detected.
     """
     ppid = os.getppid()
@@ -253,7 +291,12 @@ def detect_session() -> dict:
         except (ValueError, OSError):
             pass
 
-    # 5. Fallback: env var override
+    # 5. Hermes Agent: env-based session detection
+    result = _find_hermes_session_by_env()
+    if result:
+        return result
+
+    # 6. Fallback: env var override
     env_ws = os.environ.get("SAVANT_WORKSPACE_ID")
     env_session = os.environ.get("SAVANT_SESSION_ID")
     if env_ws or env_session:
@@ -262,5 +305,5 @@ def detect_session() -> dict:
     raise RuntimeError(
         "Could not detect AI coding session. "
         "Assign a workspace manually via SAVANT_WORKSPACE_ID env var, "
-        "or ensure this MCP is launched from within a Copilot CLI, Claude Code, Codex, or Gemini session."
+        "or ensure this MCP is launched from within a Copilot CLI, Claude Code, Codex, Gemini, or Hermes session."
     )

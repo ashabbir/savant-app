@@ -46,10 +46,10 @@ const _guideTree = [
     id: 'what-is-savant', title: 'What is Savant?', children: [],
     content: `
       <h2>What is Savant?</h2>
-      <p>Savant is a <strong>desktop application for macOS</strong> that monitors, manages, and enhances AI coding sessions. It tracks sessions from <strong>GitHub Copilot CLI</strong>, <strong>Claude Code</strong>, <strong>Codex</strong>, and <strong>Gemini</strong> — giving your team a unified dashboard to see what AI assistants are doing across all projects.</p>
+      <p>Savant is a <strong>desktop application for macOS</strong> that monitors, manages, and enhances AI coding sessions. It tracks sessions from <strong>Hermes Agent</strong>, <strong>GitHub Copilot CLI</strong>, <strong>Claude Code</strong>, <strong>Codex</strong>, and <strong>Gemini</strong> — giving your team a unified dashboard to see what AI assistants are doing across all projects.</p>
 
       ${_gStats([
-        { icon: '🤖', value: '4', label: 'AI Tools Supported', color: 'var(--cyan)' },
+        { icon: '🤖', value: '5', label: 'AI Tools Supported', color: 'var(--cyan)' },
         { icon: '🧠', value: '4', label: 'MCP Servers', color: 'var(--magenta)' },
         { icon: '📊', value: '4', label: 'Dashboard Tabs', color: 'var(--orange)' },
         { icon: '⚡', value: 'Real-time', label: 'Session Monitoring', color: 'var(--green)' },
@@ -662,6 +662,7 @@ class WorkspaceDB:
         <tr><td>Claude sessions</td><td><code>~/.claude/projects/</code></td></tr>
         <tr><td>Codex sessions</td><td><code>~/.codex/sessions/</code></td></tr>
         <tr><td>Gemini sessions</td><td><code>~/.gemini/tmp/savant-app/chats/</code></td></tr>
+        <tr><td>Hermes sessions</td><td><code>~/.hermes/sessions/</code></td></tr>
       </table>
     `
   },
@@ -673,7 +674,7 @@ class WorkspaceDB:
 
       <h3>Session Data Flow</h3>
       ${_gFlow([
-        { icon: '🤖', title: 'AI Tool', desc: 'Copilot, Claude, Codex, and Gemini write session data to disk', color: 'var(--green)' },
+        { icon: '🤖', title: 'AI Tool', desc: 'Hermes, Copilot, Claude, Codex, and Gemini write session data to disk', color: 'var(--green)' },
         { icon: '🔍', title: 'Scanner', desc: 'Background thread reads files every 30s', color: 'var(--cyan)' },
         { icon: '🗃', title: 'Cache', desc: 'Parsed sessions cached in memory', color: 'var(--magenta)' },
         { icon: '📡', title: 'REST API', desc: 'GET /api/sessions serves cached data', color: 'var(--orange)' },
@@ -816,10 +817,11 @@ def create_task(title: str, workspace_id: str,
       <h3>Auto-Configuration</h3>
       <p>On startup, <code>setupMcpConfigs()</code> in <code>main.js</code> automatically patches config files for:</p>
       <ul>
-        <li><strong>Copilot CLI</strong> — <code>~/.copilot/config.json</code></li>
-        <li><strong>Claude Desktop</strong> — <code>~/Library/Application Support/Claude/claude_desktop_config.json</code></li>
-        <li><strong>Gemini CLI</strong> — <code>~/.gemini/settings.json</code></li>
-        <li><strong>Codex CLI</strong> — <code>~/.codex/config.toml</code></li>
+       <li><strong>Copilot CLI</strong> — <code>~/.copilot/config.json</code></li>
+       <li><strong>Claude Desktop</strong> — <code>~/Library/Application Support/Claude/claude_desktop_config.json</code></li>
+       <li><strong>Gemini CLI</strong> — <code>~/.gemini/settings.json</code></li>
+       <li><strong>Codex CLI</strong> — <code>~/.codex/config.toml</code></li>
+        <li><strong>Hermes Agent</strong> — <code>~/.hermes/config.yaml</code> <em>(preferred — also installs skills)</em></li>
       </ul>
       <p>This means AI tools automatically discover Savant's MCP servers without manual config.</p>
     `
@@ -1097,6 +1099,7 @@ open /Applications/Savant.app</code></pre>
         <tr><td>Claude sessions</td><td><code>~/.claude/projects/</code></td></tr>
         <tr><td>Codex sessions</td><td><code>~/.codex/sessions/</code></td></tr>
         <tr><td>Gemini sessions</td><td><code>~/.gemini/tmp/savant-app/chats/</code></td></tr>
+        <tr><td>Hermes sessions</td><td><code>~/.hermes/sessions/</code></td></tr>
       </table>
     `
   },
@@ -1294,6 +1297,322 @@ def tool_name(param: str, optional: str = "default") -> dict:
         <tr><td><kbd>⌘[</kbd> / <kbd>⌘]</kbd></td><td>Previous / next pane</td></tr>
         <tr><td><kbd>⌘{</kbd> / <kbd>⌘}</kbd></td><td>Previous / next tab</td></tr>
       </table>
+    `
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 4. AI AGENT SETUP
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    id: 'ai-agent-setup', title: 'AI Agent Setup', children: [
+      { id: 'agent-setup-flow', title: 'What Happens on Setup', children: [] },
+      { id: 'agent-providers', title: 'Supported Providers', children: [] },
+      { id: 'agent-mcp-servers', title: 'MCP Servers Configured', children: [] },
+     { id: 'agent-hermes-skills', title: 'Hermes Skills', children: [] },
+     { id: 'agent-env-vars', title: 'Environment Variables', children: [] },
+      { id: 'agent-using-hermes', title: 'Using Hermes (Recommended)', children: [] },
+    ],
+    content: `
+      <h2>AI Agent Setup</h2>
+      <p>Savant acts as a <strong>central hub</strong> for your AI coding agents. When you enable a provider in Preferences, Savant automatically configures that agent's MCP connections — so the agent can talk to Savant's servers and any installed CLI-based MCP tools.</p>
+
+      ${_gFlow([
+        { icon: '⚙️', title: 'Enable Provider', desc: 'Toggle in Preferences or call POST /api/setup-mcp', color: 'var(--cyan)' },
+        { icon: '📝', title: 'Write Config', desc: 'Savant writes MCP entries to the agent\\\'s config file', color: 'var(--green)' },
+        { icon: '🔗', title: 'Connect', desc: 'Agent discovers Savant + stdio servers via MCP', color: 'var(--magenta)' },
+        { icon: '🧠', title: 'Use Tools', desc: 'Agent can manage workspaces, search code, build knowledge', color: 'var(--orange)' },
+      ])}
+
+      <h3>Key Design Principles</h3>
+      <table class="guide-table">
+        <tr><th>Principle</th><th>Details</th></tr>
+        <tr><td style="color:var(--cyan);">Idempotent</td><td>Running setup multiple times is safe — entries are skipped if already present</td></tr>
+        <tr><td style="color:var(--green);">No Credentials in Config</td><td>Agents inherit tokens from shell environment variables, nothing is written to config files</td></tr>
+        <tr><td style="color:var(--magenta);">Auto-detect Binaries</td><td>Stdio servers (gitlab, atlassian) are only added if the binary is found on the machine</td></tr>
+        <tr><td style="color:var(--orange);">Content-based Dedup</td><td>Hermes skills are only overwritten if the source file has actually changed</td></tr>
+      </table>
+      <p>Select a sub-section from the tree to learn about each aspect.</p>
+    `
+  },
+  {
+    id: 'agent-setup-flow', title: 'What Happens on Setup', _sub: true, children: [],
+    content: `
+      <h2>What Happens on Setup</h2>
+      <p>When you enable a provider (via the Preferences UI or <code>POST /api/setup-mcp</code>), Savant performs these steps:</p>
+
+      ${_gSteps([
+        { title: 'Locate Config File', desc: 'Each provider stores MCP config in a different location and format (JSON, YAML, or TOML). Savant knows where each one lives.', color: 'var(--cyan)' },
+        { title: 'Add Savant SSE Servers', desc: 'Adds entries for savant-workspace (:8091), savant-abilities (:8092), savant-context (:8093), and savant-knowledge (:8094). These are HTTP-based MCP servers Savant runs locally.', color: 'var(--green)' },
+        { title: 'Add Stdio Servers', desc: 'Checks if gitlab-mcp and mcp-atlassian binaries are installed. If found, adds them as stdio-type MCP entries. If not installed, silently skips.', color: 'var(--magenta)' },
+        { title: 'Hermes Extras', desc: 'For Hermes only: patches SSE transport support into the agent, then installs/updates 4 Savant skill files to ~/.hermes/skills/savant/.', color: 'var(--orange)' },
+      ])}
+
+      <h3>Already Configured?</h3>
+      <p>If MCP is already configured for a provider, Savant checks each entry individually. Missing servers are added, existing ones are left untouched. For Hermes, skill files are still checked for updates even if MCP config hasn't changed.</p>
+
+      <h3>API</h3>
+      <table class="guide-table">
+        <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
+        <tr><td><code>/api/setup-mcp</code></td><td>POST</td><td>Configure MCP for a provider. Body: <code>{ "provider": "hermes" }</code></td></tr>
+        <tr><td><code>/api/check-mcp</code></td><td>GET</td><td>Check which providers have MCP configured. Returns per-provider status.</td></tr>
+      </table>
+    `
+  },
+  {
+    id: 'agent-providers', title: 'Supported Providers', _sub: true, children: [],
+    content: `
+      <h2>Supported Providers</h2>
+      <p>Each AI coding agent stores its MCP configuration in a different file and format. Savant handles all of them:</p>
+
+      <table class="guide-table">
+        <tr><th>Provider</th><th>Config File</th><th>Format</th><th>Extra Setup</th></tr>
+       <tr><td style="color:var(--cyan);">Copilot CLI</td><td><code>~/.copilot/mcp-config.json</code></td><td>JSON</td><td>—</td></tr>
+       <tr><td style="color:var(--green);">Claude Code</td><td><code>.mcp.json</code> (project-level)</td><td>JSON</td><td>—</td></tr>
+       <tr><td style="color:var(--magenta);">Codex</td><td><code>~/.codex/config.toml</code></td><td>TOML</td><td>—</td></tr>
+        <tr><td style="color:var(--yellow);">Gemini CLI</td><td><code>~/.gemini/settings.json</code></td><td>JSON</td><td>—</td></tr>
+        <tr><td style="color:var(--orange);">Hermes ⭐</td><td><code>~/.hermes/config.yaml</code></td><td>YAML</td><td>SSE patches + skill install</td></tr>
+      </table>
+
+      <h3>Format Differences</h3>
+      <p>The same MCP server entry looks different in each format, but Savant handles the translation automatically:</p>
+
+      <h4>JSON (Copilot / Claude)</h4>
+      <pre style="background:var(--bg-main);color:var(--text);padding:10px;border-radius:6px;font-size:0.5rem;overflow-x:auto;">{
+  "savant-workspace": {
+    "url": "http://127.0.0.1:8091/sse",
+    "type": "sse",
+    "tools": ["*"],
+    "headers": {}
+  }
+}</pre>
+
+      <h4>YAML (Hermes)</h4>
+      <pre style="background:var(--bg-main);color:var(--text);padding:10px;border-radius:6px;font-size:0.5rem;overflow-x:auto;">mcp_servers:
+  savant-workspace:
+    url: http://127.0.0.1:8091/sse
+    timeout: 120</pre>
+
+      <h4>TOML (Codex)</h4>
+      <pre style="background:var(--bg-main);color:var(--text);padding:10px;border-radius:6px;font-size:0.5rem;overflow-x:auto;">[mcp_servers."savant-workspace"]
+type = "stdio"
+command = "/path/to/python3"
+args = ["/path/to/savant/mcp/stdio.py", "workspace"]</pre>
+      <p><em>Note: Codex uses stdio transport via a Python bridge script, while other providers connect directly over HTTP/SSE.</em></p>
+    `
+  },
+  {
+    id: 'agent-mcp-servers', title: 'MCP Servers Configured', _sub: true, children: [],
+    content: `
+      <h2>MCP Servers Configured</h2>
+      <p>Savant adds two categories of MCP servers to each agent's config:</p>
+
+      <h3>Savant SSE Servers (always added)</h3>
+      <p>These are Savant's own MCP servers, running locally as HTTP services:</p>
+      <table class="guide-table">
+        <tr><th>Server</th><th>Port</th><th>What It Does</th></tr>
+        <tr><td style="color:var(--cyan);">savant-workspace</td><td>8091</td><td>Workspaces, tasks, Jira tickets, merge requests, session notes, session assignment</td></tr>
+        <tr><td style="color:var(--magenta);">savant-abilities</td><td>8092</td><td>Personas, rules, policies, styles — prompt resolution and YAML asset management</td></tr>
+        <tr><td style="color:var(--green);">savant-context</td><td>8093</td><td>Semantic code search across indexed repos, memory bank search, repository info</td></tr>
+        <tr><td style="color:var(--orange);">savant-knowledge</td><td>8094</td><td>Knowledge graph — store, search, traverse, and connect nodes (insights, services, domains, etc.)</td></tr>
+      </table>
+
+      <h3>Stdio MCP Servers (added if binary is installed)</h3>
+      <p>These are standalone CLI tools that run as subprocesses:</p>
+      <table class="guide-table">
+        <tr><th>Server</th><th>Binary</th><th>Install</th><th>What It Does</th></tr>
+        <tr><td style="color:var(--cyan);">gitlab</td><td><code>gitlab-mcp</code></td><td><code>pip install gitlab-mcp</code></td><td>GitLab issues, merge requests, pipelines, repos, discussions, snippets</td></tr>
+        <tr><td style="color:var(--magenta);">atlassian</td><td><code>mcp-atlassian</code></td><td><code>pip install mcp-atlassian</code></td><td>Jira tickets and Confluence pages via Atlassian API</td></tr>
+      </table>
+      <p>Savant checks <code>which &lt;binary&gt;</code> before adding these entries. If the tool isn't installed, that entry is silently skipped — no errors, no broken config.</p>
+
+      <h3>What Agents Can Do After Setup</h3>
+      <p>Once configured, every agent gets access to these capabilities via MCP tools:</p>
+      ${_gFlow([
+        { icon: '🔍', title: 'Search Code', desc: 'Semantic search across all indexed repos', color: 'var(--cyan)' },
+        { icon: '📋', title: 'Manage Work', desc: 'Create tasks, track Jira tickets & MRs', color: 'var(--green)' },
+        { icon: '🧠', title: 'Build Knowledge', desc: 'Persistent graph across sessions', color: 'var(--orange)' },
+        { icon: '🎭', title: 'Load Personas', desc: 'Consistent agent behavior via abilities', color: 'var(--magenta)' },
+      ])}
+    `
+  },
+  {
+    id: 'agent-hermes-skills', title: 'Hermes Skills', _sub: true, children: [],
+    content: `
+      <h2>Hermes Skills</h2>
+      <p>When Hermes is enabled, Savant installs 4 skill files into <code>~/.hermes/skills/savant/</code>. These give Hermes detailed knowledge about how to use Savant's MCP tools effectively.</p>
+
+      <table class="guide-table">
+        <tr><th>Skill</th><th>What It Covers</th></tr>
+        <tr><td style="color:var(--cyan);">platform</td><td>Comprehensive guide to all 4 MCP servers — abilities (personas, rules, policies), workspaces (lifecycle, tasks, Jira, MRs, sessions), knowledge graph (node types, edges, store/search/traverse), and context (code search, memory bank, repos)</td></tr>
+        <tr><td style="color:var(--green);">gitlab-mr-review</td><td>GitLab merge request review workflow — fetching diffs, leaving inline comments, creating Savant workspaces for reviews, writing structured review documents</td></tr>
+        <tr><td style="color:var(--magenta);">session-provider</td><td>How to add new AI session providers to Savant — parser implementation, Flask routes, UI integration, background cache</td></tr>
+        <tr><td style="color:var(--orange);">test-runner</td><td>Running Savant's pytest suite safely — avoiding segfaults from sqlite-vec, correct Python version, test isolation</td></tr>
+      </table>
+
+      <h3>How Installation Works</h3>
+      ${_gSteps([
+        { title: 'Source Files Live in Repo', desc: 'Skills are maintained as SKILL.md files inside the Savant codebase under savant/hermes_skill/ and savant/hermes_skills/.', color: 'var(--cyan)' },
+        { title: 'Copied on Setup', desc: 'When POST /api/setup-mcp is called with provider=hermes, the installer copies each skill to ~/.hermes/skills/savant/<name>/SKILL.md.', color: 'var(--green)' },
+        { title: 'Content-based Dedup', desc: 'Each file is compared byte-for-byte. Only changed files are overwritten — unchanged files are skipped. No unnecessary disk writes.', color: 'var(--magenta)' },
+        { title: 'Auto-loaded by Hermes', desc: 'When Hermes encounters a task matching trigger conditions, it loads the skill automatically and follows its instructions.', color: 'var(--orange)' },
+      ])}
+
+      <h3>Updating Skills</h3>
+      <p>To update a skill:</p>
+      <ol>
+        <li>Edit the source SKILL.md in the Savant repo (<code>savant/hermes_skill/</code> or <code>savant/hermes_skills/&lt;name&gt;/</code>)</li>
+        <li>Rebuild and restart Savant (<code>bash build-and-deploy.sh</code>)</li>
+        <li>The next MCP setup call will detect the change and overwrite the installed copy</li>
+      </ol>
+    `
+  },
+  {
+    id: 'agent-env-vars', title: 'Environment Variables', _sub: true, children: [],
+    content: `
+      <h2>Environment Variables</h2>
+      <p>No credentials are stored in agent config files. Agents inherit authentication tokens from shell environment variables. Set these in your shell profile (<code>~/.zshrc</code>, <code>~/.bashrc</code>, etc.):</p>
+
+      <h3>GitLab</h3>
+      <table class="guide-table">
+        <tr><th>Variable</th><th>Description</th><th>Example</th></tr>
+        <tr><td><code>GITLAB_TOKEN</code></td><td>Personal access token with API scope</td><td><code>glpat-xxxxxxxxxxxx</code></td></tr>
+      </table>
+
+      <h3>Atlassian (Jira + Confluence)</h3>
+      <table class="guide-table">
+        <tr><th>Variable</th><th>Description</th><th>Example</th></tr>
+        <tr><td><code>JIRA_URL</code></td><td>Jira instance URL</td><td><code>https://your-org.atlassian.net</code></td></tr>
+        <tr><td><code>JIRA_USERNAME</code></td><td>Email for Jira auth</td><td><code>you@company.com</code></td></tr>
+        <tr><td><code>JIRA_API_TOKEN</code></td><td>Atlassian API token</td><td><code>xxxxx</code></td></tr>
+        <tr><td><code>CONFLUENCE_URL</code></td><td>Confluence wiki URL</td><td><code>https://your-org.atlassian.net/wiki</code></td></tr>
+        <tr><td><code>CONFLUENCE_USERNAME</code></td><td>Email for Confluence auth</td><td><code>you@company.com</code></td></tr>
+        <tr><td><code>CONFLUENCE_API_TOKEN</code></td><td>Atlassian API token</td><td><code>xxxxx</code></td></tr>
+      </table>
+
+      <h3>Verifying Setup</h3>
+      <p>Use the <code>GET /api/check-mcp</code> endpoint to verify all providers are configured. The response shows per-provider status and which servers are connected.</p>
+      <p>In the MCP tab's Workspace sub-tab, the server health cards show real-time connectivity status for each Savant MCP server.</p>
+    `
+  },
+  {
+    id: 'agent-using-hermes', title: 'Using Hermes (Recommended)', _sub: true, children: [],
+    content: `
+      <h2>Using Hermes Agent <span style="color:var(--orange);">⭐ Recommended</span></h2>
+      <p><strong>Hermes Agent</strong> is our preferred AI coding agent for working with Savant. It is an open-source agent by <a href="https://nousresearch.com" target="_blank" style="color:var(--cyan);">Nous Research</a> that runs in your terminal, messaging platforms, and IDEs. Unlike other agents, Hermes has persistent memory, a skill system, and deep MCP integration that makes it the most capable agent for Savant workflows.</p>
+
+      <h3>Why Hermes?</h3>
+      <table class="guide-table">
+        <tr><th>Feature</th><th>Hermes</th><th>Other Agents</th></tr>
+        <tr><td style="color:var(--cyan);">Skills</td><td>Learns from experience — saves reusable procedures as skill files that load into future sessions. Savant auto-installs 4 skills covering the full platform.</td><td>No skill system. Each session starts from scratch.</td></tr>
+        <tr><td style="color:var(--green);">Persistent Memory</td><td>Remembers user preferences, environment details, and lessons across sessions. Never need to repeat yourself.</td><td>Limited or no cross-session memory.</td></tr>
+        <tr><td style="color:var(--magenta);">Provider Agnostic</td><td>Works with 20+ LLM providers (OpenRouter, Anthropic, OpenAI, Google, DeepSeek, local models). Swap models mid-workflow.</td><td>Locked to one provider.</td></tr>
+        <tr><td style="color:var(--orange);">MCP Integration</td><td>Native SSE + stdio MCP support. Savant auto-configures all servers and installs skills on setup.</td><td>Basic MCP support, manual config often needed.</td></tr>
+        <tr><td style="color:var(--yellow);">Multi-Platform</td><td>CLI + Telegram + Discord + Slack + 10 more platforms. Same agent, same tools everywhere.</td><td>CLI only (most agents).</td></tr>
+      </table>
+
+      <h3>Installation</h3>
+      <pre style="background:var(--bg-main);color:var(--text);padding:10px;border-radius:6px;font-size:0.5rem;overflow-x:auto;"># Install Hermes
+curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+
+# Run setup wizard
+hermes setup
+
+# Pick your model/provider
+hermes model
+
+# Check everything works
+hermes doctor</pre>
+
+      <h3>Connecting to Savant</h3>
+      <p>Once Hermes is installed, enable it in Savant:</p>
+      ${_gSteps([
+        { title: 'Enable in Preferences', desc: 'Open Savant Preferences, toggle Hermes ON. This triggers POST /api/setup-mcp automatically.', color: 'var(--cyan)' },
+        { title: 'Auto-Config Happens', desc: 'Savant writes MCP server entries to ~/.hermes/config.yaml and copies 4 skill files to ~/.hermes/skills/savant/.', color: 'var(--green)' },
+        { title: 'Start Hermes', desc: 'Run "hermes" in your terminal. It auto-discovers Savant MCP servers and loads skills when needed.', color: 'var(--magenta)' },
+        { title: 'Verify', desc: 'In Hermes, type "/reload-mcp" to confirm all Savant servers connect. You should see workspace, abilities, context, and knowledge servers.', color: 'var(--orange)' },
+      ])}
+
+      <h3>Key Commands</h3>
+      <table class="guide-table">
+        <tr><th>Command</th><th>What It Does</th></tr>
+        <tr><td><code>hermes</code></td><td>Start interactive chat (default)</td></tr>
+        <tr><td><code>hermes chat -q "..."</code></td><td>Single query, non-interactive</td></tr>
+        <tr><td><code>hermes --continue</code></td><td>Resume most recent session</td></tr>
+        <tr><td><code>hermes --resume ID</code></td><td>Resume a specific session</td></tr>
+        <tr><td><code>hermes -w</code></td><td>Worktree mode — isolated git branch per agent</td></tr>
+        <tr><td><code>hermes -s savant:platform</code></td><td>Preload a specific skill</td></tr>
+        <tr><td><code>hermes mcp list</code></td><td>List configured MCP servers</td></tr>
+        <tr><td><code>hermes skills list</code></td><td>List installed skills</td></tr>
+        <tr><td><code>hermes tools</code></td><td>Interactive tool enable/disable</td></tr>
+      </table>
+
+      <h3>Slash Commands (In-Session)</h3>
+      <table class="guide-table">
+        <tr><th>Command</th><th>What It Does</th></tr>
+        <tr><td><code>/reload-mcp</code></td><td>Reconnect to all MCP servers (fixes dropped SSE connections)</td></tr>
+        <tr><td><code>/skill platform</code></td><td>Load the Savant platform skill into current session</td></tr>
+        <tr><td><code>/model</code></td><td>Switch model mid-session</td></tr>
+        <tr><td><code>/new</code></td><td>Start a fresh session</td></tr>
+        <tr><td><code>/tools</code></td><td>Manage enabled toolsets</td></tr>
+        <tr><td><code>/voice on</code></td><td>Enable voice-to-voice mode</td></tr>
+        <tr><td><code>/btw</code></td><td>Side question without interrupting the main task</td></tr>
+      </table>
+
+      <h3>What Hermes Can Do with Savant</h3>
+      <p>Once connected, Hermes has access to ~150 MCP tools. Here are common workflows:</p>
+
+      <h4 style="color:var(--cyan);">Workspace Management</h4>
+      <pre style="background:var(--bg-main);color:var(--text);padding:8px;border-radius:6px;font-size:0.45rem;overflow-x:auto;">Ask Hermes: "Create a workspace for the auth refactor, add tasks for
+the API changes and frontend updates, and link JIRA ticket AUTH-1234"
+
+Hermes will:
+  1. create_workspace("Auth Refactor")
+  2. assign_session_to_workspace(workspace_id)
+  3. create_task("Refactor auth API endpoints")
+  4. create_task("Update frontend auth flow")
+  5. create_jira_ticket(ticket_key="AUTH-1234")</pre>
+
+      <h4 style="color:var(--green);">Code Search & Analysis</h4>
+      <pre style="background:var(--bg-main);color:var(--text);padding:8px;border-radius:6px;font-size:0.45rem;overflow-x:auto;">Ask Hermes: "Find all code related to email notifications across our repos"
+
+Hermes will:
+  1. code_search(query="email notification send")
+  2. Analyze results across indexed repos
+  3. Summarize findings with file paths and line numbers</pre>
+
+      <h4 style="color:var(--orange);">Knowledge Graph</h4>
+      <pre style="background:var(--bg-main);color:var(--text);padding:8px;border-radius:6px;font-size:0.45rem;overflow-x:auto;">Ask Hermes: "Document what we learned about the caching architecture"
+
+Hermes will:
+  1. store(content="...", node_type="insight", workspace_id="...")
+  2. connect(source_id, target_id, edge_type="relates_to")
+  3. Knowledge persists across all future sessions</pre>
+
+      <h4 style="color:var(--magenta);">MR Reviews</h4>
+      <pre style="background:var(--bg-main);color:var(--text);padding:8px;border-radius:6px;font-size:0.45rem;overflow-x:auto;">Ask Hermes: "Review MR !456 in the networks project"
+
+Hermes will:
+  1. Load the gitlab-mr-review skill automatically
+  2. Fetch MR diffs, discussions, and pipeline status
+  3. Create a Savant workspace for the review
+  4. Write a structured review with findings</pre>
+
+      <h3>Tips</h3>
+      <ul>
+        <li><strong>SSE connections drop after idle periods.</strong> If tools stop working, type <code>/reload-mcp</code> to reconnect.</li>
+        <li><strong>Skills auto-load.</strong> You rarely need to manually load a skill — Hermes matches tasks to skills automatically.</li>
+        <li><strong>Memory is persistent.</strong> Tell Hermes your preferences once (coding style, project conventions, etc.) and it remembers across sessions.</li>
+        <li><strong>Use worktree mode (<code>-w</code>)</strong> when running multiple Hermes instances on the same repo to avoid git conflicts.</li>
+        <li><strong>Cron jobs</strong> let you schedule recurring tasks (daily standup summaries, monitoring, etc.) via the <code>cronjob</code> tool.</li>
+      </ul>
+
+      <h3>Docs & Resources</h3>
+      <ul>
+        <li><a href="https://hermes-agent.nousresearch.com/docs/" target="_blank" style="color:var(--cyan);">Full Documentation</a></li>
+        <li><a href="https://github.com/NousResearch/hermes-agent" target="_blank" style="color:var(--green);">GitHub Repository</a></li>
+        <li><a href="https://hermes-agent.nousresearch.com/docs/user-guide/configuration" target="_blank" style="color:var(--magenta);">Configuration Reference</a></li>
+        <li><a href="https://hermes-agent.nousresearch.com/docs/integrations/providers" target="_blank" style="color:var(--orange);">Provider Setup Guide</a></li>
+      </ul>
     `
   },
 ];

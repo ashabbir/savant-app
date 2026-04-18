@@ -75,6 +75,11 @@ CODEX_DIR = os.environ.get("CODEX_DIR",
     "/data/codex" if _IN_DOCKER else os.path.expanduser("~/.codex"))
 CODEX_SESSIONS_DIR = os.path.join(CODEX_DIR, "sessions")
 CODEX_META_DIR = os.path.join(CODEX_DIR, ".savant-meta")
+HERMES_DIR = os.environ.get("HERMES_DIR",
+    os.path.expanduser("~/.hermes"))
+HERMES_SESSIONS_DIR = os.path.join(HERMES_DIR, "sessions")
+HERMES_META_DIR = os.path.join(HERMES_DIR, ".savant-meta")
+HERMES_STATE_DB = os.path.join(HERMES_DIR, "state.db")
 
 # --- Host path mapping (container→host for file open/reveal) ---
 _HOST_PATH_MAP = []
@@ -109,8 +114,8 @@ def _unique_ts_id():
 # BACKGROUND CACHE — all list/usage data served from memory
 # ═══════════════════════════════════════════════════════════════════════════════
 _bg_cache = {
-    'copilot_sessions': None, 'claude_sessions': None, 'codex_sessions': None, 'gemini_sessions': None,
-    'copilot_usage': None, 'claude_usage': None, 'codex_usage': None, 'gemini_usage': None,
+    'copilot_sessions': None, 'claude_sessions': None, 'codex_sessions': None, 'gemini_sessions': None, 'hermes_sessions': None,
+    'copilot_usage': None, 'claude_usage': None, 'codex_usage': None, 'gemini_usage': None, 'hermes_usage': None,
 }
 _bg_lock = threading.Lock()
 
@@ -1321,7 +1326,7 @@ def api_workspaces_list():
         ws.setdefault("status", "open")
         ws.setdefault("priority", "medium")
         ws.setdefault("start_date", None)
-        counts = {"copilot": 0, "claude": 0, "codex": 0, "gemini": 0, "total": 0}
+        counts = {"copilot": 0, "claude": 0, "codex": 0, "gemini": 0, "hermes": 0, "total": 0}
         session_status_counts = {}
         projects = set()
         mr_urls = set()
@@ -1333,7 +1338,7 @@ def api_workspaces_list():
         archived_count = 0
         session_file_count = 0
         with _bg_lock:
-            for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
+            for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
                 sessions = _bg_cache.get(provider) or []
                 for s in sessions:
                     if s.get("workspace") == ws_id:
@@ -1513,7 +1518,7 @@ def api_workspaces_delete(ws_id):
     
     # Remove workspace assignment from all sessions
     with _bg_lock:
-        for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
+        for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
             sessions = _bg_cache.get(provider) or []
             for s in sessions:
                 if s.get("workspace") == ws_id:
@@ -1527,7 +1532,7 @@ def api_workspaces_sessions(ws_id):
     """Get all sessions across all providers for a workspace."""
     results = []
     with _bg_lock:
-        for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
+        for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
             pkey = provider.replace("_sessions", "")
             sessions = _bg_cache.get(provider) or []
             for s in sessions:
@@ -1555,7 +1560,7 @@ def api_workspaces_files(ws_id):
     grouped = []  # [{session_id, provider, summary, project, files: [...]}]
 
     with _bg_lock:
-        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
+        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
             pname = provider_key.replace("_sessions", "")
             for s in (_bg_cache.get(provider_key) or []):
                 if s.get("workspace") != ws_id:
@@ -1671,6 +1676,17 @@ def api_workspaces_files(ws_id):
                             files_seen[fpath]["count"] += 1
                             files_seen[fpath]["last_seen"] = ts
 
+                elif pname == "hermes":
+                    # Extract files from Hermes session via project-files endpoint
+                    res = api_hermes_session_project_files(sid)
+                    fdata = res.get_json() if hasattr(res, 'get_json') else {}
+                    for fi in fdata.get("files", []):
+                        fpath = fi.get("path")
+                        if fpath not in files_seen:
+                            files_seen[fpath] = fi
+                        else:
+                            files_seen[fpath]["count"] += fi.get("count", 0)
+
                 # Build file list for this session
                 file_list = []
                 for fpath, info in files_seen.items():
@@ -1698,7 +1714,7 @@ def api_workspaces_session_files(ws_id):
     """Get session artifact files (plan, checkpoints, files/, research/) grouped by session."""
     grouped = []
     with _bg_lock:
-        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
+        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
             pname = provider_key.replace("_sessions", "")
             for s in (_bg_cache.get(provider_key) or []):
                 if s.get("workspace") != ws_id:
@@ -1718,6 +1734,9 @@ def api_workspaces_session_files(ws_id):
                     session_path = os.path.join(GEMINI_DIR, "tmp", "savant-app", "chats", sid)
                     if not os.path.isdir(session_path):
                         session_path = ""
+                elif pname == "hermes":
+                    # Hermes sessions are single JSON files, no artifact directory
+                    session_path = ""
                 else:
                     continue
                 if not session_path or not os.path.isdir(session_path):
@@ -1752,7 +1771,7 @@ def api_workspaces_notes(ws_id):
 
     # 1. Notes from bg_cache (embedded in session file data)
     with _bg_lock:
-        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
+        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
             pname = provider_key.replace("_sessions", "")
             for s in (_bg_cache.get(provider_key) or []):
                 if s.get("workspace") != ws_id:
@@ -1822,7 +1841,7 @@ def api_workspaces_search():
     # Search sessions and notes within workspaces
     ws_by_id = {w["id"]: w for w in workspaces}
     with _bg_lock:
-        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
+        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
             pname = provider_key.replace("_sessions", "")
             for s in (_bg_cache.get(provider_key) or []):
                 ws_id = s.get("workspace")
@@ -1914,6 +1933,7 @@ def api_all_mrs():
             ("claude",  _bg_cache.get("claude_sessions") or []),
             ("codex", _bg_cache.get("codex_sessions") or []),
             ("gemini", _bg_cache.get("gemini_sessions") or []),
+            ("hermes", _bg_cache.get("hermes_sessions") or []),
         ]
     for prov, sessions in providers:
         for s in sessions:
@@ -1988,6 +2008,7 @@ def api_all_jira_tickets():
             ("claude",  _bg_cache.get("claude_sessions") or []),
             ("codex", _bg_cache.get("codex_sessions") or []),
             ("gemini", _bg_cache.get("gemini_sessions") or []),
+            ("hermes", _bg_cache.get("hermes_sessions") or []),
         ]
 
     ws_map = {}
@@ -2053,7 +2074,7 @@ def _collect_workspace_sessions(ws_id):
     """Gather all active (non-archived) sessions assigned to a workspace."""
     sessions = []
     with _bg_lock:
-        for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
+        for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
             pkey = provider.replace("_sessions", "")
             for s in (_bg_cache.get(provider) or []):
                 if s.get("workspace") == ws_id and not s.get("archived"):
@@ -2074,6 +2095,8 @@ def _collect_session_artifacts(sessions):
             sp = os.path.join(SESSION_DIR, sid)
         elif pname == "claude":
             sp = os.path.join(CLAUDE_DIR, sid)
+        elif pname == "hermes":
+            sp = os.path.join(HERMES_SESSIONS_DIR, sid)
         else:
             continue
         sp = os.path.realpath(sp)
@@ -2367,6 +2390,815 @@ def api_preferences_save():
     return jsonify(merged)
 
 
+# ── MCP Setup for AI Agents ───────────────────────────────────────────────────
+
+def _get_savant_mcp_entries():
+    """Return the 4 Savant MCP server entries with current ports."""
+    ports = _get_mcp_ports()
+    return {
+        f"savant-{name}": {"url": f"http://127.0.0.1:{port}/sse"}
+        for name, port in ports.items()
+    }
+
+
+# Stdio MCP servers to configure alongside Savant SSE servers.
+# command values use the binary name; the setup function resolves full paths.
+_STDIO_MCP_SERVERS = {
+    "gitlab": {"command": "gitlab-mcp", "args": []},
+    "atlassian": {"command": "mcp-atlassian", "args": []},
+}
+
+# Map provider names to their config file paths and formats
+_AGENT_CONFIG_MAP = {
+    "copilot": {
+        "config_path": os.path.join(os.path.expanduser("~"), ".copilot", "mcp-config.json"),
+        "format": "json",
+        "key": "mcpServers",
+        "entry_extras": {"type": "sse", "tools": ["*"], "headers": {}},
+        "label": "Copilot CLI",
+    },
+    "claude": {
+        "config_path": os.path.join(
+            os.path.expanduser("~"), "Library", "Application Support",
+            "Claude", "claude_desktop_config.json"
+        ),
+        "format": "json",
+        "key": "mcpServers",
+        "entry_extras": {"type": "sse", "tools": ["*"]},
+        "label": "Claude Desktop",
+    },
+    "gemini": {
+        "config_path": os.path.join(os.path.expanduser("~"), ".gemini", "settings.json"),
+        "format": "json",
+        "key": "mcpServers",
+        "entry_extras": {"type": "sse", "trust": True},
+        "label": "Gemini CLI",
+    },
+    "codex": {
+        "config_path": os.path.join(os.path.expanduser("~"), ".codex", "config.toml"),
+        "format": "toml",
+        "label": "Codex CLI",
+    },
+    "hermes": {
+        "config_path": os.path.join(os.path.expanduser("~"), ".hermes", "config.yaml"),
+        "format": "yaml",
+        "key": "mcp_servers",
+        "label": "Hermes Agent",
+    },
+}
+
+
+def _check_mcp_configured(provider):
+    """Check if Savant MCP servers are already configured for a provider.
+    Returns (is_configured: bool, config_exists: bool)."""
+    cfg = _AGENT_CONFIG_MAP.get(provider)
+    if not cfg:
+        return False, False
+    config_path = cfg["config_path"]
+    if not os.path.exists(config_path):
+        return False, False
+
+    # All server names that should be present
+    required = [f"savant-{n}" for n in _get_mcp_ports()]
+    for name, sdef in _STDIO_MCP_SERVERS.items():
+        if shutil.which(sdef["command"]):
+            required.append(name)
+
+    try:
+        fmt = cfg["format"]
+        if fmt == "json":
+            with open(config_path, "r") as f:
+                data = json.load(f)
+            servers = data.get(cfg["key"], {})
+            return all(n in servers for n in required), True
+        elif fmt == "yaml":
+            with open(config_path, "r") as f:
+                raw = f.read()
+            return all(n in raw for n in required), True
+        elif fmt == "toml":
+            with open(config_path, "r") as f:
+                raw = f.read()
+            return all(n in raw for n in required), True
+    except Exception:
+        pass
+    return False, True
+
+
+def _setup_mcp_for_provider(provider):
+    """Configure Savant MCP servers for a single AI agent provider.
+    Returns dict with status: 'configured', 'already_configured', 'skipped', or 'error'."""
+    cfg = _AGENT_CONFIG_MAP.get(provider)
+    if not cfg:
+        return {"provider": provider, "status": "skipped", "reason": "unknown provider"}
+
+    config_path = cfg["config_path"]
+    if not os.path.exists(config_path):
+        return {"provider": provider, "status": "skipped", "reason": "config file not found",
+                "path": config_path, "label": cfg["label"]}
+
+    is_configured, _ = _check_mcp_configured(provider)
+    if is_configured:
+        result = {"provider": provider, "status": "already_configured",
+                  "label": cfg["label"], "path": config_path}
+        # Even if MCP config is already set, Hermes may still need SSE patches
+        if provider == "hermes":
+            sse_check = _check_hermes_sse_support()
+            if not sse_check.get("mcp_tool_sse") or not sse_check.get("mcp_config_sse"):
+                sse_result = _patch_hermes_sse_support()
+                result["sse_patch"] = sse_result
+            else:
+                result["sse_patch"] = {"all_good": True, "patches_applied": [], "errors": []}
+            result["skill_install"] = _install_hermes_savant_skills()
+        return result
+
+    try:
+        entries = _get_savant_mcp_entries()
+        fmt = cfg["format"]
+
+        if fmt == "json":
+            with open(config_path, "r") as f:
+                data = json.load(f)
+            servers = data.get(cfg["key"], {})
+            extras = cfg.get("entry_extras", {})
+            for name, entry in entries.items():
+                if name not in servers:
+                    servers[name] = {**entry, **extras}
+            # Add stdio servers (gitlab, atlassian) if binaries are installed
+            for name, sdef in _STDIO_MCP_SERVERS.items():
+                if name not in servers:
+                    cmd_path = shutil.which(sdef["command"])
+                    if cmd_path:
+                        servers[name] = {
+                            "type": "stdio",
+                            "command": sdef["command"],
+                            "args": sdef["args"],
+                            "tools": ["*"],
+                        }
+            data[cfg["key"]] = servers
+            with open(config_path, "w") as f:
+                json.dump(data, f, indent=2)
+                f.write("\n")
+
+        elif fmt == "yaml":
+            with open(config_path, "r") as f:
+                raw = f.read()
+            # Use simple YAML append — find mcp_servers key or add it
+            yaml_key = cfg["key"]
+            ports = _get_mcp_ports()
+            if f"{yaml_key}:" not in raw:
+                # Add mcp_servers section at end
+                raw = raw.rstrip() + f"\n{yaml_key}:\n"
+            # Add each missing SSE server entry
+            for name, port in ports.items():
+                server_name = f"savant-{name}"
+                if server_name not in raw:
+                    indent = "  "
+                    entry = f"{indent}{server_name}:\n{indent}  url: http://127.0.0.1:{port}/sse\n{indent}  timeout: 120\n"
+                    idx = raw.find(f"{yaml_key}:")
+                    if idx != -1:
+                        end_of_line = raw.index("\n", idx) + 1
+                        raw = raw[:end_of_line] + entry + raw[end_of_line:]
+            # Add each missing stdio server entry
+            for name, sdef in _STDIO_MCP_SERVERS.items():
+                if name not in raw:
+                    cmd_path = shutil.which(sdef["command"])
+                    if cmd_path:
+                        indent = "  "
+                        entry = f"{indent}{name}:\n{indent}  command: {cmd_path}\n{indent}  args: []\n{indent}  timeout: 120\n"
+                        idx = raw.find(f"{yaml_key}:")
+                        if idx != -1:
+                            end_of_line = raw.index("\n", idx) + 1
+                            raw = raw[:end_of_line] + entry + raw[end_of_line:]
+            with open(config_path, "w") as f:
+                f.write(raw)
+
+        elif fmt == "toml":
+            with open(config_path, "r") as f:
+                raw = f.read()
+            # Find python for stdio command
+            python_cmd = _find_python_for_mcp()
+            savant_dir = os.path.dirname(os.path.abspath(__file__))
+            stdio_path = os.path.join(savant_dir, "mcp", "stdio.py")
+            updated = raw
+            for name in _get_mcp_ports():
+                section_header = f'[mcp_servers."savant-{name}"]'
+                if section_header in raw:
+                    continue
+                entry = f'\n{section_header}\ntype = "stdio"\ncommand = "{python_cmd}"\nargs = ["{stdio_path}", "{name}"]\n'
+                updated += entry
+            if updated != raw:
+                with open(config_path, "w") as f:
+                    f.write(updated)
+            # Add stdio servers (gitlab, atlassian) to TOML
+            raw2 = updated
+            for name, sdef in _STDIO_MCP_SERVERS.items():
+                section_header = f'[mcp_servers."{name}"]'
+                if section_header in raw2:
+                    continue
+                cmd_path = shutil.which(sdef["command"])
+                if not cmd_path:
+                    continue
+                entry = f'\n{section_header}\ntype = "stdio"\ncommand = "{cmd_path}"\nargs = []\n'
+                raw2 += entry
+            if raw2 != updated:
+                with open(config_path, "w") as f:
+                    f.write(raw2)
+
+        result = {"provider": provider, "status": "configured",
+                  "label": cfg["label"], "path": config_path}
+
+        # For Hermes, also patch SSE transport support into hermes-agent
+        if provider == "hermes":
+            sse_result = _patch_hermes_sse_support()
+            result["sse_patch"] = sse_result
+            if sse_result["patches_applied"]:
+                logger.info(f"Hermes SSE patches applied: {sse_result['patches_applied']}")
+            elif sse_result["all_good"]:
+                logger.info("Hermes SSE support already present")
+            if sse_result["errors"]:
+                logger.warning(f"Hermes SSE patch errors: {sse_result['errors']}")
+
+            # Install/update the Savant skill for Hermes
+            result["skill_install"] = _install_hermes_savant_skills()
+
+        return result
+    except Exception as e:
+        logger.error(f"MCP setup failed for {provider}: {e}")
+        return {"provider": provider, "status": "error", "error": str(e),
+                "label": cfg["label"]}
+
+
+def _find_python_for_mcp():
+    """Find a Python interpreter that has the mcp package installed."""
+    import subprocess as _sp
+    candidates = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3",
+                  "/usr/bin/python3", "python3"]
+    for p in candidates:
+        try:
+            _sp.check_output([p, "-c", "import mcp"], stderr=_sp.DEVNULL, timeout=5)
+            return p
+        except Exception:
+            continue
+    return "python3"
+
+
+# ---------------------------------------------------------------------------
+# Hermes SSE support patching
+# ---------------------------------------------------------------------------
+# When Hermes is enabled, we check if the hermes-agent code supports SSE
+# transport (needed for Savant MCP servers). If not, we patch two files:
+#   1. tools/mcp_tool.py  — _MCP_SSE_AVAILABLE flag, _is_sse(), _run_sse(), routing
+#   2. hermes_cli/mcp_config.py — SSE display label in `hermes mcp test`
+# ---------------------------------------------------------------------------
+
+_HERMES_AGENT_DIR = os.path.join(os.path.expanduser("~"), ".hermes", "hermes-agent")
+_MCP_TOOL_PATH = os.path.join(_HERMES_AGENT_DIR, "tools", "mcp_tool.py")
+_MCP_CONFIG_PATH = os.path.join(_HERMES_AGENT_DIR, "hermes_cli", "mcp_config.py")
+
+
+def _check_hermes_sse_support():
+    """Check if hermes-agent has SSE transport support.
+    Returns dict with check results for each file."""
+    result = {"mcp_tool_sse": False, "mcp_config_sse": False,
+              "mcp_tool_exists": False, "mcp_config_exists": False}
+
+    if os.path.isfile(_MCP_TOOL_PATH):
+        result["mcp_tool_exists"] = True
+        try:
+            with open(_MCP_TOOL_PATH, "r") as f:
+                content = f.read()
+            # All 4 markers must be present for full SSE support
+            result["mcp_tool_sse"] = all(marker in content for marker in [
+                "_MCP_SSE_AVAILABLE",
+                "def _is_sse(self)",
+                "def _run_sse(self",
+                "from mcp.client.sse import sse_client",
+            ])
+        except Exception:
+            pass
+
+    if os.path.isfile(_MCP_CONFIG_PATH):
+        result["mcp_config_exists"] = True
+        try:
+            with open(_MCP_CONFIG_PATH, "r") as f:
+                content = f.read()
+            result["mcp_config_sse"] = 'is_sse' in content and '"SSE"' in content
+        except Exception:
+            pass
+
+    return result
+
+
+def _patch_hermes_sse_support():
+    """Patch hermes-agent files to add SSE transport support.
+    Returns dict with patch results."""
+    import shutil as _shutil
+
+    checks = _check_hermes_sse_support()
+    patches_applied = []
+    errors = []
+
+    # --- Patch 1: mcp_tool.py ---
+    if checks["mcp_tool_exists"] and not checks["mcp_tool_sse"]:
+        try:
+            path = _MCP_TOOL_PATH
+            _shutil.copy2(path, path + ".bak")
+
+            with open(path, "r") as f:
+                content = f.read()
+
+            modified = False
+
+            # 1a. Add _MCP_SSE_AVAILABLE flag and sse_client import
+            if "_MCP_SSE_AVAILABLE" not in content:
+                old = "_MCP_HTTP_AVAILABLE = False\n_MCP_SAMPLING_TYPES = False"
+                new = "_MCP_HTTP_AVAILABLE = False\n_MCP_SSE_AVAILABLE = False\n_MCP_SAMPLING_TYPES = False"
+                if old in content:
+                    content = content.replace(old, new)
+                    modified = True
+
+                # Add sse_client import block after streamable_http import
+                old_import = ("    try:\n"
+                              "        from mcp.client.streamable_http import streamablehttp_client\n"
+                              "        _MCP_HTTP_AVAILABLE = True\n"
+                              "    except ImportError:\n"
+                              "        _MCP_HTTP_AVAILABLE = False\n")
+                new_import = (old_import +
+                              "    try:\n"
+                              "        from mcp.client.sse import sse_client\n"
+                              "        _MCP_SSE_AVAILABLE = True\n"
+                              "    except ImportError:\n"
+                              "        _MCP_SSE_AVAILABLE = False\n")
+                if old_import in content and "from mcp.client.sse" not in content:
+                    content = content.replace(old_import, new_import)
+                    modified = True
+
+            # 1b. Add _is_sse() method after _auth_type or _refresh_lock
+            if "def _is_sse(self)" not in content:
+                # Find _is_http and insert _is_sse before it
+                is_http_marker = "    def _is_http(self)"
+                if is_http_marker in content:
+                    is_sse_method = (
+                        '    def _is_sse(self) -> bool:\n'
+                        '        """Check if this server uses legacy SSE transport.\n'
+                        '\n'
+                        '        Detected by explicit ``transport: sse`` in config, or by a URL\n'
+                        '        path ending in ``/sse``.\n'
+                        '        """\n'
+                        '        if not self._config:\n'
+                        '            return False\n'
+                        '        transport = (self._config.get("transport") or "").lower().strip()\n'
+                        '        if transport == "sse":\n'
+                        '            return True\n'
+                        '        url = self._config.get("url", "")\n'
+                        '        if url and url.rstrip("/").endswith("/sse"):\n'
+                        '            return True\n'
+                        '        return False\n'
+                        '\n'
+                    )
+                    content = content.replace(is_http_marker, is_sse_method + is_http_marker)
+                    modified = True
+
+            # 1c. Update _is_http to exclude SSE URLs
+            old_is_http = '        return "url" in self._config\n'
+            new_is_http = '        return "url" in self._config and not self._is_sse()\n'
+            if old_is_http in content and "not self._is_sse()" not in content:
+                content = content.replace(old_is_http, new_is_http, 1)
+                modified = True
+
+            # 1d. Add _run_sse() method before _discover_tools
+            if "def _run_sse(self" not in content:
+                discover_marker = "    async def _discover_tools(self):"
+                if discover_marker in content:
+                    run_sse_method = (
+                        '    async def _run_sse(self, config: dict):\n'
+                        '        """Run the server using legacy SSE transport.\n'
+                        '\n'
+                        '        Used for MCP servers that expose a ``GET /sse`` endpoint returning\n'
+                        '        an event stream (older MCP protocol, still common in many servers).\n'
+                        '        """\n'
+                        '        if not _MCP_SSE_AVAILABLE:\n'
+                        '            raise ImportError(\n'
+                        '                f"MCP server \'{self.name}\' requires SSE transport but "\n'
+                        '                "mcp.client.sse is not available. "\n'
+                        '                "Upgrade the mcp package to get SSE support."\n'
+                        '            )\n'
+                        '\n'
+                        '        url = config["url"]\n'
+                        '        headers = dict(config.get("headers") or {})\n'
+                        '        connect_timeout = config.get("connect_timeout", _DEFAULT_CONNECT_TIMEOUT)\n'
+                        '\n'
+                        '        sampling_kwargs = self._sampling.session_kwargs() if self._sampling else {}\n'
+                        '        if _MCP_NOTIFICATION_TYPES and _MCP_MESSAGE_HANDLER_SUPPORTED:\n'
+                        '            sampling_kwargs["message_handler"] = self._make_message_handler()\n'
+                        '\n'
+                        '        sse_kwargs: dict = {\n'
+                        '            "timeout": float(connect_timeout),\n'
+                        '            "sse_read_timeout": 300.0,\n'
+                        '        }\n'
+                        '        if headers:\n'
+                        '            sse_kwargs["headers"] = headers\n'
+                        '\n'
+                        '        async with sse_client(url, **sse_kwargs) as (read_stream, write_stream):\n'
+                        '            async with ClientSession(read_stream, write_stream, **sampling_kwargs) as session:\n'
+                        '                await session.initialize()\n'
+                        '                self.session = session\n'
+                        '                await self._discover_tools()\n'
+                        '                self._ready.set()\n'
+                        '                await self._shutdown_event.wait()\n'
+                        '\n'
+                    )
+                    content = content.replace(discover_marker, run_sse_method + discover_marker)
+                    modified = True
+
+            # 1e. Update run() routing: SSE -> HTTP -> stdio
+            old_routing = "                if self._is_http():"
+            new_routing = ("                if self._is_sse():\n"
+                          "                    await self._run_sse(config)\n"
+                          "                elif self._is_http():")
+            if old_routing in content and "self._is_sse()" not in content:
+                content = content.replace(old_routing, new_routing, 1)
+                modified = True
+
+            if modified:
+                with open(path, "w") as f:
+                    f.write(content)
+                patches_applied.append("mcp_tool.py (SSE transport support)")
+                logger.info("Patched hermes mcp_tool.py with SSE support")
+            else:
+                # All individual checks passed but full check failed — partial state
+                patches_applied.append("mcp_tool.py (already partially patched)")
+
+        except Exception as e:
+            errors.append(f"mcp_tool.py: {e}")
+            logger.error(f"Failed to patch hermes mcp_tool.py: {e}")
+
+    # --- Patch 2: mcp_config.py ---
+    if checks["mcp_config_exists"] and not checks["mcp_config_sse"]:
+        try:
+            path = _MCP_CONFIG_PATH
+            _shutil.copy2(path, path + ".bak")
+
+            with open(path, "r") as f:
+                content = f.read()
+
+            modified = False
+
+            # Find the transport display block and add SSE detection
+            old_display = ('    if "url" in cfg:\n'
+                          '        url = cfg["url"]\n'
+                          '        _info(f"Transport: HTTP')
+            new_display = ('    if "url" in cfg:\n'
+                          '        url = cfg["url"]\n'
+                          '        is_sse = (cfg.get("transport") or "").lower().strip() == "sse" '
+                          'or url.rstrip("/").endswith("/sse")\n'
+                          '        transport_label = "SSE" if is_sse else "HTTP"\n'
+                          '        _info(f"Transport: {transport_label}')
+            if old_display in content:
+                content = content.replace(old_display, new_display, 1)
+                modified = True
+
+            if modified:
+                with open(path, "w") as f:
+                    f.write(content)
+                patches_applied.append("mcp_config.py (SSE display label)")
+                logger.info("Patched hermes mcp_config.py with SSE display label")
+        except Exception as e:
+            errors.append(f"mcp_config.py: {e}")
+            logger.error(f"Failed to patch hermes mcp_config.py: {e}")
+
+    return {
+        "patches_applied": patches_applied,
+        "errors": errors,
+        "checks": checks,
+        "all_good": checks.get("mcp_tool_sse", False) and checks.get("mcp_config_sse", False),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Hermes Savant skills installation
+# ---------------------------------------------------------------------------
+# When Hermes is enabled, install/update Savant skills so the agent has
+# up-to-date local guidance for platform usage and common workflows.
+# Sources live in:
+#   - savant/hermes_skill/SKILL.md (platform)
+#   - savant/hermes_skills/<skill>/SKILL.md (additional skills)
+# and are copied to ~/.hermes/skills/savant/<skill>/SKILL.md.
+# ---------------------------------------------------------------------------
+
+_HERMES_SKILL_BASE = os.path.dirname(os.path.abspath(__file__))
+_HERMES_SAVANT_SKILLS = {
+    # Directory names are non-prefixed; the savant/ category provides the namespace.
+    # Hermes resolves these as "savant/platform", "savant/gitlab-mr-review", etc.
+    "platform": os.path.join(_HERMES_SKILL_BASE, "hermes_skill", "SKILL.md"),
+    "gitlab-mr-review": os.path.join(_HERMES_SKILL_BASE, "hermes_skills", "gitlab-mr-review", "SKILL.md"),
+    "session-provider": os.path.join(_HERMES_SKILL_BASE, "hermes_skills", "session-provider", "SKILL.md"),
+    "test-runner": os.path.join(_HERMES_SKILL_BASE, "hermes_skills", "test-runner", "SKILL.md"),
+}
+
+
+def _install_hermes_savant_skills():
+    """Install or update Savant skills into ~/.hermes/skills/savant.
+    Returns dict with per-skill installation results."""
+    import shutil as _shutil
+
+    base_dst = os.path.join(os.path.expanduser("~"), ".hermes", "skills", "savant")
+    per_skill = {}
+    installed_count = 0
+    current_count = 0
+    error_count = 0
+
+    for skill_name, src_path in _HERMES_SAVANT_SKILLS.items():
+        dst_dir = os.path.join(base_dst, skill_name)
+        dst_path = os.path.join(dst_dir, "SKILL.md")
+
+        if not os.path.isfile(src_path):
+            per_skill[skill_name] = {
+                "installed": False,
+                "status": "missing_source",
+                "source": src_path,
+                "path": dst_path,
+            }
+            error_count += 1
+            continue
+
+        # Check if already up-to-date (compare contents)
+        if os.path.isfile(dst_path):
+            try:
+                with open(src_path, "r") as f:
+                    src_content = f.read()
+                with open(dst_path, "r") as f:
+                    dst_content = f.read()
+                if src_content == dst_content:
+                    per_skill[skill_name] = {
+                        "installed": True,
+                        "status": "already_current",
+                        "source": src_path,
+                        "path": dst_path,
+                    }
+                    current_count += 1
+                    continue
+            except Exception:
+                pass  # Fall through to copy
+
+        try:
+            os.makedirs(dst_dir, exist_ok=True)
+            _shutil.copy2(src_path, dst_path)
+            logger.info(f"Installed Savant skill '{skill_name}' to {dst_path}")
+            per_skill[skill_name] = {
+                "installed": True,
+                "status": "installed",
+                "source": src_path,
+                "path": dst_path,
+            }
+            installed_count += 1
+        except Exception as e:
+            logger.error(f"Failed to install Savant skill '{skill_name}': {e}")
+            per_skill[skill_name] = {
+                "installed": False,
+                "status": "error",
+                "error": str(e),
+                "source": src_path,
+                "path": dst_path,
+            }
+            error_count += 1
+
+    total = len(_HERMES_SAVANT_SKILLS)
+    overall_status = "error" if error_count == total else (
+        "partial" if error_count > 0 else (
+            "already_current" if current_count == total else "installed"
+        )
+    )
+
+    return {
+        "installed": error_count < total,
+        "status": overall_status,
+        "summary": {
+            "total": total,
+            "installed": installed_count,
+            "already_current": current_count,
+            "errors": error_count,
+        },
+        "skills": per_skill,
+    }
+
+
+@app.route("/api/setup-mcp", methods=["POST"])
+def api_setup_mcp():
+    """Configure Savant MCP servers for specified AI agent providers.
+
+    Body: {"providers": ["copilot", "claude", ...]}
+    If providers is omitted, uses enabled_providers from preferences.
+    Set "force": true to reconfigure even if already set up.
+    """
+    data = request.get_json(force=True) if request.data else {}
+    providers = data.get("providers")
+    force = data.get("force", False)
+
+    if not providers:
+        prefs = _read_preferences()
+        defaults = _default_preferences()
+        providers = prefs.get("enabled_providers", defaults["enabled_providers"])
+
+    results = []
+    for provider in providers:
+        if force:
+            # Force reconfigure — temporarily remove existing entries then re-setup
+            cfg = _AGENT_CONFIG_MAP.get(provider)
+            if not cfg:
+                results.append({"provider": provider, "status": "skipped", "reason": "unknown provider"})
+                continue
+            if not os.path.exists(cfg["config_path"]):
+                results.append({"provider": provider, "status": "skipped",
+                                "reason": "config file not found", "path": cfg["config_path"],
+                                "label": cfg["label"]})
+                continue
+        result = _setup_mcp_for_provider(provider)
+        results.append(result)
+
+    configured = [r for r in results if r["status"] == "configured"]
+    already = [r for r in results if r["status"] == "already_configured"]
+    skipped = [r for r in results if r["status"] == "skipped"]
+    errors = [r for r in results if r["status"] == "error"]
+
+    return jsonify({
+        "results": results,
+        "summary": {
+            "configured": len(configured),
+            "already_configured": len(already),
+            "skipped": len(skipped),
+            "errors": len(errors),
+        }
+    })
+
+
+@app.route("/api/check-mcp", methods=["GET"])
+def api_check_mcp():
+    """Check MCP configuration status for all known agents."""
+    results = {}
+    for provider, cfg in _AGENT_CONFIG_MAP.items():
+        is_configured, config_exists = _check_mcp_configured(provider)
+        results[provider] = {
+            "label": cfg["label"],
+            "config_exists": config_exists,
+            "savant_configured": is_configured,
+            "path": cfg["config_path"],
+        }
+    return jsonify(results)
+
+
+# ── System Info Registry ─────────────────────────────────────────────────────
+# MCP port map — defaults match Electron's DEFAULT_*_MCP_PORT constants.
+# Electron calls POST /api/system/ports after resolving available ports.
+_system_ports = {
+    "workspace":  int(os.environ.get("SAVANT_MCP_PORT", "8091")),
+    "abilities":  int(os.environ.get("SAVANT_ABILITIES_MCP_PORT", "8092")),
+    "context":    int(os.environ.get("SAVANT_CONTEXT_MCP_PORT", "8093")),
+    "knowledge":  int(os.environ.get("SAVANT_KNOWLEDGE_MCP_PORT", "8094")),
+}
+
+
+def _get_mcp_ports():
+    """Return current MCP port mapping."""
+    return dict(_system_ports)
+
+
+@app.route("/api/system/ports", methods=["POST"])
+def api_system_ports_update():
+    """Electron pushes resolved MCP ports after startup."""
+    data = request.get_json(silent=True) or {}
+    updated = []
+    for name in _system_ports:
+        if name in data:
+            _system_ports[name] = int(data[name])
+            updated.append(name)
+    return jsonify({"updated": updated, "ports": _get_mcp_ports()})
+
+
+@app.route("/api/system/info", methods=["GET"])
+def api_system_info():
+    """Return system status: ports, directories, components, health."""
+    import sys
+    import platform
+    import urllib.request
+    import urllib.error
+    import sqlite3
+
+    flask_port = int(os.environ.get("FLASK_PORT", "8090"))
+    savant_dir = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(os.path.expanduser("~"), ".savant", "savant.db")
+
+    # Probe each MCP server
+    mcp_status = {}
+    ports = _get_mcp_ports()
+    for name, port in ports.items():
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/sse", method="GET")
+            resp = urllib.request.urlopen(req, timeout=2)
+            resp.close()
+            mcp_status[name] = {"port": port, "status": "ok"}
+        except Exception as e:
+            mcp_status[name] = {"port": port, "status": "offline", "error": str(e)}
+
+    # DB status
+    db_ok = False
+    db_size = None
+    try:
+        client = get_sqlite()
+        db_ok = client.health_check()
+    except Exception:
+        pass
+    if os.path.exists(db_path):
+        db_size = os.path.getsize(db_path)
+
+    # Loaded blueprints
+    blueprints = sorted(app.blueprints.keys())
+
+    # Git / worktree info — prefer build-info.json (baked at build time),
+    # fall back to live git commands (works in dev, not in packaged app)
+    import subprocess as _sp
+    build_info = {}
+    build_info_path = os.path.join(savant_dir, "build-info.json")
+    if os.path.isfile(build_info_path):
+        try:
+            import json as _json2
+            with open(build_info_path) as f:
+                build_info = _json2.load(f)
+        except Exception:
+            pass
+
+    # Normalize worktree to just the directory name (not full path)
+    if build_info.get("worktree"):
+        build_info["worktree"] = os.path.basename(build_info["worktree"])
+
+    if not build_info.get("branch") or build_info.get("branch") == "unknown":
+        try:
+            _git_dir = os.path.dirname(savant_dir)  # repo root (one level up from savant/)
+            branch = _sp.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=_git_dir, stderr=_sp.DEVNULL, timeout=3
+            ).decode().strip()
+            commit = _sp.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=_git_dir, stderr=_sp.DEVNULL, timeout=3
+            ).decode().strip()
+            # Detect if running from a worktree (git commondir != git-dir)
+            git_dir = _sp.check_output(
+                ["git", "rev-parse", "--git-dir"],
+                cwd=_git_dir, stderr=_sp.DEVNULL, timeout=3
+            ).decode().strip()
+            common_dir = _sp.check_output(
+                ["git", "rev-parse", "--git-common-dir"],
+                cwd=_git_dir, stderr=_sp.DEVNULL, timeout=3
+            ).decode().strip()
+            worktree = os.path.basename(_git_dir) if os.path.realpath(git_dir) != os.path.realpath(common_dir) else None
+            build_info = {
+                "branch": branch,
+                "commit": commit,
+                "worktree": worktree,
+            }
+        except Exception:
+            if not build_info:
+                build_info = {"branch": "unknown", "commit": "unknown", "worktree": None}
+
+    # Read version from build-info.json first, then package.json
+    pkg_version = build_info.get("version", "unknown")
+    if pkg_version == "unknown":
+        pkg_path = os.path.join(os.path.dirname(savant_dir), "package.json")
+        try:
+            import json as _json
+            with open(pkg_path) as f:
+                pkg_version = _json.load(f).get("version", "unknown")
+        except Exception:
+            pass
+
+    return jsonify({
+        "version": pkg_version,
+        "build": build_info,
+        "flask": {
+            "port": flask_port,
+            "status": "ok",
+            "pid": os.getpid(),
+        },
+        "mcp_servers": mcp_status,
+        "database": {
+            "path": db_path,
+            "status": "healthy" if db_ok else "unhealthy",
+            "size_bytes": db_size,
+        },
+        "directories": {
+            "savant_app": savant_dir,
+            "data_dir": os.path.join(os.path.expanduser("~"), ".savant"),
+            "abilities_dir": os.path.join(os.path.expanduser("~"), ".savant", "abilities"),
+        },
+        "environment": {
+            "python": sys.version.split()[0],
+            "platform": f"{platform.system()} {platform.machine()}",
+        },
+        "blueprints": blueprints,
+    })
+
+
 # SQLITE ENDPOINTS — Workspace, Task, MR, and Jira management
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -2382,7 +3214,7 @@ def api_db_health():
 @app.route("/api/mcp/health/<name>", methods=["GET"])
 def api_mcp_health(name):
     """Probe an MCP SSE server to check if it's running."""
-    ports = {"workspace": 8091, "abilities": 8092, "context": 8093, "knowledge": 8094}
+    ports = _get_mcp_ports()
     port = ports.get(name)
     if not port:
         return jsonify({"status": "unknown", "error": "Unknown MCP: " + name}), 404
@@ -2401,7 +3233,7 @@ def api_mcp_health(name):
 @app.route("/api/mcp/health", methods=["GET"])
 def api_mcp_health_all():
     """Check health of all MCP servers for status bar display."""
-    ports = {"workspace": 8091, "abilities": 8092, "context": 8093, "knowledge": 8094}
+    ports = _get_mcp_ports()
     results = {}
     
     import urllib.request, urllib.error
@@ -3457,7 +4289,7 @@ def api_search():
         nickname = meta.get("nickname") or ""
         orig_name = ""
         with _bg_lock:
-            for prov in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
+            for prov in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
                 for s in (_bg_cache.get(prov) or []):
                     if s.get("id") == entry:
                         if not nickname:
@@ -3535,7 +4367,7 @@ def api_search():
         n_nick = meta.get("nickname") or ""
         n_orig = ""
         with _bg_lock:
-            for prov in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions"):
+            for prov in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
                 for s in (_bg_cache.get(prov) or []):
                     if s.get("id") == entry:
                         if not n_nick:
@@ -6559,6 +7391,1909 @@ def claude_session_detail_page(session_id):
 
 
 # ───────────────────────────────────────────────────────────────────────────
+# Hermes session parsing
+# ───────────────────────────────────────────────────────────────────────────
+
+def _hermes_read_session_meta(session_id: str) -> dict:
+    """Read Savant metadata for a Hermes session."""
+    os.makedirs(HERMES_META_DIR, exist_ok=True)
+    meta_path = os.path.join(HERMES_META_DIR, f"{session_id}.json")
+    if not os.path.isfile(meta_path):
+        return {"workspace": None, "starred": False, "archived": False}
+    try:
+        with open(meta_path) as f:
+            return json.load(f)
+    except Exception:
+        return {"workspace": None, "starred": False, "archived": False}
+
+
+def _hermes_write_session_meta(session_id: str, meta: dict):
+    """Write Savant metadata for a Hermes session."""
+    os.makedirs(HERMES_META_DIR, exist_ok=True)
+    meta_path = os.path.join(HERMES_META_DIR, f"{session_id}.json")
+    try:
+        with open(meta_path, "w") as f:
+            json.dump(meta, f)
+    except Exception as e:
+        logger.error(f"Error writing Hermes meta {session_id}: {e}")
+
+
+def _hermes_find_session_file(session_id: str) -> str | None:
+    """Find the session JSON file for a Hermes session."""
+    # Session files follow pattern: session_<session_id>.json
+    candidate = os.path.join(HERMES_SESSIONS_DIR, f"session_{session_id}.json")
+    if os.path.isfile(candidate):
+        return candidate
+    # Also try without the session_ prefix
+    candidate2 = os.path.join(HERMES_SESSIONS_DIR, f"{session_id}.json")
+    if os.path.isfile(candidate2):
+        return candidate2
+    return None
+
+
+def _hermes_load_session(session_id: str) -> dict | None:
+    """Load a Hermes session JSON file."""
+    path = _hermes_find_session_file(session_id)
+    if not path:
+        return None
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Error reading Hermes session {session_id}: {e}")
+        return None
+
+
+def _hermes_extract_tools_from_messages(messages: list) -> tuple[set, int, dict]:
+    """Extract tool names, total tool call count, and tool call counts from messages."""
+    tools_used = set()
+    tool_call_count = 0
+    tool_call_counts = {}
+    for msg in messages:
+        if msg.get("role") == "assistant":
+            for tc in (msg.get("tool_calls") or []):
+                fn = tc.get("function", {})
+                name = fn.get("name", "")
+                if name:
+                    tools_used.add(name)
+                    tool_call_count += 1
+                    tool_call_counts[name] = tool_call_counts.get(name, 0) + 1
+    return tools_used, tool_call_count, tool_call_counts
+
+
+def _hermes_build_session_chains() -> dict:
+    """Build parent→tip chains from state.db. Returns {root_id: {root_id, tip_id, chain: [ids]}}.
+
+    When state.db exists, uses parent_session_id to build chains.
+    Only root sessions (no parent) become entries.  Child/tip sessions are
+    folded into their root's chain list.
+
+    When state.db is absent, falls back to treating each JSON file as standalone.
+    """
+    if os.path.isfile(HERMES_STATE_DB):
+        try:
+            import sqlite3
+            conn = sqlite3.connect(HERMES_STATE_DB)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, parent_session_id, end_reason, message_count, title, model, "
+                "input_tokens, output_tokens, estimated_cost_usd, tool_call_count, "
+                "started_at FROM sessions ORDER BY started_at"
+            ).fetchall()
+            conn.close()
+
+            # Build lookup: id -> row, parent_id -> children
+            by_id = {r["id"]: dict(r) for r in rows}
+            children_of = {}  # parent_id -> [child_ids]
+            for r in rows:
+                pid = r["parent_session_id"]
+                if pid:
+                    children_of.setdefault(pid, []).append(r["id"])
+
+            # Find roots (sessions with no parent, or whose parent is not in by_id)
+            roots = [sid for sid, r in by_id.items()
+                     if not r.get("parent_session_id") or r["parent_session_id"] not in by_id]
+
+            chains = {}
+            for root_id in roots:
+                chain = [root_id]
+                current = root_id
+                while current in children_of:
+                    kids = children_of[current]
+                    # Pick the child (there should be exactly one per checkpoint model)
+                    current = kids[0]
+                    chain.append(current)
+                tip_id = chain[-1]
+                chains[root_id] = {
+                    "root_id": root_id,
+                    "tip_id": tip_id,
+                    "chain": chain,
+                    "db_rows": {sid: by_id[sid] for sid in chain if sid in by_id},
+                }
+            return chains
+
+        except Exception as e:
+            logger.error(f"Error reading Hermes state.db: {e}")
+            # Fall through to fallback
+
+    # Fallback: each JSON file is a standalone session
+    chains = {}
+    if os.path.isdir(HERMES_SESSIONS_DIR):
+        for filename in os.listdir(HERMES_SESSIONS_DIR):
+            if not filename.endswith(".json") or not filename.startswith("session_"):
+                continue
+            sid = filename[len("session_"):-len(".json")]
+            chains[sid] = {"root_id": sid, "tip_id": sid, "chain": [sid], "db_rows": {}}
+    return chains
+
+
+def _hermes_resolve_session_id(session_id: str) -> tuple[str, dict | None]:
+    """Resolve any session_id (root, child, or tip) to (root_id, chain_info).
+
+    Returns (root_id, chain_info) where chain_info has root_id, tip_id, chain list.
+    If the session_id is not found, returns (session_id, None).
+    """
+    chains = _hermes_build_session_chains()
+
+    # Direct hit: session_id is a root
+    if session_id in chains:
+        return session_id, chains[session_id]
+
+    # Search: session_id might be a child or tip in some chain
+    for root_id, info in chains.items():
+        if session_id in info["chain"]:
+            return root_id, info
+
+    return session_id, None
+
+
+def _hermes_compute_activity_buckets(all_messages_with_timestamps: list, session_start: str, session_end: str) -> list:
+    """Compute 24-element activity buckets from message timestamps.
+
+    Divides the session duration into 24 equal time buckets and counts
+    messages in each, producing a sparkline array for the frontend.
+
+    all_messages_with_timestamps: list of (role, timestamp_str) tuples
+    session_start, session_end: ISO timestamp strings for session boundaries
+    Returns: list of 24 ints (message counts per bucket)
+    """
+    start_dt = parse_timestamp(session_start)
+    end_dt = parse_timestamp(session_end)
+    if not start_dt or not end_dt:
+        return []
+    if start_dt.tzinfo is None:
+        start_dt = start_dt.replace(tzinfo=timezone.utc)
+    if end_dt.tzinfo is None:
+        end_dt = end_dt.replace(tzinfo=timezone.utc)
+
+    duration = (end_dt - start_dt).total_seconds()
+    if duration <= 0:
+        # All activity in a single instant — put everything in first bucket
+        return [len(all_messages_with_timestamps)] + [0] * 23 if all_messages_with_timestamps else []
+
+    bucket_size = duration / 24.0
+    buckets = [0] * 24
+
+    for _role, ts_str in all_messages_with_timestamps:
+        ts_dt = parse_timestamp(ts_str)
+        if not ts_dt:
+            continue
+        if ts_dt.tzinfo is None:
+            ts_dt = ts_dt.replace(tzinfo=timezone.utc)
+        offset = (ts_dt - start_dt).total_seconds()
+        idx = min(int(offset / bucket_size), 23)
+        if idx < 0:
+            idx = 0
+        buckets[idx] += 1
+
+    return buckets
+
+
+def _hermes_get_last_intent(messages: list) -> str | None:
+    """Extract last user intent (last user message content) from messages."""
+    last_intent = None
+    for msg in messages:
+        if msg.get("role") == "user":
+            content = msg.get("content", "")
+            if isinstance(content, str) and content.strip():
+                last_intent = content.strip()[:200]
+    return last_intent
+
+
+def _hermes_detect_has_abort(messages: list) -> bool:
+    """Check if any message indicates an abort/cancellation."""
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            lower = content.lower()
+            if msg.get("role") == "assistant" and any(w in lower for w in ["aborted", "cancelled", "interrupted"]):
+                return True
+    return False
+
+
+def _hermes_compute_disk_size(chain_ids: list) -> int:
+    """Compute total disk size of all session JSON files in a chain."""
+    total = 0
+    for sid in chain_ids:
+        path = _hermes_find_session_file(sid)
+        if path:
+            try:
+                total += os.path.getsize(path)
+            except OSError:
+                pass
+    return total
+
+
+def _hermes_extract_cwd(session_data: dict) -> str:
+    """Extract the working directory from a Hermes session.
+
+    Hermes doesn't store cwd explicitly.  We infer it from:
+      1. ``workdir`` args in terminal / read_file / search_files tool calls
+      2. Absolute paths referenced in tool call arguments
+      3. AGENTS.md / project context paths in the system prompt
+
+    Returns the best-guess project directory or empty string.
+    """
+    import re as _re
+
+    candidates: dict[str, int] = {}  # path -> score (higher = more confident)
+
+    messages = session_data.get("messages", [])
+
+    for msg in messages:
+        # --- assistant tool_calls ---
+        if msg.get("role") == "assistant":
+            for tc in msg.get("tool_calls", []):
+                fn = tc.get("function", {})
+                fn_name = fn.get("name", "")
+                raw_args = fn.get("arguments", "")
+                try:
+                    args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                if not isinstance(args, dict):
+                    continue
+
+                # Explicit workdir is the strongest signal
+                wd = args.get("workdir", "")
+                if wd and os.path.isabs(wd):
+                    candidates[wd] = candidates.get(wd, 0) + 10
+
+                # path / file args in read_file, search_files, patch, write_file
+                for key in ("path", "file_path"):
+                    p = args.get(key, "")
+                    if p and os.path.isabs(p):
+                        # Extract project root (e.g. /Users/x/Developer/org/repo)
+                        root = _hermes_project_root_from_path(p)
+                        if root:
+                            candidates[root] = candidates.get(root, 0) + 3
+
+                # terminal command may contain cd <path>
+                if fn_name == "terminal":
+                    cmd = args.get("command", "")
+                    for m in _re.finditer(r'\bcd\s+(/[^\s;&|]+)', cmd):
+                        root = _hermes_project_root_from_path(m.group(1))
+                        if root:
+                            candidates[root] = candidates.get(root, 0) + 5
+
+        # --- tool results may contain absolute paths ---
+        if msg.get("role") == "tool":
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                for m in _re.finditer(r'(/(?:Users|home)/[^\s"\'\\:]+)', content):
+                    root = _hermes_project_root_from_path(m.group(1))
+                    if root:
+                        candidates[root] = candidates.get(root, 0) + 1
+
+    if not candidates:
+        return ""
+
+    # Return the highest-scored candidate
+    best = max(candidates, key=candidates.get)
+    return best
+
+
+def _hermes_project_root_from_path(path: str) -> str:
+    """Given an absolute path, try to extract a plausible project root.
+
+    Heuristic: keep up to 5 components (e.g. /Users/x/Developer/org/repo).
+    If the path has more components after that, we trim to the project root.
+    If fewer, return as-is (it's already a root-level path).
+    Excludes hidden directories and system paths.
+    """
+    parts = path.rstrip("/").split("/")
+
+    # Reject paths into hidden directories or system locations
+    _EXCLUDED_SEGMENTS = {
+        ".hermes", ".copilot", ".claude", ".codex", ".cache", ".config",
+        ".local", ".npm", ".git", "Library", "node_modules", "tmp",
+        "__pycache__", ".savant", ".savant-meta",
+    }
+    for p in parts:
+        if p in _EXCLUDED_SEGMENTS:
+            return ""
+
+    # Look for common dev directory markers
+    for marker in ("Developer", "Projects", "repos", "src", "workspace"):
+        if marker in parts:
+            idx = parts.index(marker)
+            # Developer typically has org/repo (2 levels), others just repo (1 level)
+            depth = 3 if marker == "Developer" else 2
+            end = min(idx + depth, len(parts))
+            candidate = "/".join(parts[:end])
+            if len(candidate) > 3:
+                return candidate
+    # Fallback: /home/user/project paths (not macOS)
+    if len(parts) >= 4 and parts[1] == "home":
+        return "/".join(parts[:4])
+    return ""
+
+
+def hermes_get_all_sessions() -> list[dict]:
+    """Gather Hermes sessions from ~/.hermes/sessions/, grouped by checkpoint chains.
+
+    Uses state.db to identify parent→child chains and collapses them into
+    single logical sessions.  The root_id is used as the canonical session ID,
+    data is drawn from the tip (latest checkpoint), and tool/message stats are
+    aggregated across the entire chain.
+    """
+    if not os.path.isdir(HERMES_SESSIONS_DIR):
+        return []
+
+    chains = _hermes_build_session_chains()
+    sessions = []
+
+    for root_id, chain_info in chains.items():
+        tip_id = chain_info["tip_id"]
+        chain_ids = chain_info["chain"]
+
+        # Load the root session (for created timestamp and initial user message)
+        root_data = _hermes_load_session(root_id)
+        # Load the tip session (for latest data)
+        tip_data = _hermes_load_session(tip_id) if tip_id != root_id else root_data
+
+        if not tip_data:
+            # Tip JSON missing; try root
+            if not root_data:
+                continue
+            tip_data = root_data
+
+        if not root_data:
+            root_data = tip_data
+
+        model = tip_data.get("model", "unknown")
+        platform = tip_data.get("platform", "cli")
+        session_start = root_data.get("session_start", "")
+        last_updated = tip_data.get("last_updated", session_start)
+
+        # Aggregate messages, tools, counts across all chain sessions
+        all_tools_used = set()
+        total_tool_calls = 0
+        total_user_count = 0
+        total_message_count = 0
+        summary = ""
+        user_msgs = []
+        models_seen = set()
+        model_call_counts = {}
+        tool_call_counts = {}
+        all_messages_flat = []  # for activity buckets
+        last_intent = None
+        has_abort = False
+        last_event_type = None
+
+        for sid in chain_ids:
+            sdata = _hermes_load_session(sid) if sid != tip_id else tip_data
+            if sid == root_id and root_data:
+                sdata = root_data
+            if not sdata:
+                continue
+            msgs = sdata.get("messages", [])
+            total_message_count += len(msgs)
+            m = sdata.get("model", "")
+            if m:
+                models_seen.add(m)
+
+            s_start = sdata.get("session_start", "")
+            s_end = sdata.get("last_updated", s_start)
+
+            for msg in msgs:
+                role = msg.get("role", "")
+                if role == "user":
+                    content = msg.get("content", "")
+                    if isinstance(content, str) and content.strip():
+                        if not summary:
+                            summary = content[:140]
+                        user_msgs.append({"content": content[:200], "timestamp": sdata.get("session_start", "")})
+                        last_intent = content.strip()[:200]
+                    total_user_count += 1
+                elif role == "assistant":
+                    m_name = sdata.get("model", "unknown")
+                    model_call_counts[m_name] = model_call_counts.get(m_name, 0) + 1
+
+                # Track last event type
+                if role:
+                    last_event_type = role
+
+                # Distribute message timestamps across session span for buckets
+                if s_start:
+                    all_messages_flat.append((role, s_start))
+
+            # Check for abort
+            if not has_abort:
+                has_abort = _hermes_detect_has_abort(msgs)
+
+            t_used, t_count, t_counts = _hermes_extract_tools_from_messages(msgs)
+            all_tools_used |= t_used
+            total_tool_calls += t_count
+            for tn, tc in t_counts.items():
+                tool_call_counts[tn] = tool_call_counts.get(tn, 0) + tc
+
+        if not summary:
+            # Try title from state.db
+            db_rows = chain_info.get("db_rows", {})
+            for sid in reversed(chain_ids):
+                row = db_rows.get(sid, {})
+                if row.get("title"):
+                    summary = row["title"]
+                    break
+            if not summary:
+                summary = f"Hermes Session ({model})"
+
+        # Meta is stored under root_id
+        meta = _hermes_read_session_meta(root_id)
+
+        # Determine status from tip's last_updated
+        status = "COMPLETED"
+        is_open = False
+        lu_dt = parse_timestamp(last_updated)
+        if lu_dt and lu_dt.tzinfo is None:
+            lu_dt = lu_dt.replace(tzinfo=timezone.utc)
+        if lu_dt and (datetime.now(timezone.utc) - lu_dt).total_seconds() < 600:
+            status = "RUNNING"
+            is_open = True
+
+        tip_path = _hermes_find_session_file(tip_id) or ""
+
+        # Compute enriched fields
+        checkpoint_count = max(0, len(chain_ids) - 1)
+        disk_size = _hermes_compute_disk_size(chain_ids)
+
+        # Extract cwd from session data (Hermes doesn't store it explicitly)
+        cwd = _hermes_extract_cwd(root_data or tip_data)
+        resume_command = f"cd {cwd} && hermes --resume {root_id}" if cwd else f"hermes --resume {root_id}"
+
+        activity_buckets = _hermes_compute_activity_buckets(
+            all_messages_flat, session_start, last_updated
+        )
+
+        # Token/cost aggregation from state.db rows
+        db_rows = chain_info.get("db_rows", {})
+        input_tokens = sum(r.get("input_tokens", 0) or 0 for r in db_rows.values())
+        output_tokens = sum(r.get("output_tokens", 0) or 0 for r in db_rows.values())
+        estimated_cost_usd = sum(r.get("estimated_cost_usd", 0) or 0 for r in db_rows.values())
+
+        sessions.append({
+            "id": root_id,
+            "provider": "hermes",
+            "project": os.path.basename(cwd) if cwd else "",
+            "project_path": cwd,
+            "cwd": cwd,
+            "summary": meta.get("nickname") or summary,
+            "modified": last_updated,
+            "created": session_start,
+            "updated_at": last_updated,
+            "created_at": session_start,
+            "path": tip_path,
+            "session_path": tip_path,
+            "message_count": total_message_count,
+            "turn_count": total_user_count,
+            "user_messages": user_msgs[:3],
+            "workspace": meta.get("workspace"),
+            "starred": meta.get("starred", False),
+            "archived": meta.get("archived", False),
+            "nickname": meta.get("nickname", ""),
+            "status": status,
+            "is_open": is_open,
+            "model": model,
+            "models": sorted(models_seen),
+            "platform": platform,
+            "tools_used": sorted(all_tools_used)[:8],
+            "tool_call_count": total_tool_calls,
+            "event_count": total_message_count,
+            "git_commit_count": 0,
+            # ── Enriched fields (parity with Copilot/Claude) ──
+            "model_call_counts": model_call_counts,
+            "tool_call_counts": tool_call_counts,
+            "activity_buckets": activity_buckets,
+            "checkpoint_count": checkpoint_count,
+            "disk_size": disk_size,
+            "file_count": len(chain_ids),  # number of session files
+            "resume_command": resume_command,
+            "first_event_time": session_start or None,
+            "last_event_time": last_updated or None,
+            "last_event_type": last_event_type,
+            "last_intent": last_intent,
+            "has_abort": has_abort,
+            "active_tools": [],  # Hermes doesn't have persistent tool processes
+            "notes": meta.get("notes", []),
+            "jira_tickets": meta.get("jira_tickets", []),
+            "mrs": meta.get("mrs", []),
+            "has_plan_file": False,
+            "research_count": 0,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "estimated_cost_usd": estimated_cost_usd,
+        })
+
+    sessions.sort(key=lambda x: x.get("modified", ""), reverse=True)
+    return sessions
+
+
+def _hermes_build_session_tree(chain_ids, db_rows, root_id):
+    """Build a tree dict with checkpoints, rewind_snapshots, files, and plan.
+
+    For Hermes, chain segments (child sessions) become virtual checkpoints.
+    Each session file on disk contributes to ``files``.
+    ``rewind_snapshots`` is always empty (Hermes doesn't have Claude-style rewinds).
+    ``plan`` is None (Hermes doesn't persist plan files in a session dir).
+    """
+    checkpoints = []
+    files = []
+    hermes_dir = os.path.expanduser("~/.hermes/sessions")
+
+    for i, sid in enumerate(chain_ids):
+        # Build the session file path
+        fname = f"session_{sid}.json"
+        fpath = os.path.join(hermes_dir, fname)
+        size = 0
+        mtime = ""
+        try:
+            if os.path.isfile(fpath):
+                st = os.stat(fpath)
+                size = st.st_size
+                mtime = datetime.fromtimestamp(
+                    st.st_mtime, tz=timezone.utc
+                ).isoformat()
+        except OSError:
+            pass
+
+        # Every session file is a "file" in the tree
+        files.append({
+            "name": fname,
+            "path": fpath,
+            "size": size,
+            "mtime": mtime,
+        })
+
+        # Only non-root sessions are checkpoints (chain continuation points)
+        if i > 0:
+            db_row = db_rows.get(sid, {}) if db_rows else {}
+            label = db_row.get("title", "") or f"Checkpoint {i}"
+            checkpoints.append({
+                "name": label,
+                "path": fpath,
+                "mtime": mtime,
+                "size": size,
+            })
+
+    return {
+        "files": files,
+        "checkpoints": checkpoints,
+        "rewind_snapshots": [],
+        "plan": None,
+        "total_size": sum(f["size"] for f in files),
+    }
+
+
+def hermes_get_session_detail(session_id: str) -> dict | None:
+    """Get detailed info for a single Hermes session (chain-aware).
+
+    Resolves any session_id (root, child, or tip) to the full chain,
+    aggregates stats across the chain, and uses root_id as canonical ID.
+    """
+    root_id, chain_info = _hermes_resolve_session_id(session_id)
+
+    if chain_info:
+        chain_ids = chain_info["chain"]
+        tip_id = chain_info["tip_id"]
+    else:
+        # No chain info — try loading directly (backward compat)
+        chain_ids = [session_id]
+        tip_id = session_id
+        root_id = session_id
+
+    # Load root and tip data
+    root_data = _hermes_load_session(root_id)
+    tip_data = _hermes_load_session(tip_id) if tip_id != root_id else root_data
+
+    if not tip_data and not root_data:
+        return None
+    if not tip_data:
+        tip_data = root_data
+    if not root_data:
+        root_data = tip_data
+
+    model = tip_data.get("model", "unknown")
+    platform = tip_data.get("platform", "cli")
+    session_start = root_data.get("session_start", "")
+    last_updated = tip_data.get("last_updated", session_start)
+
+    # Aggregate across chain
+    all_tools_used = set()
+    total_tool_calls = 0
+    total_user_count = 0
+    total_message_count = 0
+    total_assistant_count = 0
+    tool_call_counts = {}
+    model_call_counts = {}
+    summary = ""
+    user_msgs = []
+    models_seen = set()
+    all_messages_flat = []  # for activity buckets
+    last_intent = None
+    has_abort = False
+    last_event_type = None
+
+    for sid in chain_ids:
+        if sid == tip_id:
+            sdata = tip_data
+        elif sid == root_id:
+            sdata = root_data
+        else:
+            sdata = _hermes_load_session(sid)
+        if not sdata:
+            continue
+
+        msgs = sdata.get("messages", [])
+        total_message_count += len(msgs)
+        m = sdata.get("model", "")
+        if m:
+            models_seen.add(m)
+
+        s_start = sdata.get("session_start", "")
+
+        for msg in msgs:
+            role = msg.get("role", "")
+            if role == "user":
+                content = msg.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    if not summary:
+                        summary = content[:140]
+                    user_msgs.append({"content": content[:200], "timestamp": sdata.get("session_start", "")})
+                    last_intent = content.strip()[:200]
+                total_user_count += 1
+            elif role == "assistant":
+                total_assistant_count += 1
+                m_name = sdata.get("model", "unknown")
+                model_call_counts[m_name] = model_call_counts.get(m_name, 0) + 1
+
+            # Track last event type
+            if role:
+                last_event_type = role
+
+            # Distribute message timestamps across session span for buckets
+            if s_start:
+                all_messages_flat.append((role, s_start))
+
+        # Check for abort
+        if not has_abort:
+            has_abort = _hermes_detect_has_abort(msgs)
+
+        t_used, t_count, t_counts = _hermes_extract_tools_from_messages(msgs)
+        all_tools_used |= t_used
+        total_tool_calls += t_count
+        for tn, tc in t_counts.items():
+            tool_call_counts[tn] = tool_call_counts.get(tn, 0) + tc
+
+    if not summary:
+        # Try title from state.db
+        db_rows = chain_info.get("db_rows", {}) if chain_info else {}
+        for sid in reversed(chain_ids):
+            row = db_rows.get(sid, {})
+            if row.get("title"):
+                summary = row["title"]
+                break
+        if not summary:
+            summary = f"Hermes Session ({model})"
+
+    meta = _hermes_read_session_meta(root_id)
+
+    status = "COMPLETED"
+    lu_dt = parse_timestamp(last_updated)
+    if lu_dt and lu_dt.tzinfo is None:
+        lu_dt = lu_dt.replace(tzinfo=timezone.utc)
+    if lu_dt and (datetime.now(timezone.utc) - lu_dt).total_seconds() < 600:
+        status = "RUNNING"
+
+    # Compute enriched fields
+    checkpoint_count = max(0, len(chain_ids) - 1)
+    disk_size = _hermes_compute_disk_size(chain_ids)
+
+    # Extract cwd from session data (Hermes doesn't store it explicitly)
+    cwd = _hermes_extract_cwd(root_data or tip_data)
+    resume_command = f"cd {cwd} && hermes --resume {root_id}" if cwd else f"hermes --resume {root_id}"
+
+    activity_buckets = _hermes_compute_activity_buckets(
+        all_messages_flat, session_start, last_updated
+    )
+
+    # Token/cost aggregation from state.db rows
+    db_rows = chain_info.get("db_rows", {}) if chain_info else {}
+    input_tokens = sum(r.get("input_tokens", 0) or 0 for r in db_rows.values())
+    output_tokens = sum(r.get("output_tokens", 0) or 0 for r in db_rows.values())
+    estimated_cost_usd = sum(r.get("estimated_cost_usd", 0) or 0 for r in db_rows.values())
+
+    # ── Build tree with virtual checkpoints from chain segments ──
+    tree = _hermes_build_session_tree(chain_ids, db_rows, root_id)
+
+    return {
+        "id": root_id,
+        "provider": "hermes",
+        "summary": meta.get("nickname") or summary,
+        "nickname": meta.get("nickname", ""),
+        "workspace": meta.get("workspace"),
+        "starred": meta.get("starred", False),
+        "archived": meta.get("archived", False),
+        "status": status,
+        "model": model,
+        "models": sorted(models_seen),
+        "platform": platform,
+        "modified": last_updated,
+        "created": session_start,
+        "updated_at": last_updated,
+        "created_at": session_start,
+        "message_count": total_message_count,
+        "turn_count": total_user_count,
+        "user_messages": user_msgs[:5],
+        "tools_used": sorted(all_tools_used),
+        "tool_call_count": total_tool_calls,
+        "tool_call_counts": tool_call_counts,
+        "model_call_counts": model_call_counts,
+        "event_count": total_message_count,
+        "git_commit_count": 0,
+        "is_open": status == "RUNNING",
+        "project": os.path.basename(cwd) if cwd else "",
+        "project_path": cwd,
+        "cwd": cwd,
+        # ── Enriched fields (parity with Copilot/Claude) ──
+        "tree": tree,
+        "activity_buckets": activity_buckets,
+        "checkpoint_count": checkpoint_count,
+        "disk_size": disk_size,
+        "file_count": len(tree.get("files", [])),
+        "resume_command": resume_command,
+        "first_event_time": session_start or None,
+        "last_event_time": last_updated or None,
+        "last_event_type": last_event_type,
+        "last_intent": last_intent,
+        "has_abort": has_abort,
+        "active_tools": [],
+        "notes": meta.get("notes", []),
+        "jira_tickets": meta.get("jira_tickets", []),
+        "mrs": meta.get("mrs", []),
+        "has_plan_file": False,
+        "research_count": 0,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "estimated_cost_usd": estimated_cost_usd,
+    }
+
+
+def hermes_parse_full_conversation(session_id: str) -> tuple:
+    """Parse a Hermes session into a conversation list, tool map, and stats.
+
+    Chain-aware: merges messages from all sessions in the parent chain.
+
+    Returns the same shape as claude_parse_full_conversation():
+      - conversation: list of dicts with ``type`` field (user_message,
+        assistant_message, tool_start) — NOT ``role``.
+      - tool_map: keyed by call_id, each value has name/args/result/success.
+      - stats: user_messages, assistant_messages, tool_calls,
+        tool_success_rate, avg_response_length, files_created, files_edited.
+    """
+    root_id, chain_info = _hermes_resolve_session_id(session_id)
+
+    if chain_info:
+        chain_ids = chain_info["chain"]
+    else:
+        chain_ids = [session_id]
+        root_id = session_id
+
+    conversation = []
+    tool_map = {}
+    stats = {
+        "user_messages": 0,
+        "assistant_messages": 0,
+        "assistant_chars": 0,
+        "tool_calls": 0,
+        "tool_successes": 0,
+        "tool_failures": 0,
+        "files_created": [],
+        "files_edited": [],
+    }
+    models_seen = set()
+
+    for sid in chain_ids:
+        data = _hermes_load_session(sid)
+        if not data:
+            continue
+
+        messages = data.get("messages", [])
+        model = data.get("model", "unknown")
+        if model:
+            models_seen.add(model)
+        session_start = data.get("session_start", "")
+        last_updated = data.get("last_updated", session_start)
+
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            if role == "user":
+                text = content if isinstance(content, str) else str(content)
+                conversation.append({
+                    "type": "user_message",
+                    "content": text,
+                    "timestamp": session_start,
+                })
+                stats["user_messages"] += 1
+
+            elif role == "assistant":
+                text = content if isinstance(content, str) else ""
+                tool_calls_raw = msg.get("tool_calls") or []
+                tool_requests = []
+                for tc in tool_calls_raw:
+                    fn = tc.get("function", {})
+                    call_id = tc.get("id", tc.get("call_id", ""))
+                    tool_name = fn.get("name", "")
+                    args_str = fn.get("arguments", "{}")
+                    try:
+                        args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    except Exception:
+                        args = {}
+                    tool_requests.append({
+                        "call_id": call_id,
+                        "tool_name": tool_name,
+                        "arguments": args,
+                    })
+                    tool_map[call_id] = {
+                        "name": tool_name,
+                        "args": args,
+                        "result": None,
+                        "success": None,
+                        "model": model,
+                        "start_ts": last_updated,
+                    }
+                    stats["tool_calls"] += 1
+
+                    # Track file changes
+                    fpath = args.get("path", args.get("file_path", ""))
+                    if tool_name in ("write_file",) and fpath:
+                        if fpath not in stats["files_created"]:
+                            stats["files_created"].append(fpath)
+                    elif tool_name in ("patch", "edit") and fpath:
+                        if fpath not in stats["files_edited"]:
+                            stats["files_edited"].append(fpath)
+
+                conversation.append({
+                    "type": "assistant_message",
+                    "content": text,
+                    "tool_requests": tool_requests,
+                    "model": model,
+                    "timestamp": last_updated,
+                })
+                stats["assistant_messages"] += 1
+                stats["assistant_chars"] += len(text)
+
+                # Emit tool_start entries AFTER the assistant message
+                for tr in tool_requests:
+                    conversation.append({
+                        "type": "tool_start",
+                        "call_id": tr["call_id"],
+                        "tool_name": tr["tool_name"],
+                        "timestamp": last_updated,
+                    })
+
+            elif role == "tool":
+                call_id = msg.get("tool_call_id", "")
+                result_content = content if isinstance(content, str) else str(content)
+                # Determine success heuristic: non-empty result without
+                # obvious error markers is considered success
+                is_error = False
+                if result_content:
+                    lower = result_content.lower()[:500]
+                    is_error = any(
+                        marker in lower
+                        for marker in ("error:", "traceback", "exception", "failed", "command not found")
+                    )
+                if call_id and call_id in tool_map:
+                    tool_map[call_id]["result"] = result_content[:5000]
+                    tool_map[call_id]["success"] = not is_error
+                    if is_error:
+                        stats["tool_failures"] += 1
+                    else:
+                        stats["tool_successes"] += 1
+
+    # Compute derived stats (same as claude_parse_full_conversation)
+    stats["avg_response_length"] = round(
+        stats["assistant_chars"] / max(stats["assistant_messages"], 1)
+    )
+    stats["tool_success_rate"] = round(
+        stats["tool_successes"] / max(stats["tool_calls"], 1) * 100, 1
+    )
+    stats["files_created"] = stats["files_created"][:50]
+    stats["files_edited"] = stats["files_edited"][:50]
+
+    return conversation, tool_map, stats
+
+
+def _build_hermes_usage():
+    """Build Hermes usage data from session chains (no double-counting).
+
+    Uses state.db chains to identify logical sessions.  Counts each chain
+    as one session.  Aggregates tool/message stats across chain members.
+    Token counts come from state.db when available.
+
+    Returns the same shape as _build_copilot_usage() so the frontend
+    renderUsage() / fetchMcp() work identically for all providers.
+    """
+    model_totals = Counter()
+    tool_totals = Counter()
+    total_turns = 0
+    total_messages = 0
+    total_tool_calls = 0
+    total_events = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
+    daily_stats = {}
+    session_durations = []  # in minutes
+
+    if not os.path.isdir(HERMES_SESSIONS_DIR):
+        return {"models": [], "tools": [], "daily": [], "totals": {}, "loading": False}
+
+    chains = _hermes_build_session_chains()
+    session_count = len(chains)
+
+    for root_id, chain_info in chains.items():
+        chain_ids = chain_info["chain"]
+        db_rows = chain_info.get("db_rows", {})
+
+        # Sum tokens from state.db rows
+        for sid, row in db_rows.items():
+            total_input_tokens += row.get("input_tokens", 0) or 0
+            total_output_tokens += row.get("output_tokens", 0) or 0
+
+        # Get day from root session's start time
+        root_data = _hermes_load_session(root_id)
+        start_time = root_data.get("session_start", "") if root_data else ""
+        day = start_time[:10] if start_time and len(start_time) >= 10 else None
+
+        if day:
+            if day not in daily_stats:
+                daily_stats[day] = {"date": day, "sessions": 0, "messages": 0, "tools": 0, "turns": 0}
+            daily_stats[day]["sessions"] += 1
+
+        # Calculate session duration from first session_start to last last_updated
+        chain_start = None
+        chain_end = None
+        for sid in chain_ids:
+            sdata = _hermes_load_session(sid) if sid != root_id else root_data
+            if not sdata:
+                continue
+            s_start = sdata.get("session_start", "")
+            s_end = sdata.get("last_updated", "") or s_start
+            if s_start:
+                try:
+                    t1 = datetime.fromisoformat(s_start)
+                    if chain_start is None or t1 < chain_start:
+                        chain_start = t1
+                except (ValueError, TypeError):
+                    pass
+            if s_end:
+                try:
+                    t2 = datetime.fromisoformat(s_end)
+                    if chain_end is None or t2 > chain_end:
+                        chain_end = t2
+                except (ValueError, TypeError):
+                    pass
+        if chain_start and chain_end and chain_end > chain_start:
+            dur = (chain_end - chain_start).total_seconds() / 60.0
+            session_durations.append(dur)
+
+        for sid in chain_ids:
+            sdata = _hermes_load_session(sid) if sid != root_id else root_data
+            if not sdata:
+                continue
+            messages = sdata.get("messages", [])
+            model = sdata.get("model", "unknown")
+
+            for msg in messages:
+                total_events += 1
+                role = msg.get("role")
+                if role == "user":
+                    total_messages += 1
+                    if day and day in daily_stats:
+                        daily_stats[day]["messages"] += 1
+                elif role == "assistant":
+                    total_turns += 1
+                    model_totals[model] += 1
+                    if day and day in daily_stats:
+                        daily_stats[day]["turns"] += 1
+                    for tc in (msg.get("tool_calls") or []):
+                        fn = tc.get("function", {})
+                        t_name = fn.get("name", "unknown")
+                        total_tool_calls += 1
+                        tool_totals[t_name] += 1
+                        if day and day in daily_stats:
+                            daily_stats[day]["tools"] += 1
+
+    # Use 'calls' key to match copilot/claude/codex format (frontend expects .calls)
+    models_list = [{"name": m, "calls": c} for m, c in model_totals.most_common()]
+    tools_list = [{"name": t, "calls": c} for t, c in tool_totals.most_common(25)]
+    daily_list = sorted(daily_stats.values(), key=lambda x: x["date"])
+
+    # Efficiency metrics (same as copilot)
+    avg_tools_per_turn = round(total_tool_calls / max(total_turns, 1), 1)
+    avg_turns_per_msg = round(total_turns / max(total_messages, 1), 1)
+    total_hours = round(sum(session_durations) / 60.0, 1)
+    avg_session_min = round(sum(session_durations) / max(len(session_durations), 1), 0)
+
+    return {
+        "models": models_list,
+        "tools": tools_list,
+        "daily": daily_list,
+        "totals": {
+            "sessions": session_count,
+            "messages": total_messages,
+            "turns": total_turns,
+            "tool_calls": total_tool_calls,
+            "events": total_events,
+            "total_hours": total_hours,
+            "avg_session_minutes": avg_session_min,
+            "avg_tools_per_turn": avg_tools_per_turn,
+            "avg_turns_per_message": avg_turns_per_msg,
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
+        },
+    }
+
+
+# ── Hermes API routes ────────────────────────────────────────────────────────
+
+@app.route("/api/hermes/sessions")
+def api_hermes_sessions():
+    with _bg_lock:
+        all_sessions = _bg_cache.get('hermes_sessions')
+    if all_sessions is None:
+        all_sessions = hermes_get_all_sessions()
+        with _bg_lock:
+            _bg_cache['hermes_sessions'] = all_sessions
+    limit = safe_limit(request.args.get("limit", 30, type=int), 100)
+    offset = max(0, request.args.get("offset", 0, type=int) or 0)
+    paginated = all_sessions[offset:offset + limit]
+    return jsonify({
+        "sessions": paginated,
+        "total": len(all_sessions),
+        "has_more": len(all_sessions) > (offset + limit),
+    })
+
+
+@app.route("/api/hermes/session/<session_id>")
+def api_hermes_session_detail(session_id):
+    info = hermes_get_session_detail(session_id)
+    if not info:
+        return jsonify({"error": "Session not found"}), 404
+    return jsonify(info)
+
+
+@app.route("/api/hermes/session/<session_id>/convert-prompt")
+def api_hermes_convert_prompt(session_id):
+    """Generate a handoff prompt from a Hermes session."""
+    info = hermes_get_session_detail(session_id)
+    if not info:
+        return jsonify({"error": "Session not found"}), 404
+    try:
+        _, _, stats = hermes_parse_full_conversation(session_id)
+    except Exception:
+        stats = {}
+    prompt = build_convert_prompt(info, stats, provider="hermes")
+    return jsonify({"prompt": prompt, "session_id": session_id, "char_count": len(prompt)})
+
+
+@app.route("/api/hermes/session/<session_id>/conversation")
+def api_hermes_session_conversation(session_id):
+    """Full parsed conversation with stats for Hermes."""
+    conversation, tool_map, stats = hermes_parse_full_conversation(session_id)
+    return jsonify({
+        "conversation": conversation,
+        "tools": tool_map,
+        "stats": stats,
+    })
+
+
+@app.route("/api/hermes/session/<session_id>/workspace", methods=["POST"])
+def api_hermes_session_workspace(session_id):
+    root_id, chain_info = _hermes_resolve_session_id(session_id)
+    if not _hermes_find_session_file(root_id):
+        return jsonify({"error": "Not a Hermes session"}), 404
+    data = request.get_json(force=True)
+    ws_id = data.get("workspace_id")
+    meta = _hermes_read_session_meta(root_id)
+    meta["workspace"] = ws_id
+    _hermes_write_session_meta(root_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('hermes_sessions') is not None:
+            for s in _bg_cache['hermes_sessions']:
+                if s['id'] == root_id:
+                    s['workspace'] = ws_id
+                    break
+    if ws_id:
+        _emit_event("session_assigned", f"Hermes session assigned to workspace", {"session_id": root_id, "workspace_id": ws_id})
+    return jsonify({"id": root_id, "workspace": ws_id, "workspace_id": ws_id})
+
+
+@app.route("/api/hermes/session/<session_id>/star", methods=["POST"])
+def api_hermes_session_star(session_id):
+    root_id, chain_info = _hermes_resolve_session_id(session_id)
+    if not _hermes_find_session_file(root_id):
+        return jsonify({"error": "Not a Hermes session"}), 404
+    meta = _hermes_read_session_meta(root_id)
+    meta["starred"] = not meta.get("starred", False)
+    _hermes_write_session_meta(root_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('hermes_sessions') is not None:
+            for s in _bg_cache['hermes_sessions']:
+                if s['id'] == root_id:
+                    s['starred'] = meta["starred"]
+                    break
+    return jsonify({"id": root_id, "starred": meta["starred"]})
+
+
+@app.route("/api/hermes/session/<session_id>/archive", methods=["POST"])
+def api_hermes_session_archive(session_id):
+    root_id, chain_info = _hermes_resolve_session_id(session_id)
+    if not _hermes_find_session_file(root_id):
+        return jsonify({"error": "Not a Hermes session"}), 404
+    meta = _hermes_read_session_meta(root_id)
+    meta["archived"] = not meta.get("archived", False)
+    _hermes_write_session_meta(root_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('hermes_sessions') is not None:
+            for s in _bg_cache['hermes_sessions']:
+                if s['id'] == root_id:
+                    s['archived'] = meta["archived"]
+                    break
+    return jsonify({"id": root_id, "archived": meta["archived"]})
+
+
+@app.route("/api/hermes/session/<session_id>/rename", methods=["POST"])
+def api_hermes_session_rename(session_id):
+    root_id, chain_info = _hermes_resolve_session_id(session_id)
+    if not _hermes_find_session_file(root_id):
+        return jsonify({"error": "Not a Hermes session"}), 404
+    data = request.get_json(force=True)
+    nickname = (data.get("nickname") or "").strip()
+    meta = _hermes_read_session_meta(root_id)
+    if nickname:
+        meta["nickname"] = nickname
+    else:
+        meta.pop("nickname", None)
+    _hermes_write_session_meta(root_id, meta)
+    with _bg_lock:
+        if _bg_cache.get("hermes_sessions") is not None:
+            for s in _bg_cache["hermes_sessions"]:
+                if s["id"] == root_id:
+                    s["nickname"] = nickname
+                    if nickname:
+                        s["summary"] = nickname
+                    break
+    return jsonify({"id": root_id, "nickname": nickname})
+
+
+@app.route("/api/hermes/session/<session_id>/notes", methods=["GET"])
+def api_hermes_session_notes_get(session_id):
+    try:
+        full_session_id = f"hermes_{session_id}"
+        notes_list = NoteDB.list_by_session(full_session_id)
+        notes = [
+            {
+                "text": n.get("text", ""),
+                "timestamp": n.get("created_at", "").isoformat() if isinstance(n.get("created_at"), datetime) else n.get("created_at", "")
+            }
+            for n in notes_list
+        ]
+        return jsonify({"notes": notes})
+    except Exception as e:
+        logger.error(f"Error getting hermes session notes: {e}")
+        return jsonify({"error": "Failed to get notes"}), 500
+
+
+@app.route("/api/hermes/session/<session_id>/notes", methods=["POST"])
+def api_hermes_session_notes_post(session_id):
+    try:
+        data = request.get_json(force=True)
+        text = (data.get("text") or "").strip()
+        if not text:
+            return jsonify({"error": "Note text required"}), 400
+        import uuid
+        note_id = f"note_{uuid.uuid4().hex[:8]}"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        full_session_id = f"hermes_{session_id}"
+        NoteDB.create({
+            "note_id": note_id,
+            "session_id": full_session_id,
+            "workspace_id": "",
+            "text": text,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        })
+        notes_list = NoteDB.list_by_session(full_session_id)
+        _emit_event("note_created", f"Note added to hermes session", {"session_id": session_id})
+        return jsonify({"id": session_id, "note": {"text": text, "timestamp": now_iso}, "total": len(notes_list)})
+    except Exception as e:
+        logger.error(f"Error creating hermes session note: {e}")
+        return jsonify({"error": "Failed to create note"}), 500
+
+
+@app.route("/api/hermes/session/<session_id>/notes", methods=["DELETE"])
+def api_hermes_session_notes_delete(session_id):
+    try:
+        data = request.get_json(force=True)
+        idx = data.get("index")
+        if idx is None:
+            return jsonify({"error": "index required"}), 400
+        full_session_id = f"hermes_{session_id}"
+        notes_list = NoteDB.list_by_session(full_session_id)
+        if idx < 0 or idx >= len(notes_list):
+            return jsonify({"error": "index out of range"}), 400
+        note_id = notes_list[idx].get("note_id")
+        if note_id:
+            NoteDB.delete(note_id)
+        return jsonify({"id": session_id, "deleted": True})
+    except Exception as e:
+        logger.error(f"Error deleting hermes session note: {e}")
+        return jsonify({"error": "Failed to delete note"}), 500
+
+
+# ── Hermes session file endpoints ────────────────────────────────────────────
+
+def _hermes_find_session_dir(session_id: str) -> str | None:
+    """Find the artifact directory for a Hermes session.
+
+    Hermes stores session artifacts in HERMES_SESSIONS_DIR/<session_id>/
+    (a directory alongside the session JSON file).
+    """
+    candidate = os.path.join(HERMES_SESSIONS_DIR, session_id)
+    if os.path.isdir(candidate):
+        return candidate
+    return None
+
+
+@app.route("/api/hermes/session/<session_id>/file")
+def api_hermes_session_file(session_id):
+    """Read a file from a Hermes session artifact directory."""
+    rel_path = request.args.get("path", "")
+    if not rel_path or ".." in rel_path:
+        return jsonify({"error": "Invalid path"}), 400
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    session_dir = _hermes_find_session_dir(root_id)
+    if not session_dir:
+        return jsonify({"error": "Session directory not found"}), 404
+    full = os.path.realpath(os.path.join(session_dir, rel_path))
+    if not full.startswith(os.path.realpath(session_dir)) or not os.path.isfile(full):
+        return jsonify({"error": "File not found"}), 404
+    try:
+        with open(full, "r", errors="replace") as f:
+            content = f.read(500_000)
+        return jsonify({
+            "path": rel_path,
+            "content": content,
+            "size": os.path.getsize(full),
+            "truncated": os.path.getsize(full) > 500_000,
+            "host_path": container_to_host_path(full),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/hermes/session/<session_id>/file/raw")
+def api_hermes_session_file_raw(session_id):
+    """Serve a Hermes session file raw."""
+    rel_path = request.args.get("path", "")
+    if not rel_path or ".." in rel_path:
+        return "Invalid path", 400
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    session_dir = _hermes_find_session_dir(root_id)
+    if not session_dir:
+        return "Session not found", 404
+    full = os.path.realpath(os.path.join(session_dir, rel_path))
+    if not full.startswith(os.path.realpath(session_dir)) or not os.path.isfile(full):
+        return "File not found", 404
+    return send_file(full)
+
+
+@app.route("/api/hermes/session/<session_id>/file", methods=["PUT"])
+def api_hermes_session_file_write(session_id):
+    """Write content to a Hermes session file."""
+    data = request.get_json(force=True)
+    rel_path = data.get("path", "")
+    content = data.get("content")
+    if not rel_path or ".." in rel_path or content is None:
+        return jsonify({"error": "Invalid path or missing content"}), 400
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    session_dir = _hermes_find_session_dir(root_id)
+    if not session_dir:
+        return jsonify({"error": "Session directory not found"}), 404
+    full = os.path.realpath(os.path.join(session_dir, rel_path))
+    if not full.startswith(os.path.realpath(session_dir)) or not os.path.isfile(full):
+        return jsonify({"error": "File not found"}), 404
+    try:
+        with open(full, "w") as f:
+            f.write(content)
+        return jsonify({"ok": True, "size": len(content)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/hermes/session/<session_id>/project-files")
+def api_hermes_session_project_files(session_id):
+    """Extract files created/edited/read during a Hermes session (chain-aware)."""
+    root_id, chain_info = _hermes_resolve_session_id(session_id)
+    chain_ids = chain_info["chain"] if chain_info else [session_id]
+
+    files_seen = {}
+    cwd = ""
+
+    for sid in chain_ids:
+        data = _hermes_load_session(sid)
+        if not data:
+            continue
+
+        messages = data.get("messages", [])
+
+        for msg in messages:
+            if msg.get("role") != "assistant":
+                continue
+            for tc in (msg.get("tool_calls") or []):
+                fn = tc.get("function", {})
+                tool_name = fn.get("name", "")
+                args_str = fn.get("arguments", "{}")
+                try:
+                    args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                except Exception:
+                    args = {}
+                if not isinstance(args, dict):
+                    continue
+
+                fpath = args.get("path", args.get("file_path", ""))
+                if not fpath:
+                    # check for terminal/workdir
+                    if tool_name == "terminal":
+                        wd = args.get("workdir", "")
+                        if wd and not cwd:
+                            cwd = wd
+                    continue
+                if "/.hermes/" in fpath or "/.copilot/" in fpath or "/.claude/" in fpath:
+                    continue
+
+                action = "view"
+                if tool_name in ("write_file", "skill_manage"):
+                    action = "create"
+                elif tool_name in ("patch",):
+                    action = "edit"
+                elif tool_name in ("read_file", "search_files"):
+                    action = "view"
+                else:
+                    action = tool_name.lower() if tool_name else "view"
+
+                ts = data.get("last_updated", "")
+                if fpath not in files_seen:
+                    files_seen[fpath] = {
+                        "path": fpath,
+                        "action": action,
+                        "count": 0,
+                        "first_seen": ts,
+                        "last_seen": ts,
+                    }
+                files_seen[fpath]["count"] += 1
+                files_seen[fpath]["last_seen"] = ts
+                if action in ("create", "edit"):
+                    files_seen[fpath]["action"] = action
+
+    file_list = []
+    for fpath, info in files_seen.items():
+        info["name"] = os.path.basename(fpath)
+        info["relative"] = os.path.relpath(fpath, cwd) if cwd and fpath.startswith(cwd) else fpath
+        file_list.append(info)
+    file_list.sort(key=lambda x: x.get("last_seen", ""), reverse=True)
+    return jsonify({"files": file_list, "cwd": cwd})
+
+
+@app.route("/api/hermes/session/<session_id>/git-changes")
+def api_hermes_session_git_changes(session_id):
+    """Extract git commands, commits, file changes from Hermes session (chain-aware)."""
+    root_id, chain_info = _hermes_resolve_session_id(session_id)
+    chain_ids = chain_info["chain"] if chain_info else [session_id]
+
+    commits = []
+    file_changes = []
+    git_commands = []
+
+    for sid in chain_ids:
+        data = _hermes_load_session(sid)
+        if not data:
+            continue
+
+        messages = data.get("messages", [])
+
+        # Collect tool calls and their results
+        tool_calls_by_id = {}
+        tool_results_by_id = {}
+
+        for msg in messages:
+            role = msg.get("role", "")
+            if role == "assistant":
+                for tc in (msg.get("tool_calls") or []):
+                    fn = tc.get("function", {})
+                    call_id = tc.get("id", tc.get("call_id", ""))
+                    tool_name = fn.get("name", "")
+                    args_str = fn.get("arguments", "{}")
+                    try:
+                        args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    except Exception:
+                        args = {}
+                    tool_calls_by_id[call_id] = {"name": tool_name, "args": args if isinstance(args, dict) else {}, "ts": data.get("last_updated", "")}
+
+                    # Track file changes from write/patch tools
+                    if isinstance(args, dict):
+                        fpath = args.get("path", args.get("file_path", ""))
+                        if tool_name == "write_file" and fpath:
+                            file_changes.append({"type": "create", "path": fpath, "timestamp": data.get("last_updated", "")})
+                        elif tool_name == "patch" and fpath:
+                            file_changes.append({"type": "edit", "path": fpath, "timestamp": data.get("last_updated", "")})
+
+            elif role == "tool":
+                call_id = msg.get("tool_call_id", "")
+                result_text = msg.get("content", "")
+                if isinstance(result_text, str):
+                    tool_results_by_id[call_id] = {"content": result_text[:5000], "ts": ""}
+
+        # Extract git commands from terminal tool calls
+        for call_id, info in tool_calls_by_id.items():
+            if info["name"] != "terminal":
+                continue
+            cmd = info["args"].get("command", "")
+            if not cmd or "git " not in cmd:
+                continue
+            result_info = tool_results_by_id.get(call_id, {})
+            result_text = result_info.get("content", "")
+
+            cmd_type = "other"
+            if "commit" in cmd:
+                cmd_type = "commit"
+            elif "push" in cmd:
+                cmd_type = "push"
+            elif "diff" in cmd:
+                cmd_type = "diff"
+            elif "status" in cmd:
+                cmd_type = "status"
+            elif "add " in cmd:
+                cmd_type = "add"
+            elif "checkout" in cmd or "switch" in cmd:
+                cmd_type = "checkout"
+
+            git_commands.append({
+                "command": cmd[:500],
+                "timestamp": info["ts"],
+                "result": result_text[:3000],
+                "type": cmd_type,
+            })
+
+            if cmd_type == "commit" and result_text:
+                match = re.search(r"\[(\S+)\s+([a-f0-9]+)\]\s+(.*?)(?:\n|$)", result_text)
+                if match:
+                    files_match = re.search(r"(\d+)\s+files?\s+changed", result_text)
+                    ins_match = re.search(r"(\d+)\s+insertions?", result_text)
+                    del_match = re.search(r"(\d+)\s+deletions?", result_text)
+                    commits.append({
+                        "sha": match.group(2),
+                        "branch": match.group(1),
+                        "message": match.group(3),
+                        "timestamp": info["ts"],
+                        "files_changed": int(files_match.group(1)) if files_match else 0,
+                        "insertions": int(ins_match.group(1)) if ins_match else 0,
+                        "deletions": int(del_match.group(1)) if del_match else 0,
+                    })
+
+    unique_files = {}
+    for fc in file_changes:
+        p = fc["path"]
+        if p not in unique_files:
+            unique_files[p] = {"path": p, "creates": 0, "edits": 0, "first_seen": fc["timestamp"], "last_seen": fc["timestamp"]}
+        if fc["type"] == "create":
+            unique_files[p]["creates"] += 1
+        else:
+            unique_files[p]["edits"] += 1
+        unique_files[p]["last_seen"] = fc["timestamp"]
+
+    return jsonify({
+        "commits": commits,
+        "file_changes": file_changes,
+        "file_summary": sorted(unique_files.values(), key=lambda x: x["last_seen"], reverse=True),
+        "git_commands": git_commands,
+    })
+
+
+@app.route("/api/hermes/session/<session_id>", methods=["DELETE"])
+def api_hermes_session_delete(session_id):
+    # Resolve to root so we delete the entire chain
+    root_id, chain_info = _hermes_resolve_session_id(session_id)
+    chain_ids = chain_info["chain"] if chain_info else [session_id]
+
+    errors = []
+    for sid in chain_ids:
+        path = _hermes_find_session_file(sid)
+        if path and os.path.isfile(path):
+            try:
+                os.remove(path)
+            except Exception as e:
+                errors.append(str(e))
+        # Remove meta for every chain member
+        meta_path = os.path.join(HERMES_META_DIR, f"{sid}.json")
+        if os.path.isfile(meta_path):
+            try:
+                os.remove(meta_path)
+            except Exception:
+                pass
+
+    if errors:
+        return jsonify({"error": "; ".join(errors)}), 500
+
+    # Evict from cache using root_id (canonical)
+    with _bg_lock:
+        if _bg_cache.get("hermes_sessions") is not None:
+            _bg_cache["hermes_sessions"] = [s for s in _bg_cache["hermes_sessions"] if s["id"] != root_id]
+    return jsonify({"deleted": root_id})
+
+
+@app.route("/api/hermes/sessions/bulk-delete", methods=["POST"])
+def api_hermes_bulk_delete():
+    data = request.get_json(force=True)
+    ids = data.get("ids", [])
+    if not ids:
+        return jsonify({"error": "No session IDs provided"}), 400
+    deleted = []
+    errors = []
+
+    # Resolve each id to its root and collect all chain files
+    seen_roots = set()
+    for sid in ids:
+        sid = str(sid)
+        root_id, chain_info = _hermes_resolve_session_id(sid)
+        if root_id in seen_roots:
+            continue
+        seen_roots.add(root_id)
+        chain_ids = chain_info["chain"] if chain_info else [sid]
+
+        chain_ok = True
+        for csid in chain_ids:
+            path = _hermes_find_session_file(csid)
+            if path and os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except Exception as e:
+                    errors.append({"id": csid, "error": str(e)})
+                    chain_ok = False
+            meta_path = os.path.join(HERMES_META_DIR, f"{csid}.json")
+            if os.path.isfile(meta_path):
+                try:
+                    os.remove(meta_path)
+                except Exception:
+                    pass
+        if chain_ok:
+            deleted.append(root_id)
+
+    if deleted:
+        deleted_set = set(deleted)
+        with _bg_lock:
+            if _bg_cache.get("hermes_sessions") is not None:
+                _bg_cache["hermes_sessions"] = [s for s in _bg_cache["hermes_sessions"] if s["id"] not in deleted_set]
+    return jsonify({"deleted": deleted, "errors": errors})
+
+
+@app.route("/api/hermes/search")
+def api_hermes_search():
+    query = request.args.get("q", "").strip().lower()
+    if not query or len(query) < 2:
+        return jsonify({"results": [], "error": "Query too short"})
+    limit = int(request.args.get("limit", 50))
+    results = []
+    for session in hermes_get_all_sessions():
+        data = _hermes_load_session(session["id"])
+        if not data:
+            continue
+        for msg in data.get("messages", []):
+            if msg.get("role") not in ("user", "assistant"):
+                continue
+            content = msg.get("content", "")
+            if not isinstance(content, str):
+                continue
+            lower = content.lower()
+            if query not in lower:
+                continue
+            idx = lower.index(query)
+            start = max(0, idx - 80)
+            results.append({
+                "session_id": session["id"],
+                "summary": session.get("nickname") or session.get("summary") or "Hermes Session",
+                "provider": "hermes",
+                "timestamp": data.get("session_start", ""),
+                "content": content[start:start + 200],
+            })
+            if len(results) >= limit:
+                break
+        if len(results) >= limit:
+            break
+    results.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+    return jsonify({"results": results})
+
+
+# ── Hermes merge request (MR) endpoints ──────────────────────────────────────
+
+@app.route("/api/hermes/session/<session_id>/mr", methods=["GET"])
+def api_hermes_session_mr_get(session_id):
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    meta = _hermes_read_session_meta(root_id)
+    mrs = meta.get("mrs", [])
+    return jsonify(mrs)
+
+
+@app.route("/api/hermes/session/<session_id>/mr", methods=["POST"])
+def api_hermes_session_mr_post(session_id):
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    data = request.get_json(force=True)
+    mr_id = data.get("id") or str(int(time.time() * 1000))
+    mr_data = {
+        "id": mr_id,
+        "url": (data.get("url") or "").strip(),
+        "status": (data.get("status") or "").strip(),
+        "jira": (data.get("jira") or "").strip(),
+        "role": (data.get("role") or "").strip(),
+    }
+    meta = _hermes_read_session_meta(root_id)
+    mrs = meta.get("mrs", [])
+    found = False
+    for i, mr in enumerate(mrs):
+        if mr.get("id") == mr_id:
+            mrs[i] = mr_data
+            found = True
+            break
+    if not found:
+        mrs.append(mr_data)
+    meta["mrs"] = mrs
+    _hermes_write_session_meta(root_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('hermes_sessions') is not None:
+            for s in _bg_cache['hermes_sessions']:
+                if s['id'] == root_id:
+                    s['mrs'] = mrs
+                    break
+    return jsonify({"id": root_id, "mrs": mrs})
+
+
+@app.route("/api/hermes/session/<session_id>/mr/<mr_id>", methods=["DELETE"])
+def api_hermes_session_mr_delete(session_id, mr_id):
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    meta = _hermes_read_session_meta(root_id)
+    mrs = [mr for mr in meta.get("mrs", []) if mr.get("id") != mr_id]
+    meta["mrs"] = mrs
+    _hermes_write_session_meta(root_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('hermes_sessions') is not None:
+            for s in _bg_cache['hermes_sessions']:
+                if s['id'] == root_id:
+                    s['mrs'] = mrs
+                    break
+    return jsonify({"id": root_id, "deleted": True})
+
+
+# ── Hermes Jira ticket endpoints ─────────────────────────────────────────────
+
+@app.route("/api/hermes/session/<session_id>/jira-ticket", methods=["GET"])
+def api_hermes_session_jira_ticket_get(session_id):
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    meta = _hermes_read_session_meta(root_id)
+    tickets = meta.get("jira_tickets", [])
+    return jsonify(tickets)
+
+
+@app.route("/api/hermes/session/<session_id>/jira-ticket", methods=["POST"])
+def api_hermes_session_jira_ticket_post(session_id):
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    data = request.get_json(force=True)
+    ticket_id = data.get("id") or _unique_ts_id()
+    ticket_data = {
+        "id": ticket_id,
+        "ticket_key": (data.get("ticket_key") or "").strip().upper(),
+        "title": (data.get("title") or "").strip(),
+        "status": (data.get("status") or "").strip(),
+        "assignee": (data.get("assignee") or "").strip(),
+        "role": (data.get("role") or "").strip(),
+    }
+    meta = _hermes_read_session_meta(root_id)
+    tickets = meta.get("jira_tickets", [])
+    found = False
+    for i, t in enumerate(tickets):
+        if t.get("id") == ticket_id:
+            tickets[i] = ticket_data
+            found = True
+            break
+    if not found:
+        tickets.append(ticket_data)
+    meta["jira_tickets"] = tickets
+    _hermes_write_session_meta(root_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('hermes_sessions') is not None:
+            for s in _bg_cache['hermes_sessions']:
+                if s['id'] == root_id:
+                    s['jira_tickets'] = tickets
+                    break
+    return jsonify({"id": root_id, "jira_tickets": tickets})
+
+
+@app.route("/api/hermes/session/<session_id>/jira-ticket/<ticket_id>", methods=["DELETE"])
+def api_hermes_session_jira_ticket_delete(session_id, ticket_id):
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    meta = _hermes_read_session_meta(root_id)
+    tickets = [t for t in meta.get("jira_tickets", []) if t.get("id") != ticket_id]
+    meta["jira_tickets"] = tickets
+    _hermes_write_session_meta(root_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('hermes_sessions') is not None:
+            for s in _bg_cache['hermes_sessions']:
+                if s['id'] == root_id:
+                    s['jira_tickets'] = tickets
+                    break
+    return jsonify({"id": root_id, "deleted": True})
+
+
+# ── Hermes assign/unassign MR & Jira (central registry) ─────────────────────
+
+@app.route("/api/hermes/session/<session_id>/assign-mr", methods=["POST"])
+def api_hermes_session_assign_mr(session_id):
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    data = request.get_json(force=True)
+    mr_id = data.get("mr_id")
+    if not mr_id:
+        return jsonify({"error": "mr_id required"}), 400
+    registry = _read_merge_requests()
+    mr = next((m for m in registry if m["id"] == mr_id), None)
+    if not mr:
+        return jsonify({"error": "MR not found in registry"}), 404
+    explicit_role = (data.get("role") or "").strip()
+    role = explicit_role or _auto_detect_mr_role(mr)
+    if role == "author" and not mr.get("author"):
+        prefs = _read_preferences()
+        my_name = (prefs.get("name") or "").strip()
+        if my_name:
+            mr["author"] = my_name
+            _write_merge_requests(registry)
+            _mr_registry_cache["data"] = None
+    meta = _hermes_read_session_meta(root_id)
+    if "mrs" not in meta:
+        meta["mrs"] = []
+    if any(link.get("mr_id") == mr_id for link in meta["mrs"]):
+        return jsonify({"error": "MR already assigned to this session"}), 409
+    link = {
+        "mr_id": mr_id,
+        "role": role,
+        "assigned_at": datetime.now(timezone.utc).isoformat(),
+    }
+    meta["mrs"].append(link)
+    _hermes_write_session_meta(root_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('hermes_sessions') is not None:
+            for s in _bg_cache['hermes_sessions']:
+                if s['id'] == root_id:
+                    s['mrs'] = meta["mrs"]
+                    break
+    return jsonify({"session_id": root_id, "link": link, "mrs": meta["mrs"]})
+
+
+@app.route("/api/hermes/session/<session_id>/unassign-mr", methods=["POST"])
+def api_hermes_session_unassign_mr(session_id):
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    data = request.get_json(force=True)
+    mr_id = data.get("mr_id")
+    if not mr_id:
+        return jsonify({"error": "mr_id required"}), 400
+    meta = _hermes_read_session_meta(root_id)
+    before = len(meta.get("mrs", []))
+    meta["mrs"] = [link for link in meta.get("mrs", []) if link.get("mr_id") != mr_id]
+    after = len(meta["mrs"])
+    if before == after:
+        return jsonify({"error": "MR was not assigned to this session"}), 404
+    _hermes_write_session_meta(root_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('hermes_sessions') is not None:
+            for s in _bg_cache['hermes_sessions']:
+                if s['id'] == root_id:
+                    s['mrs'] = meta["mrs"]
+                    break
+    return jsonify({"session_id": root_id, "removed": mr_id, "mrs": meta["mrs"]})
+
+
+@app.route("/api/hermes/session/<session_id>/assign-jira", methods=["POST"])
+def api_hermes_session_assign_jira(session_id):
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    data = request.get_json(force=True)
+    ticket_id = data.get("ticket_id")
+    if not ticket_id:
+        return jsonify({"error": "ticket_id required"}), 400
+    registry = _read_jira_tickets()
+    ticket = next((t for t in registry if t["id"] == ticket_id), None)
+    if not ticket:
+        return jsonify({"error": "Jira ticket not found in registry"}), 404
+    role = (data.get("role") or "watcher").strip()
+    meta = _hermes_read_session_meta(root_id)
+    if "jira_tickets" not in meta:
+        meta["jira_tickets"] = []
+    if any(link.get("ticket_id") == ticket_id for link in meta["jira_tickets"]):
+        return jsonify({"error": "Jira ticket already assigned to this session"}), 409
+    link = {
+        "ticket_id": ticket_id,
+        "role": role,
+        "assigned_at": datetime.now(timezone.utc).isoformat(),
+    }
+    meta["jira_tickets"].append(link)
+    _hermes_write_session_meta(root_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('hermes_sessions') is not None:
+            for s in _bg_cache['hermes_sessions']:
+                if s['id'] == root_id:
+                    s['jira_tickets'] = meta["jira_tickets"]
+                    break
+    return jsonify({"session_id": root_id, "link": link, "jira_tickets": meta["jira_tickets"]})
+
+
+@app.route("/api/hermes/session/<session_id>/unassign-jira", methods=["POST"])
+def api_hermes_session_unassign_jira(session_id):
+    root_id, _ = _hermes_resolve_session_id(session_id)
+    data = request.get_json(force=True)
+    ticket_id = data.get("ticket_id")
+    if not ticket_id:
+        return jsonify({"error": "ticket_id required"}), 400
+    meta = _hermes_read_session_meta(root_id)
+    before = len(meta.get("jira_tickets", []))
+    meta["jira_tickets"] = [link for link in meta.get("jira_tickets", []) if link.get("ticket_id") != ticket_id]
+    after = len(meta["jira_tickets"])
+    if before == after:
+        return jsonify({"error": "Jira ticket was not assigned to this session"}), 404
+    _hermes_write_session_meta(root_id, meta)
+    with _bg_lock:
+        if _bg_cache.get('hermes_sessions') is not None:
+            for s in _bg_cache['hermes_sessions']:
+                if s['id'] == root_id:
+                    s['jira_tickets'] = meta["jira_tickets"]
+                    break
+    return jsonify({"session_id": root_id, "removed": ticket_id, "jira_tickets": meta["jira_tickets"]})
+
+
+@app.route("/api/hermes/usage")
+def api_hermes_usage():
+    with _bg_lock:
+        data = _bg_cache.get('hermes_usage')
+    if data is None:
+        return jsonify({"models": [], "tools": [], "daily": [], "totals": {}, "loading": True})
+    return jsonify(data)
+
+
+@app.route("/hermes/session/<session_id>")
+def hermes_session_detail_page(session_id):
+    return render_template("detail.html", session_id=session_id, mode="hermes")
+
+
+# ───────────────────────────────────────────────────────────────────────────
 # Codex session parsing
 # ───────────────────────────────────────────────────────────────────────────
 
@@ -7016,17 +9751,19 @@ def _bg_worker():
     _usage_ts = 0
     while True:
         # Build all session caches in parallel
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=5) as pool:
             f_copilot = pool.submit(_bg_build_copilot_sessions)
             f_claude = pool.submit(claude_get_all_sessions)
             f_codex = pool.submit(_bg_build_codex_sessions)
             f_gemini = pool.submit(gemini_get_all_sessions)
+            f_hermes = pool.submit(hermes_get_all_sessions)
 
         for name, future, key in [
             ("copilot", f_copilot, "copilot_sessions"),
             ("claude", f_claude, "claude_sessions"),
             ("codex", f_codex, "codex_sessions"),
             ("gemini", f_gemini, "gemini_sessions"),
+            ("hermes", f_hermes, "hermes_sessions"),
         ]:
             try:
                 data = future.result()
@@ -7039,17 +9776,19 @@ def _bg_worker():
         now = _time.time()
         if now - _usage_ts >= 120:
             _usage_ts = now
-            with ThreadPoolExecutor(max_workers=4) as pool:
+            with ThreadPoolExecutor(max_workers=5) as pool:
                 f_cu = pool.submit(_build_copilot_usage)
                 f_clau = pool.submit(_build_claude_usage)
                 f_codex = pool.submit(_build_codex_usage)
                 f_gemini = pool.submit(_build_gemini_usage)
+                f_hermes = pool.submit(_build_hermes_usage)
 
             for name, future, key in [
                 ("copilot", f_cu, "copilot_usage"),
                 ("claude", f_clau, "claude_usage"),
                 ("codex", f_codex, "codex_usage"),
                 ("gemini", f_gemini, "gemini_usage"),
+                ("hermes", f_hermes, "hermes_usage"),
             ]:
                 try:
                     data = future.result()

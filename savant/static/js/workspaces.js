@@ -145,7 +145,7 @@ function renderWorkspaces() {
   // Build dashboard stats
   if (_workspaces.length) {
     const totalWs = _workspaces.length;
-    let totalSessions = 0, totalCopilot = 0, totalCline = 0, totalClaude = 0, totalCodex = 0, totalGemini = 0;
+    let totalSessions = 0, totalCopilot = 0, totalCline = 0, totalClaude = 0, totalCodex = 0, totalGemini = 0, totalHermes = 0;
     let totalTasks = 0, tasksDone = 0, tasksActive = 0, tasksBlocked = 0;
     let totalMRs = 0;
     let totalKgNodes = 0;
@@ -158,6 +158,7 @@ function renderWorkspaces() {
       totalClaude += c.claude || 0;
       totalCodex += c.codex || 0;
       totalGemini += c.gemini || 0;
+      totalHermes += c.hermes || 0;
       const ts = ws.task_stats || {};
       totalTasks += ts.total || 0;
       tasksDone += ts.done || 0;
@@ -179,7 +180,7 @@ function renderWorkspaces() {
       </div>
       <div class="ws-dash-card accent-magenta">
         <div class="ws-dash-label">PROVIDERS</div>
-        <div class="ws-dash-value" style="color:var(--text);font-size:0.9rem;">⟐${totalCopilot} 🎭${totalClaude} 🧠${totalCodex} ♊${totalGemini}</div>
+        <div class="ws-dash-value" style="color:var(--text);font-size:0.9rem;">⟐${totalCopilot} 🎭${totalClaude} 🧠${totalCodex} ♊${totalGemini} 🪶${totalHermes}</div>
         <div class="ws-dash-sub">across all workspaces</div>
       </div>
       <div class="ws-dash-card accent-yellow">
@@ -290,6 +291,7 @@ function renderWorkspaces() {
           ${c.claude ? `<span class="ws-provider-chip claude">🎭 <span class="count">${c.claude}</span></span>` : ''}
           ${c.codex ? `<span class="ws-provider-chip codex">🧠 <span class="count">${c.codex}</span></span>` : ''}
           ${c.gemini ? `<span class="ws-provider-chip gemini">♊ <span class="count">${c.gemini}</span></span>` : ''}
+          ${c.hermes ? `<span class="ws-provider-chip hermes">🪶 <span class="count">${c.hermes}</span></span>` : ''}
         </div>
         ${statusChips ? `<div class="ws-provider-row" style="margin-top:4px;flex-wrap:wrap;gap:4px;">${statusChips}</div>` : ''}
         ${taskLine}
@@ -546,7 +548,7 @@ async function _openWsDetailInner(wsId) {
         No sessions assigned to this workspace yet.<br>Assign sessions from their detail page.</div>`;
     } else {
       container.innerHTML = _wsDetailSessions.map(s => {
-      const provIcon = s.provider === 'copilot' ? '⟐' : s.provider === 'cline' ? '🤖' : s.provider === 'codex' ? '🧠' : s.provider === 'gemini' ? '♊' : '🎭';
+      const provIcon = s.provider === 'copilot' ? '⟐' : s.provider === 'cline' ? '🤖' : s.provider === 'codex' ? '🧠' : s.provider === 'gemini' ? '♊' : s.provider === 'hermes' ? '🪶' : '🎭';
         const provBadge = `<span class="provider-badge ${s.provider}">${provIcon} ${s.provider}</span>`;
         // Build a full card via buildCardHtml, then inject provider badge
         const cardHtml = buildCardHtml(s, s.provider);
@@ -599,7 +601,7 @@ async function loadWsFiles(wsId) {
     let html = `<div style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text-dim);margin-bottom:12px;">
       ${groups.length} session${groups.length !== 1 ? 's' : ''} · ${totalFiles} file${totalFiles !== 1 ? 's' : ''} total</div>`;
     groups.forEach((g, idx) => {
-      const provIcon = g.provider === 'copilot' ? '⟐' : g.provider === 'cline' ? '🤖' : g.provider === 'codex' ? '🧠' : g.provider === 'gemini' ? '♊' : '🎭';
+      const provIcon = g.provider === 'copilot' ? '⟐' : g.provider === 'cline' ? '🤖' : g.provider === 'codex' ? '🧠' : g.provider === 'gemini' ? '♊' : g.provider === 'hermes' ? '🪶' : '🎭';
       html += `<div class="ws-file-group">
         <div class="ws-file-group-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('hidden')">
           <span class="expand-icon">▼</span>
@@ -643,7 +645,7 @@ async function loadWsSessionFiles(wsId) {
     let html = `<div style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text-dim);margin-bottom:12px;">
       ${groups.length} session${groups.length !== 1 ? 's' : ''} · ${totalFiles} file${totalFiles !== 1 ? 's' : ''} total</div>`;
     groups.forEach(g => {
-      const provIcon = g.provider === 'copilot' ? '⟐' : g.provider === 'cline' ? '🤖' : g.provider === 'codex' ? '🧠' : g.provider === 'gemini' ? '♊' : '🎭';
+      const provIcon = g.provider === 'copilot' ? '⟐' : g.provider === 'cline' ? '🤖' : g.provider === 'codex' ? '🧠' : g.provider === 'gemini' ? '♊' : g.provider === 'hermes' ? '🪶' : '🎭';
       html += `<div class="ws-file-group">
         <div class="ws-file-group-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('hidden')">
           <span class="expand-icon">▼</span>
@@ -760,7 +762,7 @@ function loadWsMergeRequests() {
 
     for (const e of mr.entries) {
       const sName = e.session.nickname || e.session.summary || e.session.id.slice(0, 8);
-      const provIcon = e.session.provider === 'copilot' ? '⟐' : e.session.provider === 'cline' ? '🤖' : e.session.provider === 'codex' ? '🧠' : e.session.provider === 'gemini' ? '♊' : '🎭';
+      const provIcon = e.session.provider === 'copilot' ? '⟐' : e.session.provider === 'cline' ? '🤖' : e.session.provider === 'codex' ? '🧠' : e.session.provider === 'gemini' ? '♊' : e.session.provider === 'hermes' ? '🪶' : '🎭';
       const statusColor = mrColors[e.status] || '#888';
       const statusLabel = mrLabels[e.status] || e.status;
       const provStr = e.session.provider ? `<span class="chip-provider">${provIcon} ${e.session.provider}</span>` : '';
@@ -927,7 +929,7 @@ async function loadWsNotes(wsId) {
       container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-dim);font-family:var(--font-mono);font-size:0.7rem;">No notes yet across sessions in this workspace.</div>`;
       return;
     }
-    const providerIcon = {copilot:'⟐', cline:'🤖', claude:'🎭', codex:'🧠', gemini:'♊'};
+    const providerIcon = {copilot:'⟐', cline:'🤖', claude:'🎭', codex:'🧠', gemini:'♊', hermes:'🪶'};
     let totalNotes = 0;
     groups.forEach(g => totalNotes += g.note_count);
     let html = `<div style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text-dim);margin-bottom:14px;">${totalNotes} note${totalNotes!==1?'s':''} across ${groups.length} session${groups.length!==1?'s':''}</div>`;
@@ -971,6 +973,8 @@ function navigateToSessionDirect(sessionId, provider) {
   if (provider === 'cline') url = `/cline/task/${sessionId}`;
   else if (provider === 'claude') url = `/claude/session/${sessionId}`;
   else if (provider === 'codex') url = `/codex/session/${sessionId}`;
+  else if (provider === 'gemini') url = `/gemini/session/${sessionId}`;
+  else if (provider === 'hermes') url = `/hermes/session/${sessionId}`;
   else url = `/session/${sessionId}`;
   showLoadingThenNavigate(url);
 }

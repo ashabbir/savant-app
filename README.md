@@ -547,3 +547,84 @@ No database. No build tools. No npm. No frameworks.
 ```bash
 docker compose up -d --build
 ```
+
+---
+
+## AI Agent MCP Setup
+
+Savant acts as a central hub for your AI coding agents. When you enable a provider in Savant's preferences, it automatically configures that agent's MCP (Model Context Protocol) connections so the agent can talk to Savant's servers and any installed stdio-based MCP tools.
+
+### What Happens on Setup
+
+When you enable a provider (via the preferences UI or `POST /api/setup-mcp`), Savant:
+
+1. **Locates the agent's config file** — each provider stores MCP config in a different place and format:
+
+   | Provider | Config File | Format |
+   |----------|------------|--------|
+   | Copilot CLI | `~/.copilot/mcp-config.json` | JSON |
+   | Claude Code | `.mcp.json` (project-level) | JSON |
+   | Codex | `~/.codex/config.toml` | TOML |
+   | Hermes | `~/.hermes/config.yaml` | YAML |
+
+2. **Adds Savant's 4 SSE servers** — these are the MCP servers Savant runs locally:
+
+   | Server | Port | Purpose |
+   |--------|------|---------|
+   | `savant-workspace` | 8091 | Workspaces, tasks, Jira tickets, merge requests, sessions |
+   | `savant-abilities` | 8092 | Personas, rules, policies, prompt resolution |
+   | `savant-context` | 8093 | Semantic code search, memory bank, repo info |
+   | `savant-knowledge` | 8094 | Knowledge graph — store, search, traverse, connect |
+
+3. **Adds stdio MCP servers** (if the binary is installed on the machine):
+
+   | Server | Binary | Purpose |
+   |--------|--------|---------|
+   | `gitlab` | `gitlab-mcp` | GitLab issues, MRs, pipelines, repos |
+   | `atlassian` | `mcp-atlassian` | Jira and Confluence via Atlassian API |
+
+   These are only added if `which <binary>` finds the tool. If you haven't installed `gitlab-mcp` or `mcp-atlassian`, those entries are silently skipped.
+
+4. **For Hermes specifically**, two extra things happen:
+   - **SSE transport patches** — Hermes's MCP client is patched to support SSE connections (it defaults to stdio)
+   - **Savant skills are installed** — 4 skill files are copied to `~/.hermes/skills/savant/`:
+     - `platform` — comprehensive guide to all 4 MCP servers (abilities, workspaces, knowledge, context)
+     - `gitlab-mr-review` — GitLab MR review workflow with Savant workspace integration
+     - `session-provider` — adding new AI session providers to Savant
+     - `test-runner` — running Savant's pytest suite safely
+
+### Idempotent and Safe
+
+- **MCP entries** use "skip if already present" logic — running setup multiple times is safe
+- **Skills** use content-based dedup — files are only overwritten if the source has changed
+- **No credentials are stored** in config files — agents inherit tokens from shell environment variables (`GITLAB_TOKEN`, `JIRA_API_TOKEN`, etc.)
+
+### Required Environment Variables
+
+For the stdio MCP servers to authenticate, these must be set in your shell:
+
+```
+# GitLab
+GITLAB_TOKEN=glpat-xxxxx
+
+# Atlassian (Jira + Confluence)
+JIRA_URL=https://your-org.atlassian.net
+JIRA_USERNAME=you@company.com
+JIRA_API_TOKEN=xxxxx
+CONFLUENCE_URL=https://your-org.atlassian.net/wiki
+CONFLUENCE_USERNAME=you@company.com
+CONFLUENCE_API_TOKEN=xxxxx
+```
+
+### What Each Agent Gets
+
+After setup, every agent can use MCP tools to:
+
+- **Search code** semantically across all indexed repos
+- **Manage workspaces** — create tasks, track Jira tickets and MRs
+- **Store and query knowledge** — build a persistent knowledge graph across sessions
+- **Resolve abilities** — load personas, rules, and policies for consistent agent behavior
+- **Query GitLab** — read issues, review MRs, check pipelines (if gitlab-mcp installed)
+- **Query Jira/Confluence** — search tickets and docs (if mcp-atlassian installed)
+
+The agent doesn't need to know about config formats or server ports — Savant handles all of that on setup.
