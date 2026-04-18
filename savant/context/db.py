@@ -104,6 +104,7 @@ def init_context_schema() -> bool:
 
     try:
         conn.executescript(_CONTEXT_SCHEMA)
+        _normalize_ctx_ast_nodes_schema(conn)
         # Create vec0 virtual table (can't be in executescript)
         conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS ctx_vec_chunks "
@@ -115,6 +116,40 @@ def init_context_schema() -> bool:
     except Exception as e:
         logger.error(f"Failed to init context schema: {e}")
         return False
+
+
+def _normalize_ctx_ast_nodes_schema(conn: sqlite3.Connection) -> None:
+    """Normalize ctx_ast_nodes schema if legacy required content column exists."""
+    rows = conn.execute("PRAGMA table_info(ctx_ast_nodes)").fetchall()
+    if not rows:
+        return
+
+    has_required_content = any((r[1] == "content" and int(r[3] or 0) == 1) for r in rows)
+    if not has_required_content:
+        return
+
+    logger.warning("Normalizing legacy ctx_ast_nodes schema (required content column detected)")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS ctx_ast_nodes_new (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id     INTEGER NOT NULL REFERENCES ctx_files(id) ON DELETE CASCADE,
+            node_type   TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            start_line  INTEGER NOT NULL,
+            end_line    INTEGER NOT NULL,
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+
+        INSERT INTO ctx_ast_nodes_new (id, file_id, node_type, name, start_line, end_line, created_at)
+        SELECT id, file_id, node_type, name, start_line, end_line, created_at
+        FROM ctx_ast_nodes;
+
+        DROP TABLE ctx_ast_nodes;
+        ALTER TABLE ctx_ast_nodes_new RENAME TO ctx_ast_nodes;
+        CREATE INDEX IF NOT EXISTS idx_ctx_ast_file ON ctx_ast_nodes(file_id);
+        """
+    )
 
 
 def vec_loaded() -> bool:
@@ -280,14 +315,33 @@ class ContextDB:
 
     @staticmethod
     def insert_ast_node(file_id: int, node_type: str, name: str, start_line: int, end_line: int) -> int:
+        """Insert AST node row.
+
+        Backward-compat: some older local DBs have ctx_ast_nodes.content TEXT NOT NULL.
+        Prefer modern 5-column insert, but fall back to content='' when required.
+        """
         conn = get_connection()
-        cur = conn.execute(
-            """INSERT INTO ctx_ast_nodes (file_id, node_type, name, start_line, end_line)
-               VALUES (?, ?, ?, ?, ?)""",
-            (file_id, node_type, name, start_line, end_line)
-        )
-        conn.commit()
-        return cur.lastrowid
+        try:
+            cur = conn.execute(
+                """INSERT INTO ctx_ast_nodes (file_id, node_type, name, start_line, end_line)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (file_id, node_type, name, start_line, end_line)
+            )
+            conn.commit()
+            return cur.lastrowid
+        except Exception as e:
+            msg = str(e)
+            if "ctx_ast_nodes.content" not in msg:
+                raise
+
+            # Legacy schema fallback (content column is required)
+            cur = conn.execute(
+                """INSERT INTO ctx_ast_nodes (file_id, node_type, name, start_line, end_line, content)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (file_id, node_type, name, start_line, end_line, "")
+            )
+            conn.commit()
+            return cur.lastrowid
 
     # ------------------------------------------------------------------
     # Search

@@ -18,7 +18,7 @@
     "appId": "com.icapital.savant",
     "productName": "Savant",
     "releaseInfo": {
-      "releaseNotes": "v7.0.1: Configurable ports with smart fallback, System Status tab, AI Agent MCP auto-setup from Preferences and dashboard, and automatic Hermes SSE transport patching."
+      "releaseNotes": "v7.1.0 HERO RELEASE: savant-context AST is live end-to-end — indexing now generates AST structures, project Overview shows AST node counts, the AST panel renders the generated tree, and MCP structure_search is production-hardened for reliable AST queries."
     },
     "mac": {
       "category": "public.app-category.developer-tools",

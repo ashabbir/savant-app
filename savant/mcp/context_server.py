@@ -91,11 +91,13 @@ def code_search(
 
 @mcp.tool()
 def structure_search(
-    query: str,
+    q: str = None,
+    query: str = None,
     repo: str | list[str] = None,
 ) -> dict:
     """AST structure search for code (e.g. classes, functions)."""
-    params = {"query": query}
+    effective_query = q or query or ""
+    params = {"query": effective_query}
     if repo:
         params["repo"] = ",".join(repo) if isinstance(repo, list) else repo
     return _get("/api/context/ast/search", params)
