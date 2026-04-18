@@ -139,6 +139,119 @@ function _providerLaunchCommand(provider) {
   return ({ hermes:'hermes', copilot:'copilot', claude:'claude', codex:'codex', gemini:'gemini' })[provider] || 'hermes';
 }
 
+function _providerFollowupDelayMs(provider) {
+  const delays = {
+    copilot: 900,
+    claude: 900,
+    codex: 2200,
+    gemini: 2200,
+    hermes: 900,
+  };
+  return delays[provider] || 900;
+}
+
+function _shellSingleQuote(value) {
+  return `'${String(value || '').replace(/'/g, `'\\''`)}'`;
+}
+
+function _repoNameFromPath(repoPath) {
+  const clean = String(repoPath || '').trim().replace(/[\\/]+$/, '');
+  if (!clean) return '';
+  const parts = clean.split(/[\\/]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : clean;
+}
+
+function _normalizeAbilityTags(rawTags) {
+  const seen = new Set();
+  return String(rawTags || '')
+    .split(',')
+    .map(t => t.trim().toLowerCase())
+    .filter(Boolean)
+    .filter(t => {
+      if (seen.has(t)) return false;
+      seen.add(t);
+      return true;
+    });
+}
+
+function _normalizeSessionName(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function _sessionDisplayName(session) {
+  if (!session || typeof session !== 'object') return '';
+  return String(
+    session.nickname || session.summary || session.session_name || session.title || session.name || ''
+  ).trim();
+}
+
+function _sessionNameExistsInWorkspace(name) {
+  const target = _normalizeSessionName(name);
+  if (!target || !_wsDetailSessions || !_wsDetailSessions.length) return false;
+  return _wsDetailSessions.some(s => _normalizeSessionName(_sessionDisplayName(s)) === target);
+}
+
+function _suggestUniqueSessionName(baseName) {
+  const base = String(baseName || '').trim();
+  if (!base) return '';
+  if (!_sessionNameExistsInWorkspace(base)) return base;
+  let n = 2;
+  while (_sessionNameExistsInWorkspace(`${base} ${n}`)) n += 1;
+  return `${base} ${n}`;
+}
+
+let _wsNewSessionAbilityTags = [];
+
+function _renderWsNewSessionTagPills() {
+  const pills = document.getElementById('ws-new-session-tag-pills');
+  if (!pills) return;
+  pills.innerHTML = _wsNewSessionAbilityTags.map(tag =>
+    `<span class="ab-chip">${escapeHtml(tag)}<button type="button" data-tag="${encodeURIComponent(tag)}" onclick="_removeWsNewSessionTag(decodeURIComponent(this.dataset.tag))" aria-label="remove tag ${escapeHtml(tag)}">×</button></span>`
+  ).join('');
+}
+
+function _setWsNewSessionTags(tags) {
+  _wsNewSessionAbilityTags = _normalizeAbilityTags((tags || []).join(','));
+  _renderWsNewSessionTagPills();
+}
+
+function _addWsNewSessionTag(rawTag) {
+  const toAdd = _normalizeAbilityTags(rawTag).filter(t => !_wsNewSessionAbilityTags.includes(t));
+  if (!toAdd.length) return;
+  _wsNewSessionAbilityTags = [..._wsNewSessionAbilityTags, ...toAdd];
+  _renderWsNewSessionTagPills();
+}
+
+function _removeWsNewSessionTag(tag) {
+  _wsNewSessionAbilityTags = _wsNewSessionAbilityTags.filter(t => t !== String(tag || '').toLowerCase());
+  _renderWsNewSessionTagPills();
+}
+
+function _bindWsNewSessionTagInput() {
+  const input = document.getElementById('ws-new-session-tags');
+  if (!input || input.dataset.bound === '1') return;
+  input.dataset.bound = '1';
+
+  const commitInput = () => {
+    const pending = (input.value || '').trim();
+    if (!pending) return;
+    _addWsNewSessionTag(pending.replace(/,+$/g, ''));
+    input.value = '';
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      commitInput();
+    }
+    if (e.key === 'Backspace' && !input.value && _wsNewSessionAbilityTags.length) {
+      _wsNewSessionAbilityTags.pop();
+      _renderWsNewSessionTagPills();
+    }
+  });
+  input.addEventListener('blur', commitInput);
+}
+
 function _providerSessionsEndpoint(provider) {
   if (provider === 'copilot') return '/api/sessions';
   return `/api/${provider}/sessions`;
@@ -700,8 +813,11 @@ function openWsNewSessionModal() {
   const nameInput = document.getElementById('ws-new-session-name');
   const repoInput = document.getElementById('ws-new-session-repo');
   const providerSelect = document.getElementById('ws-new-session-provider');
+  const personaSelect = document.getElementById('ws-new-session-persona');
+  const tagsInput = document.getElementById('ws-new-session-tags');
   const seedInput = document.getElementById('ws-new-session-seed');
-  if (!modal || !nameInput || !repoInput || !providerSelect || !seedInput) return;
+  const systemPromptToggle = document.getElementById('ws-new-session-system-prompt-toggle');
+  if (!modal || !nameInput || !repoInput || !providerSelect || !personaSelect || !tagsInput || !seedInput || !systemPromptToggle) return;
 
   const enabledProviders = _getEnabledSessionProviders();
   providerSelect.innerHTML = enabledProviders.map(p =>
@@ -710,9 +826,14 @@ function openWsNewSessionModal() {
   const defaultProvider = enabledProviders.includes(currentMode) ? currentMode : (enabledProviders[0] || 'hermes');
   providerSelect.value = defaultProvider;
 
-  const defaultName = ws ? `${ws.name} kickoff` : 'New session';
+  const defaultName = _suggestUniqueSessionName(ws ? `${ws.name} kickoff` : 'New session');
   nameInput.value = defaultName;
   repoInput.value = _findSuggestedRepoForWorkspace();
+  personaSelect.value = 'engineer';
+  _setWsNewSessionTags(['backend', 'frontend', 'python', 'javascript']);
+  tagsInput.value = '';
+  _bindWsNewSessionTagInput();
+  systemPromptToggle.checked = true;
   seedInput.value = '';
   modal.style.display = 'flex';
   setTimeout(() => nameInput.focus(), 10);
@@ -741,9 +862,18 @@ async function browseWsNewSessionRepo() {
 async function startWsNewSession() {
   if (!_currentWsId) return;
   const wsId = _currentWsId;
+  const ws = _workspaces.find(w => w.id === wsId) || {};
   const name = (document.getElementById('ws-new-session-name')?.value || '').trim();
   const repo = (document.getElementById('ws-new-session-repo')?.value || '').trim();
   const provider = (document.getElementById('ws-new-session-provider')?.value || 'hermes').trim();
+  const persona = (document.getElementById('ws-new-session-persona')?.value || 'engineer').trim() || 'engineer';
+  const includeSystemPrompt = !!document.getElementById('ws-new-session-system-prompt-toggle')?.checked;
+  const tagsInput = document.getElementById('ws-new-session-tags');
+  if (tagsInput && (tagsInput.value || '').trim()) {
+    _addWsNewSessionTag(tagsInput.value);
+    tagsInput.value = '';
+  }
+  const abilityTags = [..._wsNewSessionAbilityTags];
   const seedPrompt = (document.getElementById('ws-new-session-seed')?.value || '').trim();
 
   if (!name) {
@@ -754,8 +884,9 @@ async function startWsNewSession() {
     showToast('error', 'Select a repository directory.');
     return;
   }
-  if (!seedPrompt) {
-    showToast('error', 'Seed prompt is required.');
+  if (_sessionNameExistsInWorkspace(name)) {
+    const suggestion = _suggestUniqueSessionName(name);
+    showToast('error', `Session name already exists in this workspace. Try: ${suggestion}`);
     return;
   }
   if (!window.terminalAPI?.runInFreshTab) {
@@ -770,13 +901,32 @@ async function startWsNewSession() {
     console.warn(`Failed to snapshot ${provider} sessions before launch`, e);
   }
 
-  const marker = _buildWorkspaceSeedMarker(wsId, name);
-  const followupPrompt = provider === 'hermes' ? `${seedPrompt}\n\n${marker}` : seedPrompt;
+  const titlePrompt = `/title ${name}`;
+  const workspaceName = (ws.name || wsId || '').trim();
+  const repoName = _repoNameFromPath(repo) || 'unknown-repo';
+  const tagsForPrompt = abilityTags.length ? abilityTags.join(', ') : 'none';
+  const abilitiesPrompt = `attach session to workspace ${workspaceName} then resolve ${persona} abilities for repo ${repoName} with tags ${tagsForPrompt}`;
+
+  const setupParts = [
+    titlePrompt,
+    includeSystemPrompt ? abilitiesPrompt : '',
+    seedPrompt || '',
+  ].filter(Boolean);
+  const combinedPrompt = setupParts.join('\n\n');
+
+  const launchCommand = provider === 'hermes'
+    ? `hermes --yolo chat -q ${_shellSingleQuote(combinedPrompt)} && hermes --yolo --continue`
+    : (provider === 'gemini' && seedPrompt)
+      ? `gemini -i ${_shellSingleQuote(seedPrompt)}`
+      : (provider === 'copilot' && seedPrompt)
+        ? `copilot -p ${_shellSingleQuote(seedPrompt)}`
+        : _providerLaunchCommand(provider);
+  const followupPrompt = (provider === 'hermes' || provider === 'gemini' || provider === 'copilot') ? '' : seedPrompt;
 
   window.terminalAPI.runInFreshTab(repo, {
-    command: _providerLaunchCommand(provider),
+    command: launchCommand,
     followup: followupPrompt,
-    followupDelayMs: 900,
+    followupDelayMs: _providerFollowupDelayMs(provider),
   });
 
   closeWsNewSessionModal();

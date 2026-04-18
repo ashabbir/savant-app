@@ -6043,9 +6043,28 @@ function showLoadingScreen(cb) { if (cb) cb(); }
       </div>
       <label style="font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);display:block;margin:10px 0 4px;">PROVIDER</label>
       <select id="ws-new-session-provider" style="width:100%;background:var(--bg-card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:0.65rem;font-family:var(--font-mono);"></select>
-      <label style="font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);display:block;margin:10px 0 4px;">SEED PROMPT</label>
+      <div style="display:flex;gap:10px;align-items:flex-end;">
+        <div style="flex:1;">
+          <label style="font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);display:block;margin:10px 0 4px;">PERSONA (HERMES)</label>
+          <select id="ws-new-session-persona" style="width:100%;background:var(--bg-card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:0.65rem;font-family:var(--font-mono);">
+            <option value="engineer">engineer</option>
+            <option value="architect">architect</option>
+            <option value="reviewer">reviewer</option>
+          </select>
+        </div>
+        <div style="flex:2;">
+          <label style="font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);display:block;margin:10px 0 4px;">ABILITY TAGS (HERMES)</label>
+          <div id="ws-new-session-tag-pills" class="ab-tags-container" style="min-height:22px;margin-bottom:6px;"></div>
+          <input type="text" id="ws-new-session-tags" placeholder="type tag and press Enter" style="width:100%;" />
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin:10px 0 4px;font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);">
+        <input type="checkbox" id="ws-new-session-system-prompt-toggle" />
+        RUN ABILITY SETUP PROMPT (OPTIONAL FOR HERMES)
+      </label>
+      <label style="font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);display:block;margin:10px 0 4px;">SEED PROMPT (OPTIONAL FOR HERMES)</label>
       <textarea id="ws-new-session-seed" rows="6" placeholder="Describe what the agent should start with..."></textarea>
-      <div style="font-family:var(--font-mono);font-size:0.48rem;color:var(--text-dim);margin-top:8px;">This opens a fresh terminal tab, cds into the selected repo, runs the selected provider CLI, and sends your seed prompt.</div>
+      <div style="font-family:var(--font-mono);font-size:0.48rem;color:var(--text-dim);margin-top:8px;">This opens a fresh terminal tab, cds into the selected repo, runs the selected provider CLI, and sends your seed prompt. Ability setup prompt is optional.</div>
       <div class="ws-modal-actions">
         <button class="ws-modal-cancel" onclick="closeWsNewSessionModal()">CANCEL</button>
         <button class="ws-modal-save" onclick="startWsNewSession()">START HERE</button>

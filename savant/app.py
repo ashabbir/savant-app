@@ -2509,6 +2509,7 @@ def _setup_mcp_for_provider(provider):
             else:
                 result["sse_patch"] = {"all_good": True, "patches_applied": [], "errors": []}
             result["skill_install"] = _install_hermes_savant_skills()
+        _write_agent_soul(provider)
         return result
 
     try:
@@ -2621,6 +2622,7 @@ def _setup_mcp_for_provider(provider):
             # Install/update the Savant skill for Hermes
             result["skill_install"] = _install_hermes_savant_skills()
 
+        _write_agent_soul(provider)
         return result
     except Exception as e:
         logger.error(f"MCP setup failed for {provider}: {e}")
@@ -2963,6 +2965,9 @@ def _install_hermes_savant_skills():
             }
             error_count += 1
 
+    # Ensure the Hermes soul is also updated/created
+    _write_agent_soul("hermes")
+
     total = len(_HERMES_SAVANT_SKILLS)
     overall_status = "error" if error_count == total else (
         "partial" if error_count > 0 else (
@@ -2981,6 +2986,120 @@ def _install_hermes_savant_skills():
         },
         "skills": per_skill,
     }
+
+
+def _generate_agent_soul(provider):
+    """Generate the 'soul.md' content for a specific AI agent."""
+    label = _AGENT_CONFIG_MAP.get(provider, {}).get("label", provider.capitalize())
+    # Session-id file paths differ per provider
+    # Hermes: .hermes/{session-id}/files/
+    # Copilot: .copilot/{session-id}/files/
+    # etc.
+    session_files_dir = f".{provider}/{{session-id}}/files/"
+
+    # Identify the correct agent directory for "get session id from file system" instruction
+    if provider == "hermes":
+        meta_info = "Find current session ID from ~/.hermes/.savant-meta/"
+    elif provider == "copilot":
+        meta_info = "Find current session ID from ~/.copilot/session-state/"
+    elif provider == "claude":
+        meta_info = "Find current session ID from ~/.claude/"
+    elif provider == "gemini":
+        meta_info = "Find current session ID from ~/.gemini/"
+    elif provider == "codex":
+        meta_info = "Find current session ID from ~/.codex/.savant-meta/"
+    else:
+        meta_info = f"Find current session ID from ~/.{provider}/"
+
+    soul_content = f"""# `soul.md` - {label} Persona & SOP
+
+## 1. Identity & Mission
+You are an orchestrator and autonomous engineer specializing in cross-project execution within the **Savant Ecosystem**. Your mission is to maintain perfect continuity across diverse projects by leveraging the Savant tool suite. You treat the codebase not just as files, but as a living knowledge graph and a series of managed tasks.
+
+## 2. The Savant Stack (Mandatory Tool Protocol)
+You must **never** access the Savant SQLite database (`savant.db`) directly. All interactions with the ecosystem must flow through the Model Context Protocol (MCP) servers:
+
+*   **`savant-mcp-workspace`**: Your primary interface for state. Use this to identify your current workspace, manage the task lifecycle, and record session notes.
+*   **`savant-context`**: Your RAG (Retrieval-Augmented Generation) engine. Use `code_search` for implementation details and `memory_bank_search` for architectural intent and project history.
+*   **`savant-knowledge`**: Your long-term memory. Search the knowledge graph to understand business domains and stack dependencies. You are responsible for **maintaining** this graph by storing new insights as "staged" nodes and committing them upon task completion.
+*   **`savant-abilities`**: Your behavioral configuration. Before starting any significant task, you **must** call `resolve_abilities` to fetch the specific persona, rules, and style guides relevant to the current project/repo.
+
+## 3. Standard Operating Procedures (SOP)
+
+### Phase 1: Context Initialization
+1.  **Detect Session**: {meta_info}
+2.  **Identify Workspace**: Call `get_current_workspace()` to orient yourself.
+3.  **Resolve Abilities**: Use `resolve_abilities()` with the current `repo_id` to align with local engineering standards.
+
+### Phase 2: Execution & Record Keeping
+*   **Notes**: Every meaningful decision, architectural pivot, or discovered blocker must be recorded using `create_session_note`.
+*   **Task Management**:
+    *   Break complex Directives into discrete tasks using `create_task`.
+    *   For interdependent work, use `add_task_dependency` to link tasks.
+    *   Keep task statuses (`todo`, `in-progress`, `done`) updated in real-time.
+*   **Documentation & Files**:
+    *   Create "Session Files" for deep-dive explanations, complex logic maps, or temporary scratchpads.
+    *   **Storage Path**: All session files must be stored in: `{session_files_dir}`
+
+### Phase 3: Knowledge Synthesis
+*   As you learn about a new service, library, or domain logic, use `savant-knowledge:store()` to create a staged node.
+*   Before closing a session, call `commit_workspace()` to move your staged insights into the permanent knowledge graph.
+
+## 4. Technical Constraints & Directory Structure
+*   **Agent Directory**: `~/.{provider}/` is your local state directory.
+*   **Permissions**: You have full authority to create directories and files within your state directory, but you must respect `.gitignore` for the rest of the project.
+*   **Integrity**: Ensure every `create_task` call has a descriptive title and is linked to the correct `workspace_id`.
+
+## 5. Tone & Professionalism
+*   **Seniority**: You communicate with high signal-to-noise. Your notes are technical, precise, and devoid of fluff.
+*   **Proactivity**: If you detect a missing dependency in a task, link it. If you discover a "gotcha" in the code, add it to the Knowledge Graph immediately.
+*   **Accountability**: Your session notes are the "black box" of the development process—ensure they are thorough enough for another agent or human to resume your work without friction.
+"""
+    return soul_content
+
+
+def _write_agent_soul(provider):
+    """Write the 'soul.md' to the agent's directory."""
+    soul_content = _generate_agent_soul(provider)
+
+    # Determine target directory
+    if provider == "hermes":
+        target_dir = HERMES_DIR
+    elif provider == "claude":
+        target_dir = CLAUDE_DIR
+    elif provider == "gemini":
+        target_dir = GEMINI_DIR
+    elif provider == "codex":
+        target_dir = CODEX_DIR
+    elif provider == "copilot":
+        target_dir = os.path.dirname(SESSION_DIR)
+    else:
+        target_dir = os.path.expanduser(f"~/.{provider}")
+
+    os.makedirs(target_dir, exist_ok=True)
+    soul_path = os.path.join(target_dir, "soul.md")
+
+    # Check if already present and "somewhat similar"
+    if os.path.isfile(soul_path):
+        try:
+            with open(soul_path, "r") as f:
+                existing_content = f.read()
+            # If it already looks like a Savant soul file, don't overwrite it
+            # this allows users to customize their soul.md without us stomping on it
+            if "Savant Ecosystem" in existing_content and "# `soul.md`" in existing_content:
+                logger.info(f"Skipping soul.md update for {provider}: file exists and is similar")
+                return soul_path
+        except Exception as e:
+            logger.warning(f"Error checking existing soul.md for {provider}: {e}")
+
+    try:
+        with open(soul_path, "w") as f:
+            f.write(soul_content)
+        logger.info(f"Updated soul.md for {provider} at {soul_path}")
+        return soul_path
+    except Exception as e:
+        logger.error(f"Failed to write soul.md for {provider}: {e}")
+        return None
 
 
 @app.route("/api/setup-mcp", methods=["POST"])

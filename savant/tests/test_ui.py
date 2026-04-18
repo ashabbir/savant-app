@@ -672,3 +672,244 @@ class TestAccessibility:
         )
         # Escape also works as a close mechanism
         assert close.count() > 0 or True
+
+
+# ---------------------------------------------------------------------------
+# 15. Workspace Session Launcher (Playwright)
+# ---------------------------------------------------------------------------
+
+class TestWorkspaceSessionLauncher:
+    def test_tags_input_turns_into_pills_and_can_remove(self, page):
+        page.evaluate("""
+            localStorage.setItem('savant_seen_release', 'v99.0.0');
+            const hero = document.getElementById('release-hero-modal');
+            if (hero) hero.style.display = 'none';
+            _currentWsId = 'ws-ui-test';
+            _workspaces = [{ id: 'ws-ui-test', name: 'savant' }];
+            _wsDetailSessions = [{ cwd: '/tmp/savant-app' }];
+            openWsNewSessionModal();
+        """)
+
+        page.wait_for_timeout(200)
+        assert page.locator("#ws-new-session-modal").is_visible()
+
+        default_pills = page.locator("#ws-new-session-tag-pills .ab-chip")
+        assert default_pills.count() >= 4
+
+        tag_input = page.locator("#ws-new-session-tags")
+        tag_input.fill("security")
+        tag_input.press("Enter")
+        page.wait_for_timeout(120)
+
+        security_chip = page.locator("#ws-new-session-tag-pills .ab-chip", has_text="security")
+        assert security_chip.count() == 1
+
+        # Remove via exposed UI handler to validate state updates
+        page.evaluate("_removeWsNewSessionTag('security')")
+        page.wait_for_timeout(120)
+        assert page.locator("#ws-new-session-tag-pills .ab-chip", has_text="security").count() == 0
+
+    def test_hermes_launch_command_does_not_require_system_prompt(self, page):
+        page.evaluate("""
+            localStorage.setItem('savant_seen_release', 'v99.0.0');
+            const hero = document.getElementById('release-hero-modal');
+            if (hero) hero.style.display = 'none';
+            window.__launch = null;
+            window.terminalAPI = {
+              runInFreshTab: (repo, payload) => { window.__launch = { repo, payload }; }
+            };
+            window._fetchProviderSessionIds = async () => new Set();
+            window._refreshWorkspaceSessionsAfterLaunch = async () => {};
+            window.showToast = () => {};
+            window.closeWsNewSessionModal = () => {};
+
+            _currentWsId = 'ws-ui-test';
+            _workspaces = [{ id: 'ws-ui-test', name: 'savant' }];
+            _wsDetailSessions = [{ cwd: '/tmp/savant-app' }];
+            openWsNewSessionModal();
+
+            document.getElementById('ws-new-session-name').value = 'test';
+            document.getElementById('ws-new-session-repo').value = '/tmp/savant-app';
+            document.getElementById('ws-new-session-provider').value = 'hermes';
+            document.getElementById('ws-new-session-persona').value = 'architect';
+            document.getElementById('ws-new-session-system-prompt-toggle').checked = false;
+            document.getElementById('ws-new-session-seed').value = '';
+
+            _setWsNewSessionTags(['backend']);
+        """)
+
+        page.evaluate("startWsNewSession()")
+        page.wait_for_timeout(180)
+
+        launch = page.evaluate("window.__launch")
+        assert launch is not None
+        cmd = (launch.get('payload') or {}).get('command', '')
+
+        assert "hermes --yolo chat -q" in cmd
+        assert cmd.count("chat -q") == 1
+        assert "/title test" in cmd
+        assert "resolve architect abilities" not in cmd
+        assert "hermes --yolo --continue" in cmd
+
+    def test_hermes_launch_command_includes_attach_and_abilities_by_default(self, page):
+        page.evaluate("""
+            localStorage.setItem('savant_seen_release', 'v99.0.0');
+            const hero = document.getElementById('release-hero-modal');
+            if (hero) hero.style.display = 'none';
+            window.__launch = null;
+            window.terminalAPI = {
+              runInFreshTab: (repo, payload) => { window.__launch = { repo, payload }; }
+            };
+            window._fetchProviderSessionIds = async () => new Set();
+            window._refreshWorkspaceSessionsAfterLaunch = async () => {};
+            window.showToast = () => {};
+            window.closeWsNewSessionModal = () => {};
+
+            _currentWsId = 'ws-ui-test';
+            _workspaces = [{ id: 'ws-ui-test', name: 'savant' }];
+            _wsDetailSessions = [{ cwd: '/tmp/savant-app' }];
+            openWsNewSessionModal();
+
+            document.getElementById('ws-new-session-name').value = 'test';
+            document.getElementById('ws-new-session-repo').value = '/tmp/savant-app';
+            document.getElementById('ws-new-session-provider').value = 'hermes';
+            document.getElementById('ws-new-session-persona').value = 'architect';
+            document.getElementById('ws-new-session-seed').value = '';
+            _setWsNewSessionTags(['backend']);
+        """)
+
+        page.evaluate("startWsNewSession()")
+        page.wait_for_timeout(180)
+
+        launch = page.evaluate("window.__launch")
+        assert launch is not None
+        cmd = (launch.get('payload') or {}).get('command', '')
+
+        assert "hermes --yolo chat -q" in cmd
+        assert cmd.count("chat -q") == 1
+        assert "/title test" in cmd
+        assert "attach session to workspace savant then resolve architect abilities" in cmd
+        assert "SAVANT:WS=" not in cmd
+        assert "hermes --yolo --continue" in cmd
+
+    def test_default_session_name_auto_increments_when_taken(self, page):
+        suggested = page.evaluate("""
+            localStorage.setItem('savant_seen_release', 'v99.0.0');
+            const hero = document.getElementById('release-hero-modal');
+            if (hero) hero.style.display = 'none';
+            _currentWsId = 'ws-ui-test';
+            _workspaces = [{ id: 'ws-ui-test', name: 'savant' }];
+            _wsDetailSessions = [
+              { summary: 'savant kickoff' },
+              { summary: 'savant kickoff 2' },
+              { cwd: '/tmp/savant-app' }
+            ];
+            openWsNewSessionModal();
+            document.getElementById('ws-new-session-name').value;
+        """)
+
+        assert suggested == 'savant kickoff 3'
+
+    def test_duplicate_session_name_is_blocked(self, page):
+        page.evaluate("""
+            localStorage.setItem('savant_seen_release', 'v99.0.0');
+            const hero = document.getElementById('release-hero-modal');
+            if (hero) hero.style.display = 'none';
+            window.__launch = null;
+            window.__toast = [];
+            window.terminalAPI = {
+              runInFreshTab: (repo, payload) => { window.__launch = { repo, payload }; }
+            };
+            window._fetchProviderSessionIds = async () => new Set();
+            window._refreshWorkspaceSessionsAfterLaunch = async () => {};
+            window.showToast = (type, msg) => { window.__toast.push({ type, msg }); };
+            window.closeWsNewSessionModal = () => {};
+
+            _currentWsId = 'ws-ui-test';
+            _workspaces = [{ id: 'ws-ui-test', name: 'savant' }];
+            _wsDetailSessions = [{ summary: 'duplicate name' }, { cwd: '/tmp/savant-app' }];
+            openWsNewSessionModal();
+
+            document.getElementById('ws-new-session-name').value = 'duplicate name';
+            document.getElementById('ws-new-session-repo').value = '/tmp/savant-app';
+            document.getElementById('ws-new-session-provider').value = 'hermes';
+        """)
+
+        page.evaluate("startWsNewSession()")
+        page.wait_for_timeout(120)
+
+        launch = page.evaluate("window.__launch")
+        toasts = page.evaluate("window.__toast")
+        assert launch is None
+        assert any('Session name already exists in this workspace.' in (t.get('msg') or '') for t in toasts)
+        assert any('Try: duplicate name 2' in (t.get('msg') or '') for t in toasts)
+
+    def test_gemini_launch_passes_seed_via_inline_i_flag(self, page):
+        page.evaluate("""
+            localStorage.setItem('savant_seen_release', 'v99.0.0');
+            const hero = document.getElementById('release-hero-modal');
+            if (hero) hero.style.display = 'none';
+            window.__launch = null;
+            window.terminalAPI = {
+              runInFreshTab: (repo, payload) => { window.__launch = { repo, payload }; }
+            };
+            window._fetchProviderSessionIds = async () => new Set();
+            window._refreshWorkspaceSessionsAfterLaunch = async () => {};
+            window.showToast = () => {};
+            window.closeWsNewSessionModal = () => {};
+
+            _currentWsId = 'ws-ui-test';
+            _workspaces = [{ id: 'ws-ui-test', name: 'savant' }];
+            _wsDetailSessions = [{ cwd: '/tmp/savant-app' }];
+            openWsNewSessionModal();
+
+            document.getElementById('ws-new-session-name').value = 'gem-seed';
+            document.getElementById('ws-new-session-repo').value = '/tmp/savant-app';
+            document.getElementById('ws-new-session-provider').value = 'gemini';
+            document.getElementById('ws-new-session-seed').value = 'hello from seed';
+        """)
+
+        page.evaluate("startWsNewSession()")
+        page.wait_for_timeout(120)
+
+        launch = page.evaluate("window.__launch")
+        assert launch is not None
+        payload = launch.get('payload') or {}
+        assert payload.get('command') == "gemini -i 'hello from seed'"
+        assert payload.get('followup') == ''
+        assert payload.get('followupDelayMs') == 2200
+
+    def test_copilot_launch_passes_seed_via_inline_p_flag(self, page):
+        page.evaluate("""
+            localStorage.setItem('savant_seen_release', 'v99.0.0');
+            const hero = document.getElementById('release-hero-modal');
+            if (hero) hero.style.display = 'none';
+            window.__launch = null;
+            window.terminalAPI = {
+              runInFreshTab: (repo, payload) => { window.__launch = { repo, payload }; }
+            };
+            window._fetchProviderSessionIds = async () => new Set();
+            window._refreshWorkspaceSessionsAfterLaunch = async () => {};
+            window.showToast = () => {};
+            window.closeWsNewSessionModal = () => {};
+
+            _currentWsId = 'ws-ui-test';
+            _workspaces = [{ id: 'ws-ui-test', name: 'savant' }];
+            _wsDetailSessions = [{ cwd: '/tmp/savant-app' }];
+            openWsNewSessionModal();
+
+            document.getElementById('ws-new-session-name').value = 'copilot-seed';
+            document.getElementById('ws-new-session-repo').value = '/tmp/savant-app';
+            document.getElementById('ws-new-session-provider').value = 'copilot';
+            document.getElementById('ws-new-session-seed').value = 'hello from copilot seed';
+        """)
+
+        page.evaluate("startWsNewSession()")
+        page.wait_for_timeout(120)
+
+        launch = page.evaluate("window.__launch")
+        assert launch is not None
+        payload = launch.get('payload') or {}
+        assert payload.get('command') == "copilot -p 'hello from copilot seed'"
+        assert payload.get('followup') == ''
+        assert payload.get('followupDelayMs') == 900
