@@ -310,7 +310,7 @@ def stop_indexing():
 
 @context_bp.route("/api/context/repos/purge", methods=["POST"])
 def purge_repo():
-    """Clear all indexed data for a project but keep the project entry."""
+    """Clear all indexed data (index + AST) for a project."""
     if not _ensure_init():
         return jsonify({"error": "Context not initialized"}), 503
 
@@ -327,6 +327,68 @@ def purge_repo():
     ContextDB.clear_repo_data(repo["id"])
     ContextDB.update_repo_status(name, "added")
     return jsonify({"purged": True, "name": name})
+
+
+@context_bp.route("/api/context/repos/index/purge", methods=["POST"])
+def purge_index():
+    """Clear ONLY chunk/vector data for a project."""
+    if not _ensure_init():
+        return jsonify({"error": "Context not initialized"}), 503
+
+    data = request.get_json(force=True)
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+
+    from .db import ContextDB
+    repo = ContextDB.get_repo(name)
+    if not repo:
+        return jsonify({"error": f"Project not found: {name}"}), 404
+
+    ContextDB.clear_index_data(repo["id"])
+    return jsonify({"purged": True, "name": name, "type": "index"})
+
+
+@context_bp.route("/api/context/repos/ast/generate", methods=["POST"])
+def generate_ast():
+    """Extract AST nodes for a single project in background."""
+    if not _ensure_init():
+        return jsonify({"error": "Context not initialized"}), 503
+
+    data = request.get_json(force=True)
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+
+    from .db import ContextDB
+    repo = ContextDB.get_repo(name)
+    if not repo:
+        return jsonify({"error": f"Project not found: {name}"}), 404
+
+    from .indexer import Indexer
+    indexer = Indexer()
+    indexer.generate_ast_in_background(Path(repo["path"]), repo_name=name)
+    return jsonify({"started": True, "name": name, "type": "ast"})
+
+
+@context_bp.route("/api/context/repos/ast/purge", methods=["POST"])
+def purge_ast():
+    """Clear ONLY AST data for a project."""
+    if not _ensure_init():
+        return jsonify({"error": "Context not initialized"}), 503
+
+    data = request.get_json(force=True)
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+
+    from .db import ContextDB
+    repo = ContextDB.get_repo(name)
+    if not repo:
+        return jsonify({"error": f"Project not found: {name}"}), 404
+
+    ContextDB.clear_ast_data(repo["id"])
+    return jsonify({"purged": True, "name": name, "type": "ast"})
 
 
 # ---------------------------------------------------------------------------

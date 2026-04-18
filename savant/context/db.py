@@ -280,6 +280,35 @@ class ContextDB:
         conn.execute("DELETE FROM ctx_files WHERE repo_id = ?", (repo_id,))
         conn.commit()
 
+    @staticmethod
+    def clear_index_data(repo_id: int):
+        """Delete only chunk/vector data for a repo."""
+        conn = get_connection()
+        conn.execute(
+            """DELETE FROM ctx_vec_chunks WHERE rowid IN (
+                 SELECT c.id FROM ctx_chunks c
+                 JOIN ctx_files f ON c.file_id = f.id
+                 WHERE f.repo_id = ?
+               )""", (repo_id,)
+        )
+        conn.execute(
+            """DELETE FROM ctx_chunks WHERE file_id IN (
+                 SELECT id FROM ctx_files WHERE repo_id = ?
+               )""", (repo_id,)
+        )
+        conn.commit()
+
+    @staticmethod
+    def clear_ast_data(repo_id: int):
+        """Delete only AST data for a repo."""
+        conn = get_connection()
+        conn.execute(
+            """DELETE FROM ctx_ast_nodes WHERE file_id IN (
+                 SELECT id FROM ctx_files WHERE repo_id = ?
+               )""", (repo_id,)
+        )
+        conn.commit()
+
     # ------------------------------------------------------------------
     # File & chunk operations
     # ------------------------------------------------------------------
@@ -288,13 +317,24 @@ class ContextDB:
     def insert_file(repo_id: int, rel_path: str, language: str,
                     is_memory_bank: bool, mtime_ns: int, indexed_at: str) -> int:
         conn = get_connection()
-        cur = conn.execute(
+        # Use ON CONFLICT DO UPDATE to support multiple passes (Index vs AST)
+        conn.execute(
             """INSERT INTO ctx_files (repo_id, rel_path, language, is_memory_bank, mtime_ns, indexed_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(repo_id, rel_path) DO UPDATE SET
+                 language=excluded.language,
+                 is_memory_bank=excluded.is_memory_bank,
+                 mtime_ns=excluded.mtime_ns,
+                 indexed_at=excluded.indexed_at""",
             (repo_id, rel_path, language, int(is_memory_bank), mtime_ns, indexed_at)
         )
+        # Fetch the ID (lastrowid might be 0 on update)
+        row = conn.execute(
+            "SELECT id FROM ctx_files WHERE repo_id = ? AND rel_path = ?",
+            (repo_id, rel_path)
+        ).fetchone()
         conn.commit()
-        return cur.lastrowid
+        return row["id"] if row else 0
 
     @staticmethod
     def insert_chunk(file_id: int, chunk_index: int, content: str,

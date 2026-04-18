@@ -18,6 +18,54 @@ def helper(x):
     return repo_dir
 
 
+def _seed_js_repo(tmp_path: Path, name: str = "ctx-ast-js-repo") -> Path:
+    repo_dir = tmp_path / name
+    repo_dir.mkdir(parents=True, exist_ok=True)
+    (repo_dir / "sample.js").write_text(
+        """
+class AuthService {
+    login(user) {
+        return true;
+    }
+}
+
+function connect() {
+    return "ok";
+}
+""".strip()
+    )
+    return repo_dir
+
+
+def test_js_ast_generation(client, tmp_path, monkeypatch):
+    from context.db import ContextDB, init_context_schema
+    from context.indexer import Indexer
+
+    assert init_context_schema()
+
+    class _FakeEmbedder:
+        def embed_one(self, _text):
+            return [0.0] * 768
+
+    monkeypatch.setattr(Indexer, "_get_embedder", lambda self: _FakeEmbedder())
+
+    repo_dir = _seed_js_repo(tmp_path, "repo-js")
+    ContextDB.add_repo("repo-js", str(repo_dir))
+
+    Indexer().index_repository(repo_dir, repo_name="repo-js")
+
+    resp = client.get("/api/context/ast/list?repo=repo-js")
+    assert resp.status_code == 200
+
+    data = resp.get_json()
+    assert data["ast_count"] >= 3
+
+    names = {(n["node_type"], n["name"]) for n in data["nodes"]}
+    assert ("class", "AuthService") in names
+    assert ("function", "login") in names
+    assert ("function", "connect") in names
+
+
 def test_index_generates_ast_and_repo_overview_count(client, tmp_path, monkeypatch):
     from context.db import ContextDB, init_context_schema
     from context.indexer import Indexer
@@ -102,8 +150,10 @@ def test_extract_ast_retries_transient_lock(tmp_path, monkeypatch):
 
 
 def test_insert_ast_node_legacy_schema_with_required_content(client):
-    from context.db import ContextDB
+    from context.db import ContextDB, init_context_schema
     from sqlite_client import get_connection
+
+    assert init_context_schema()
 
     conn = get_connection()
 

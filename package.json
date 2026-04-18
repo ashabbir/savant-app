@@ -50,7 +50,9 @@
           "!mongo_client.py",
           "!migrations.py",
           "!migrate_mongo_to_sqlite.py",
-          "!.venv/**"
+          "!savant/**",
+          "!.venv/**",
+          "!venv/**"
         ]
       }
     ],

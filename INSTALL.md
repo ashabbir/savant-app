@@ -17,7 +17,7 @@ brew install python3
 ### 3. Install Python dependencies
 
 ```bash
-pip3 install flask==3.1.0 pyyaml==6.0.2 gunicorn==23.0.0 "pydantic>=2.11,<3" "sqlite-vec>=0.1.7" "pathspec>=0.11.0" "pygments>=2.15.0" "mcp>=1.0" requests
+pip3 install flask==3.1.0 pyyaml==6.0.2 gunicorn==23.0.0 "pydantic>=2.11,<3" "sqlite-vec>=0.1.7" "pathspec>=0.11.0" "pygments>=2.15.0" "mcp>=1.0" requests tree-sitter==0.21.3 tree-sitter-languages==1.10.2
 ```
 
 Or, after mounting the DMG:

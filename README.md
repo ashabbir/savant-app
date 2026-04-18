@@ -259,6 +259,14 @@ Tabbed interface with 4 tabs (navigate with `{` and `}` keys):
 - **File Summary** — All files touched with change counts
 - **Git Command Log** — Full history of git commands from the session
 
+### 📂 Multi-language AST Exploration
+
+The dashboard now includes deep structural analysis of your codebase:
+- **Automatic AST Generation** — Classes, functions, and methods are indexed during repository scan.
+- **Language Support** — Python, JavaScript, TypeScript, Ruby, Go, Java, C++, Rust, PHP, and more.
+- **Structural Search** — AI agents can query the AST directly to find definitions and implementations.
+- **Interactive Map** — Explore the code structure globally across all indexed projects.
+
 ### 📂 File Viewer Modal
 
 Full-viewport modal (92vw × 90vh) with smart rendering:
