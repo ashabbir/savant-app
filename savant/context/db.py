@@ -56,6 +56,17 @@ CREATE TABLE IF NOT EXISTS ctx_chunks (
     created_at  TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_ctx_chunks_file ON ctx_chunks(file_id);
+
+CREATE TABLE IF NOT EXISTS ctx_ast_nodes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id     INTEGER NOT NULL REFERENCES ctx_files(id) ON DELETE CASCADE,
+    node_type   TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    start_line  INTEGER NOT NULL,
+    end_line    INTEGER NOT NULL,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ctx_ast_file ON ctx_ast_nodes(file_id);
 """
 
 
@@ -164,7 +175,10 @@ class ContextDB:
                       (SELECT COUNT(*) FROM ctx_files WHERE repo_id = r.id AND is_memory_bank = 1) AS memory_bank_count,
                       (SELECT COUNT(*) FROM ctx_chunks c
                        JOIN ctx_files f ON c.file_id = f.id
-                       WHERE f.repo_id = r.id) AS chunk_count
+                       WHERE f.repo_id = r.id) AS chunk_count,
+                      (SELECT COUNT(*) FROM ctx_ast_nodes a
+                       JOIN ctx_files f ON a.file_id = f.id
+                       WHERE f.repo_id = r.id) AS ast_node_count
                FROM ctx_repos r ORDER BY r.name"""
         ).fetchall()
         result = []
@@ -264,6 +278,17 @@ class ContextDB:
         conn.commit()
         return chunk_id
 
+    @staticmethod
+    def insert_ast_node(file_id: int, node_type: str, name: str, start_line: int, end_line: int) -> int:
+        conn = get_connection()
+        cur = conn.execute(
+            """INSERT INTO ctx_ast_nodes (file_id, node_type, name, start_line, end_line)
+               VALUES (?, ?, ?, ?, ?)""",
+            (file_id, node_type, name, start_line, end_line)
+        )
+        conn.commit()
+        return cur.lastrowid
+
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
@@ -326,9 +351,53 @@ class ContextDB:
         results.sort(key=lambda x: x["distance"])
         return results[:limit]
 
+    @staticmethod
+    def search_ast_nodes(query: str, repo_filter: Optional[Union[str, List[str]]] = None) -> List[Dict[str, Any]]:
+        conn = get_connection()
+        sql = """
+            SELECT a.id, a.node_type, a.name, a.start_line, a.end_line,
+                   f.rel_path, r.name AS repo
+            FROM ctx_ast_nodes a
+            JOIN ctx_files f ON a.file_id = f.id
+            JOIN ctx_repos r ON f.repo_id = r.id
+            WHERE a.name LIKE ?
+        """
+        params: list = [f"%{query}%"]
+
+        if repo_filter:
+            repo_list = repo_filter if isinstance(repo_filter, list) else [repo_filter]
+            rp = ",".join("?" * len(repo_list))
+            sql += f" AND r.name IN ({rp})"
+            params.extend(repo_list)
+
+        sql += " LIMIT 50"
+
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
     # ------------------------------------------------------------------
     # Memory bank
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def list_ast_nodes(repo_filter=None) -> List[Dict[str, Any]]:
+        conn = get_connection()
+        sql = """
+            SELECT r.name AS repo, f.rel_path AS path, a.node_type, a.name, a.start_line, a.end_line
+            FROM ctx_ast_nodes a
+            JOIN ctx_files f ON a.file_id = f.id
+            JOIN ctx_repos r ON f.repo_id = r.id
+        """
+        params: list = []
+        if repo_filter:
+            repo_list = repo_filter if isinstance(repo_filter, list) else [repo_filter]
+            rp = ",".join("?" * len(repo_list))
+            sql += f" WHERE r.name IN ({rp})"
+            params.extend(repo_list)
+
+        sql += " ORDER BY r.name, f.rel_path, a.start_line"
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
 
     @staticmethod
     def list_memory_resources(repo_filter=None) -> List[Dict[str, Any]]:
@@ -499,12 +568,10 @@ class ContextDB:
         conn = get_connection()
         rows = conn.execute("""
             SELECT r.id, r.name, r.path, r.status, r.indexed_at, r.created_at,
-                   COUNT(DISTINCT f.id) AS file_count,
-                   COUNT(DISTINCT c.id) AS chunk_count
+                   (SELECT COUNT(*) FROM ctx_files WHERE repo_id = r.id) AS file_count,
+                   (SELECT COUNT(*) FROM ctx_chunks WHERE file_id IN (SELECT id FROM ctx_files WHERE repo_id = r.id)) AS chunk_count,
+                   (SELECT COUNT(*) FROM ctx_ast_nodes WHERE file_id IN (SELECT id FROM ctx_files WHERE repo_id = r.id)) AS ast_node_count
             FROM ctx_repos r
-            LEFT JOIN ctx_files f ON r.id = f.repo_id
-            LEFT JOIN ctx_chunks c ON f.id = c.file_id
-            GROUP BY r.id
             ORDER BY r.name
         """).fetchall()
         return [dict(r) for r in rows]

@@ -23,5 +23,22 @@ EOF
 
 echo "Build info: v$VERSION · $BRANCH · $COMMIT"
 
-osascript -e 'quit app "Savant"' && sleep 2 && rm -rf dist && npm run build && rsync -a --delete dist/mac-arm64/Savant.app/ /Applications/Savant.app/ && open /Applications/Savant.app
+# Try to quit Savant if it's running, but don't fail if it's not.
+osascript -e 'quit app "Savant"' 2>/dev/null || true
+sleep 1
+
+# Clean up and build
+rm -rf dist
+npm run build
+
+# Find the built app (could be in mac-arm64 or mac)
+APP_PATH=$(find dist -maxdepth 2 -name "Savant.app" -type d | head -n 1)
+
+if [ -n "$APP_PATH" ]; then
+  echo "Syncing $APP_PATH to /Applications/Savant.app..."
+  rsync -a --delete "$APP_PATH/" /Applications/Savant.app/ && open /Applications/Savant.app
+else
+  echo "Error: Could not find Savant.app in dist/ folder."
+  exit 1
+fi
 

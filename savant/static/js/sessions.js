@@ -1791,8 +1791,11 @@ async function openContextFile(uri, type) {
   const openBtn = document.getElementById('open-browser-btn');
   const revealBtn = document.getElementById('reveal-path-btn');
 
-  const fileName = uri.includes(':') ? uri.split(':').slice(1).join(':') : uri;
-  const repoName = uri.includes(':') ? uri.split(':')[0] : '';
+  const unhashedUri = uri.split('#')[0];
+  const hash = uri.includes('#') ? uri.substring(uri.indexOf('#') + 1) : '';
+  const fileName = unhashedUri.includes(':') ? unhashedUri.split(':').slice(1).join(':') : unhashedUri;
+  const repoName = unhashedUri.includes(':') ? unhashedUri.split(':')[0] : '';
+  
   title.textContent = fileName;
   content.textContent = 'Loading...';
   content.style.display = '';
@@ -1806,14 +1809,14 @@ async function openContextFile(uri, type) {
 
   const endpoint = type === 'memory' ? '/api/context/memory/read' : '/api/context/code/read';
   try {
-    const res = await fetch(endpoint + '?uri=' + encodeURIComponent(uri));
+    const res = await fetch(endpoint + '?uri=' + encodeURIComponent(unhashedUri));
     if (!res.ok) throw new Error('API error');
     const data = await res.json();
     const raw = data.content || '(empty)';
     const isMd = /\.(md|mdx|markdown)$/i.test(fileName);
 
     // Enable Open (raw endpoint) and Path (resolve from project)
-    _currentFileRawUrl = endpoint + '?uri=' + encodeURIComponent(uri);
+    _currentFileRawUrl = endpoint + '?uri=' + encodeURIComponent(unhashedUri);
     openBtn.style.display = '';
 
     // Resolve host path from project data
@@ -1834,8 +1837,22 @@ async function openContextFile(uri, type) {
       contentMd.style.display = '';
       contentMd.dataset.raw = raw;
       contentMd.innerHTML = `<div class="ctx-code-view">${lines.map((ln, i) =>
-        `<div class="ctx-code-line"><span class="ctx-code-num">${i + 1}</span><span class="ctx-code-text">${_escHtml(ln)}</span></div>`
+        `<div class="ctx-code-line" id="line-${i + 1}"><span class="ctx-code-num">${i + 1}</span><span class="ctx-code-text">${_escHtml(ln)}</span></div>`
       ).join('')}</div>`;
+
+      // Scroll to line if provided in hash
+      if (hash && hash.startsWith('L')) {
+        const lineNum = hash.substring(1);
+        setTimeout(() => {
+          const target = contentMd.querySelector('#line-' + lineNum);
+          if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target.style.background = 'rgba(234, 179, 8, 0.2)'; // highlight color
+            setTimeout(() => target.style.transition = 'background 1s ease', 100);
+            setTimeout(() => target.style.background = '', 2000);
+          }
+        }, 100);
+      }
     }
   } catch (e) {
     content.textContent = 'Failed to load file: ' + e.message;

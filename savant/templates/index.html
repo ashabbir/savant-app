@@ -3057,7 +3057,7 @@
   .dep-graph-tooltip .tt-meta { color: var(--text-dim); margin-bottom: 3px; }
   .dep-graph-tooltip .tt-desc {
     color: var(--text-dim); font-size: 0.5rem; margin-top: 4px;
-    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
   }
   .dep-graph-empty {
     display: flex; align-items: center; justify-content: center; min-height: 300px;
@@ -5707,12 +5707,19 @@ function showLoadingScreen(cb) { if (cb) cb(); }
           </div>
 
           <div class="tutorial-section" style="margin-top:16px;">
-            <h4>🔍 Semantic Search</h4>
+            <h4>🔍 Search Modes</h4>
             <div class="tutorial-tool">
               <span class="tutorial-tool-icon">🔎</span>
               <div class="tutorial-tool-info">
                 <div class="tutorial-tool-name">code_search</div>
                 <div class="tutorial-tool-desc">Semantic code search across indexed repos. Accepts a natural-language query <code>q</code>, optional <code>repo</code> filter (name or list), <code>limit</code> (1–100, default 10), and <code>exclude_memory_bank</code> flag. Returns file paths, language, line range, content snippets, and distance scores.</div>
+              </div>
+            </div>
+            <div class="tutorial-tool">
+              <span class="tutorial-tool-icon">🏗️</span>
+              <div class="tutorial-tool-info">
+                <div class="tutorial-tool-name">structure_search</div>
+                <div class="tutorial-tool-desc">AST structure exploration. Query for codebase structures (classes, functions, etc.) across indexed repos by name. Returns AST node names, types, parent context, file paths, and snippets.</div>
               </div>
             </div>
             <div class="tutorial-tool">
@@ -5768,16 +5775,19 @@ function showLoadingScreen(cb) { if (cb) cb(); }
 <span class="comment">// 2. Search only in a specific project</span>
 <span class="highlight">code_search</span>(q: "database connection pool", repo: "savant-app")
 
-<span class="comment">// 3. Find relevant memory bank docs</span>
+<span class="comment">// 3. Find structural components by name</span>
+<span class="highlight">structure_search</span>(q: "UserRepository")
+
+<span class="comment">// 4. Find relevant memory bank docs</span>
 <span class="highlight">memory_bank_search</span>(q: "deployment architecture")
 
-<span class="comment">// 4. List all memory bank resources</span>
+<span class="comment">// 5. List all memory bank resources</span>
 <span class="highlight">memory_resources_list</span>()
 
-<span class="comment">// 5. Read a specific memory doc</span>
+<span class="comment">// 6. Read a specific memory doc</span>
 <span class="highlight">memory_resources_read</span>(uri: "memory/architecture.md")
 
-<span class="comment">// 6. Check which repos are indexed</span>
+<span class="comment">// 7. Check which repos are indexed</span>
 <span class="highlight">repo_status</span>()</div>
           </div>
 
@@ -6478,6 +6488,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
       <button class="savant-subtab" onclick="switchCtxPanel('projects')">📁 Projects</button>
       <button class="savant-subtab" onclick="switchCtxPanel('code')">📄 Code</button>
       <button class="savant-subtab" onclick="switchCtxPanel('memory')">🧠 Memory Bank</button>
+      <button class="savant-subtab" onclick="switchCtxPanel('ast')">🌲 AST</button>
     </div>
 
     <!-- Search Panel -->
@@ -6546,6 +6557,17 @@ function showLoadingScreen(cb) { if (cb) cb(); }
           <div style="font-size:2rem;margin-bottom:12px;">📄</div>
           <div>Indexed code files</div>
           <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Index a project to browse its code files here</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AST Panel -->
+    <div class="ctx-panel" id="ctx-panel-ast" style="display:none;">
+      <div id="ctx-ast-list" class="ctx-memory-list">
+        <div class="ctx-welcome">
+          <div style="font-size:2rem;margin-bottom:12px;">🌲</div>
+          <div>AST nodes</div>
+          <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Index a project to browse its abstract syntax tree here</div>
         </div>
       </div>
     </div>

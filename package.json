@@ -1,6 +1,6 @@
 {
   "name": "savant",
-  "version": "7.0.1",
+  "version": "7.1.0",
   "description": "Savant — AI Session Dashboard",
   "main": "main.js",
   "scripts": {
@@ -50,7 +50,7 @@
           "!mongo_client.py",
           "!migrations.py",
           "!migrate_mongo_to_sqlite.py",
-          "!savant/**"
+          "!.venv/**"
         ]
       }
     ],

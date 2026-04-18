@@ -96,6 +96,25 @@ class Indexer:
 
         return language, False
 
+    def _extract_and_store_ast(self, file_id: int, file_rel_path: str, content: str):
+        if not file_rel_path.endswith('.py'):
+            return
+        import ast
+        try:
+            tree = ast.parse(content)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    node_type = "function"
+                elif isinstance(node, ast.ClassDef):
+                    node_type = "class"
+                else:
+                    continue
+                start_line = getattr(node, 'lineno', 1)
+                end_line = getattr(node, 'end_lineno', start_line)
+                ContextDB.insert_ast_node(file_id, node_type, node.name, start_line, end_line)
+        except Exception as e:
+            logger.debug(f"Failed to parse AST for {file_rel_path}: {e}")
+
     def index_repository(self, repo_path: Path, repo_name: Optional[str] = None,
                          on_progress: Optional[Callable] = None) -> Dict[str, Any]:
         """Index a repository synchronously. Returns stats dict."""
@@ -180,6 +199,9 @@ class Indexer:
                         is_memory_bank, mtime_ns, now
                     )
                     files_indexed += 1
+
+                    # Phase 3.5: Extract & store AST nodes
+                    self._extract_and_store_ast(file_id, str(file_rel_path), content)
 
                     # Phase 4: Embedding chunks
                     chunks = self.chunker.chunk_with_metadata(content)

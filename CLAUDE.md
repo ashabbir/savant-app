@@ -39,10 +39,10 @@ open /Applications/Savant.app
 ### MCP Server Registry
 
 | Server | Port | File | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | savant-workspace | 8091 | `mcp/server.py` | Workspace/task/note/MR/Jira CRUD |
 | savant-abilities | 8092 | `mcp/abilities_server.py` | Persona/rule resolution, YAML assets |
-| savant-context | 8093 | `mcp/context_server.py` | Semantic code search, memory bank |
+| savant-context | 8093 | `mcp/context_server.py` | Semantic code search, AST exploration, memory bank |
 | savant-knowledge | 8094 | `mcp/knowledge_server.py` | Knowledge graph nodes/edges |
 
 ### Startup Sequence
@@ -83,6 +83,7 @@ open /Applications/Savant.app
 ## Adding New Features
 
 The `.github/copilot-instructions.md` file contains detailed step-by-step checklists for:
+
 - Adding a new MCP server (Flask Blueprint → MCP server file → Electron integration → UI tab)
 - The exact MCP server template to copy
 - Port allocation and config patching

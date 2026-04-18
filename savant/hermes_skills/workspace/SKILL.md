@@ -3,7 +3,7 @@ name: platform
 description: >-
   Comprehensive guide to using the Savant platform via MCP — abilities (personas, rules, repos),
   workspaces (tasks, Jira, MRs, sessions), knowledge graph (nodes, edges, search),
-  and context (semantic code search, memory bank). Load this skill whenever interacting
+  and context (semantic code search, AST exploration, memory bank). Load this skill whenever interacting
   with Savant MCP tools.
 version: 1.0.0
 author: Savant
@@ -37,7 +37,7 @@ Savant runs 4 MCP SSE servers (default ports):
 |--------|------|---------|
 | savant-workspace | 8091 | Workspaces, tasks, Jira, MRs, sessions |
 | savant-abilities | 8092 | Personas, rules, policies, repos, resolve |
-| savant-context | 8093 | Semantic code search, memory bank |
+| savant-context | 8093 | Semantic code search, AST exploration, memory bank |
 | savant-knowledge | 8094 | Knowledge graph CRUD, search, traverse |
 
 All servers connect via SSE transport at `http://127.0.0.1:<port>/sse`.
@@ -79,6 +79,7 @@ pattern `<type>.<category>.<name>` (e.g., `rules.backend.base`, `persona.reviewe
 Use this to evolve rules based on session discoveries.
 
 ### Available Personas
+
 - persona.architect — System design and architecture
 - persona.engineer — Implementation and coding
 - persona.mentor — Teaching and guidance
@@ -87,6 +88,7 @@ Use this to evolve rules based on session discoveries.
 - persona.support — Customer/technical support
 
 ### Available Repos
+
 Use `list_repos` to discover currently available repositories in your environment.
 
 ---
@@ -229,10 +231,12 @@ A persistent graph database for storing architectural decisions, insights,
 patterns, and technical knowledge. Nodes are connected by typed edges.
 
 ### Node Types
+
 insight, client, domain, service, library, technology, project, concept,
 repo, session, issue
 
 ### Edge Types
+
 relates_to, learned_from, applies_to, uses, evolved_from, contributed_to,
 part_of, integrates_with, depends_on, built_with
 
@@ -321,7 +325,7 @@ mcp_savant_knowledge_purge_workspace(workspace_id="<id>")
 
 ## 4. Context (savant-context)
 
-Semantic code search and memory bank across indexed repositories.
+Semantic code search, AST structure exploration, and memory bank across indexed repositories.
 
 ### Code Search
 
@@ -335,6 +339,13 @@ mcp_savant_context_code_search(query="user permissions", repo=["repo-b", "repo-a
 
 # Exclude memory bank results
 mcp_savant_context_code_search(query="redis caching", exclude_memory_bank=True)
+```
+
+### AST Structure Search
+
+```
+# Find classes, functions, or language elements via substring AST matching
+mcp_savant_context_structure_search(query="AuthenticationService", repo="repo-a")
 ```
 
 ### Memory Bank
@@ -398,6 +409,7 @@ mcp_savant_context_repo_status()
 ### Learning from a Session
 
 After discovering something valuable:
+
 ```
 # Store as knowledge
 mcp_savant_knowledge_store(
