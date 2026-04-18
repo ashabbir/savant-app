@@ -96,6 +96,53 @@ class Indexer:
 
         return language, False
 
+    def _extract_and_store_ast(self, file_id: int, file_rel_path: str, content: str):
+        if not file_rel_path.endswith('.py'):
+            return
+
+        import ast
+        import sqlite3
+        import time
+
+        try:
+            tree = ast.parse(content)
+        except Exception as e:
+            logger.debug(f"Failed to parse AST for {file_rel_path}: {e}")
+            return
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                node_type = "function"
+            elif isinstance(node, ast.ClassDef):
+                node_type = "class"
+            else:
+                continue
+
+            start_line = getattr(node, 'lineno', 1) or 1
+            end_line = getattr(node, 'end_lineno', None) or start_line
+
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    ContextDB.insert_ast_node(file_id, node_type, node.name, start_line, end_line)
+                    break
+                except sqlite3.OperationalError as e:
+                    msg = str(e).lower()
+                    if "locked" in msg and attempt < max_attempts:
+                        time.sleep(0.05 * attempt)
+                        continue
+                    logger.warning(
+                        f"AST insert failed for {file_rel_path}:{start_line}-{end_line} "
+                        f"({node_type} {getattr(node, 'name', '')}): {e}"
+                    )
+                    break
+                except Exception as e:
+                    logger.warning(
+                        f"AST insert failed for {file_rel_path}:{start_line}-{end_line} "
+                        f"({node_type} {getattr(node, 'name', '')}): {e}"
+                    )
+                    break
+
     def index_repository(self, repo_path: Path, repo_name: Optional[str] = None,
                          on_progress: Optional[Callable] = None) -> Dict[str, Any]:
         """Index a repository synchronously. Returns stats dict."""
@@ -180,6 +227,9 @@ class Indexer:
                         is_memory_bank, mtime_ns, now
                     )
                     files_indexed += 1
+
+                    # Phase 3.5: Extract & store AST nodes
+                    self._extract_and_store_ast(file_id, str(file_rel_path), content)
 
                     # Phase 4: Embedding chunks
                     chunks = self.chunker.chunk_with_metadata(content)

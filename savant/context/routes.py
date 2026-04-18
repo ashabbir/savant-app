@@ -127,6 +127,38 @@ def memory_search():
         return jsonify({"error": str(e), "results": []}), 500
 
 
+@context_bp.route("/api/context/ast/search")
+def ast_search():
+    if not _ensure_init():
+        return jsonify({"error": "Context not initialized"}), 503
+
+    query = request.args.get("query", "").strip()
+    if not query:
+        return jsonify({"error": "query required", "results": []}), 400
+
+    repo = request.args.get("repo")
+    repo_filter = repo.split(",") if repo and "," in repo else repo
+
+    try:
+        from .db import ContextDB
+        results = ContextDB.search_ast_nodes(query, repo_filter=repo_filter)
+        return jsonify({"query": query, "result_count": len(results), "results": results})
+    except Exception as e:
+        logger.error(f"AST search failed: {e}")
+        return jsonify({"error": str(e), "results": []}), 500
+
+
+@context_bp.route("/api/context/ast/list")
+def ast_list():
+    if not _ensure_init():
+        return jsonify({"error": "Context not initialized"}), 503
+    from .db import ContextDB
+    repo = request.args.get("repo")
+    repo_filter = repo.split(",") if repo and "," in repo else repo
+    nodes = ContextDB.list_ast_nodes(repo_filter)
+    return jsonify({"ast_count": len(nodes), "nodes": nodes})
+
+
 # ---------------------------------------------------------------------------
 # Memory bank resources
 # ---------------------------------------------------------------------------

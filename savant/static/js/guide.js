@@ -418,7 +418,7 @@ list_workspaces(status="open")</code></pre>
       ${_gFlow([
         { icon: '🧭', title: 'Workspace', desc: 'MCP server dashboard & tools', color: 'var(--cyan)' },
         { icon: '🧬', title: 'Abilities', desc: 'Prompt asset YAML editor', color: 'var(--magenta)' },
-        { icon: '📡', title: 'Context', desc: 'Semantic code search', color: 'var(--green)' },
+        { icon: '📡', title: 'Context', desc: 'Semantic search & AST exploration', color: 'var(--green)' },
         { icon: '🧠', title: 'Knowledge', desc: 'Interactive knowledge graph', color: 'var(--orange)' },
       ])}
 
@@ -428,8 +428,8 @@ list_workspaces(status="open")</code></pre>
       <h3>Abilities</h3>
       <p>A YAML asset editor with tree sidebar. Browse and edit personas, rules, policies, and styles. Use the <strong>Build</strong> tab to compile assets into a resolved prompt preview.</p>
 
-      <h3>Context (Semantic Search)</h3>
-      <p>Index repositories for semantic code search. Type a natural-language query and get relevant code chunks ranked by cosine similarity. Powered by sqlite-vec embeddings.</p>
+      <h3>Context (Semantic Search & AST)</h3>
+      <p>Index repositories for semantic code search and AST structural exploration. Type a natural-language query and get relevant code chunks ranked by cosine similarity, or search for structural elements directly. Powered by sqlite-vec and tree-sitter.</p>
       ${_gSteps([
         { title: 'Add a project', desc: 'Enter the path to a git repository', color: 'var(--cyan)' },
         { title: 'Index', desc: 'Savant walks the file tree, chunks code, and generates embeddings (~2 min for large repos)', color: 'var(--green)' },
@@ -508,7 +508,7 @@ list_workspaces(status="open")</code></pre>
       { id: 'components', title: 'Components', children: [
         { id: 'comp-mcp', title: 'MCP Servers', children: [] },
         { id: 'comp-abilities', title: 'Abilities', children: [] },
-        { id: 'comp-context', title: 'Context (Semantic Search)', children: [] },
+        { id: 'comp-context', title: 'Context (Semantic Search & AST)', children: [] },
         { id: 'comp-knowledge', title: 'Knowledge Graph', children: [] },
         { id: 'comp-notifications', title: 'Notifications', children: [] },
         { id: 'comp-debug', title: 'Debug Log', children: [] },
@@ -779,7 +779,7 @@ class WorkspaceDB:
         <tr><th>Server</th><th>Port</th><th>File</th><th>Tools</th></tr>
         <tr><td style="color:var(--cyan);">savant-workspace</td><td>8091</td><td><code>mcp/server.py</code></td><td>~30 tools (workspace, task, note, MR, Jira CRUD)</td></tr>
         <tr><td style="color:var(--magenta);">savant-abilities</td><td>8092</td><td><code>mcp/abilities_server.py</code></td><td>~10 tools (persona/rule resolution, YAML assets)</td></tr>
-        <tr><td style="color:var(--green);">savant-context</td><td>8093</td><td><code>mcp/context_server.py</code></td><td>~6 tools (code search, memory bank, repo status)</td></tr>
+        <tr><td style="color:var(--green);">savant-context</td><td>8093</td><td><code>mcp/context_server.py</code></td><td>~7 tools (code search, AST structure, memory bank, repo status)</td></tr>
         <tr><td style="color:var(--orange);">savant-knowledge</td><td>8094</td><td><code>mcp/knowledge_server.py</code></td><td>~15 tools (store, search, connect, commit, prune)</td></tr>
       </table>
 
@@ -875,10 +875,10 @@ content: |
     `
   },
   {
-    id: 'comp-context', title: 'Context (Semantic Search)', _sub: true, children: [],
+    id: 'comp-context', title: 'Context (Semantic Search & AST)', _sub: true, children: [],
     content: `
-      <h2>Context — Semantic Code Search</h2>
-      <p>Index repositories and search code using natural language. Powered by <code>sqlite-vec</code> vector embeddings.</p>
+      <h2>Context — Semantic Search & AST Explorer</h2>
+      <p>Index repositories and search code using natural language and structural tree-sitter queries. Powered by <code>sqlite-vec</code> vector embeddings and AST parsing.</p>
 
       <h3>Indexing Pipeline</h3>
       ${_gSteps([
@@ -888,13 +888,15 @@ content: |
         { title: 'Store in sqlite-vec', desc: 'Vectors stored alongside file path, line range, and content for fast KNN retrieval', color: 'var(--orange)' },
       ])}
 
-      <h3>Search</h3>
-      <p>Type a natural-language query (e.g., "authentication middleware for JWT tokens") and get ranked code chunks by cosine similarity. Results include file path, line numbers, and a relevance score.</p>
+      <h3>Search Options</h3>
+      <p><strong>Semantic Search:</strong> Type a natural-language query (e.g., "authentication middleware for JWT tokens") and get ranked code chunks by cosine similarity. Results include file path, line numbers, and a relevance score.</p>
+      <p><strong>AST Search:</strong> Query for exact structural elements (classes, functions, methods) across the codebase for precision routing and context gathering.</p>
 
       <h3>MCP Tools</h3>
       <table class="guide-table">
         <tr><th>Tool</th><th>Purpose</th></tr>
         <tr><td><code>code_search(query, repo)</code></td><td>Semantic search across repo source code</td></tr>
+        <tr><td><code>structure_search(query, repo)</code></td><td>Structural internal lookup of AST components by pattern</td></tr>
         <tr><td><code>memory_bank_search(query, repo)</code></td><td>Search within memory bank markdown files</td></tr>
         <tr><td><code>repos_list()</code></td><td>List all indexed repos with README excerpts</td></tr>
         <tr><td><code>repo_status()</code></td><td>Index health: chunk count, last indexed, errors</td></tr>
@@ -1412,7 +1414,7 @@ args = ["/path/to/savant/mcp/stdio.py", "workspace"]</pre>
         <tr><th>Server</th><th>Port</th><th>What It Does</th></tr>
         <tr><td style="color:var(--cyan);">savant-workspace</td><td>8091</td><td>Workspaces, tasks, Jira tickets, merge requests, session notes, session assignment</td></tr>
         <tr><td style="color:var(--magenta);">savant-abilities</td><td>8092</td><td>Personas, rules, policies, styles — prompt resolution and YAML asset management</td></tr>
-        <tr><td style="color:var(--green);">savant-context</td><td>8093</td><td>Semantic code search across indexed repos, memory bank search, repository info</td></tr>
+        <tr><td style="color:var(--green);">savant-context</td><td>8093</td><td>Semantic code search, AST structure exploration, memory bank search</td></tr>
         <tr><td style="color:var(--orange);">savant-knowledge</td><td>8094</td><td>Knowledge graph — store, search, traverse, and connect nodes (insights, services, domains, etc.)</td></tr>
       </table>
 

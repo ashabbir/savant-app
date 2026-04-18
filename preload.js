@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("terminalAPI", {
   list: () => ipcRenderer.invoke("terminal:list"),
   openExternal: (cwd) => ipcRenderer.invoke("terminal:open-external", cwd),
   runInNewTab: (cwd, command) => ipcRenderer.send("terminal:run-in-new-tab", { cwd, command }),
+  runInFreshTab: (cwd, payload) => ipcRenderer.send("terminal:run-in-fresh-tab", { cwd, payload }),
   getPrefs: () => ipcRenderer.invoke("terminal:get-prefs"),
   setPrefs: (prefs) => ipcRenderer.invoke("terminal:set-prefs", prefs),
 

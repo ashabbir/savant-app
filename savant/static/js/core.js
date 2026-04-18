@@ -41,11 +41,11 @@ function _peekNavState() {
 // Release notes
 const RELEASES = [
   {
-    version: 'v6.9.0',
+    version: 'v7.1.0',
     date: '2026-04-17',
     tag: 'minor',
     tagline: 'Hermes is now the default provider. Auto-installed skills. Comprehensive in-app guide for AI agent setup.',
-    description: 'SAVANT v6.9.0 makes Hermes the recommended and default AI agent. The Sessions tab now opens to Hermes first, with automatic fallback to the first enabled provider. Savant auto-installs 4 Hermes skills covering the full platform when MCP is set up. The in-app guide gets a new AI Agent Setup section with provider docs, MCP server reference, environment variable guide, and a full Hermes onboarding walkthrough. Stdio MCP servers (GitLab, Atlassian) are auto-configured for all 5 providers.',
+    description: 'SAVANT v7.1.0 introduces the savant-context AST implementation, an absolute hero release that empowers users to explore codebase structures directly in the dashboard UI. The Context panel now features a dedicated AST Explorer, transforming the codebase indexing pipeline into an interactive map of classes and functions globally. In addition to our intelligent semantic search capabilities, AI agents can now execute structural AST queries, seamlessly bridging high-level semantic intent with precise code exploration.',
     abilities: [
       { icon: '🪶', name: 'Hermes First', desc: 'Hermes is the default provider — first tab, first in all dropdown/selection order. Sessions tab always lands on the first enabled provider.' },
       { icon: '📚', name: 'Auto-Installed Skills', desc: '4 Hermes skills (platform, gitlab-mr-review, session-provider, test-runner) auto-installed to ~/.hermes/skills/savant/ during MCP setup.' },

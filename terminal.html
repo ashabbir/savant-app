@@ -1396,31 +1396,39 @@ function _initCommandListener() {
 
       case 'run-in-new-tab': {
         const { cwd: runCwd, command: runCmd } = arg || {};
-        const _writeCmd = () => {
-          if (!runCmd) return;
+        const ENTER = '\r';
+        termAddTab(runCwd).then(() => {
+          if (!runCmd || !_termApi) return;
           setTimeout(() => {
             const leaf = _focusedLeafId ? _findLeaf(_focusedLeafId) : null;
-            if (leaf && leaf.tabId && _termApi) {
-              _termApi.write(leaf.tabId, runCmd + '\n');
+            if (leaf && leaf.tabId) {
+              _termApi.write(leaf.tabId, runCmd + ENTER);
             }
-          }, 500);
-        };
-        if (_termTabs.size === 0) {
-          // No terminals — create a fresh one (no split)
-          termAddTab(runCwd).then(_writeCmd);
-        } else {
-          // Terminals exist — write command to the currently focused tab
-          const focusedLeaf = _focusedLeafId ? _findLeaf(_focusedLeafId) : null;
-          if (focusedLeaf && focusedLeaf.tabId && _termApi) {
-            if (runCwd) {
-              _termApi.write(focusedLeaf.tabId, `cd ${runCwd.replace(/ /g, '\\\\ ')} && ${runCmd}\n`);
-            } else if (runCmd) {
-              _termApi.write(focusedLeaf.tabId, runCmd + '\n');
+          }, 600);
+        });
+        break;
+      }
+
+      case 'run-in-fresh-tab': {
+        const { cwd: runCwd, command: runCmd, followup = '', followupDelayMs = 900 } = arg || {};
+        termAddTab(runCwd).then((created) => {
+          if (!created || !created.tabId || !_termApi) return;
+          const targetTabId = created.tabId;
+          setTimeout(() => {
+            const ENTER = '\r';
+            if (runCmd) _termApi.write(targetTabId, runCmd + ENTER);
+            if (followup) {
+              setTimeout(() => {
+                if (_termTabs.has(targetTabId) && _termApi) {
+                  _termApi.write(targetTabId, followup + ENTER);
+                  // Some REPLs don't execute pasted multiline input on first newline;
+                  // send one extra Enter to force submission reliably.
+                  setTimeout(() => _termApi.write(targetTabId, ENTER), 120);
+                }
+              }, Math.max(200, Number(followupDelayMs) || 900));
             }
-          } else {
-            termAddTab(runCwd).then(_writeCmd);
-          }
-        }
+          }, 450);
+        });
         break;
       }
 

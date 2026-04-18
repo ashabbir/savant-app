@@ -61,13 +61,14 @@ async function ctxRefreshStatus() {
 function switchCtxPanel(panel) {
   document.querySelectorAll('.ctx-inner-tabs .savant-subtab').forEach(b => b.classList.remove('active'));
   event.target.classList.add('active');
-  ['search', 'projects', 'memory', 'code'].forEach(p => {
+  ['search', 'projects', 'memory', 'code', 'ast'].forEach(p => {
     const el = document.getElementById('ctx-panel-' + p);
     if (el) el.style.display = p === panel ? 'block' : 'none';
   });
   if (panel === 'projects') ctxLoadProjects();
   if (panel === 'memory') ctxLoadMemory();
   if (panel === 'code') ctxLoadCode();
+  if (panel === 'ast') ctxLoadAst();
   if (panel === 'search') ctxPopulateRepoFilter();
 }
 
@@ -408,6 +409,7 @@ function _ctxRenderDetail(indexStatus) {
         <div class="ctx-det-stat"><div class="ctx-det-stat-val">${codeFiles}</div><div class="ctx-det-stat-label">Code Files</div></div>
         <div class="ctx-det-stat"><div class="ctx-det-stat-val">${memBank}</div><div class="ctx-det-stat-label">Memory Bank</div></div>
         <div class="ctx-det-stat"><div class="ctx-det-stat-val">${p.chunk_count || 0}</div><div class="ctx-det-stat-label">Chunks</div></div>
+        <div class="ctx-det-stat"><div class="ctx-det-stat-val">${p.ast_node_count || 0}</div><div class="ctx-det-stat-label">AST Nodes</div></div>
       </div>
     </div>
 
@@ -545,3 +547,62 @@ function _ctxRenderFileList(container, items, prefix, type) {
 
 function ctxReadMemory(uri) { openContextFile(uri, 'memory'); }
 function ctxReadCodeFile(uri) { openContextFile(uri, 'code'); }
+
+async function ctxLoadAst() {
+  const container = document.getElementById('ctx-ast-list');
+  try {
+    const res = await fetch('/api/context/ast/list');
+    if (!res.ok) throw new Error('API error');
+    const data = await res.json();
+    const items = data.nodes || [];
+    if (!items.length) {
+      container.innerHTML = `<div class="ctx-welcome">
+        <div style="font-size:2rem;margin-bottom:12px;">🌲</div>
+        <div>No AST nodes found</div>
+        <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Index a supported code project to see its structure</div>
+      </div>`;
+      return;
+    }
+    
+    const byRepoAndFile = {};
+    items.forEach(n => {
+      const repo = n.repo || 'unknown';
+      if (!byRepoAndFile[repo]) byRepoAndFile[repo] = {};
+      const path = n.path || 'unknown';
+      if (!byRepoAndFile[repo][path]) byRepoAndFile[repo][path] = [];
+      byRepoAndFile[repo][path].push(n);
+    });
+
+    let html = '';
+    for (const [repo, files] of Object.entries(byRepoAndFile)) {
+      const repoId = 'ast-repo-' + repo.replace(/[^a-zA-Z0-9]/g, '_');
+      html += `<div style="margin-bottom:12px;">
+        <div style="font-family:var(--font-mono);font-size:0.6rem;color:#22d3ee;margin-bottom:6px;padding:6px 10px;background:rgba(34,211,238,0.08);border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;" onclick="document.getElementById('${repoId}').style.display=document.getElementById('${repoId}').style.display==='none'?'block':'none'; this.querySelector('.ctx-mem-arrow').textContent=document.getElementById('${repoId}').style.display==='none'?'▸':'▾'">
+          <span>📁 ${_escHtml(repo)}</span><span class="ctx-mem-arrow" style="font-size:0.7rem;">▸</span>
+        </div>
+        <div id="${repoId}" style="display:none;padding-left:12px;border-left:1px solid rgba(255,255,255,0.1);margin-left:6px;">`;
+      
+      for (const [file, nodes] of Object.entries(files)) {
+        const fileId = repoId + '-file-' + file.replace(/[^a-zA-Z0-9]/g, '_');
+        html += `<div style="margin-bottom:4px;margin-top:8px;">
+          <div style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text);margin-bottom:4px;cursor:pointer;" onclick="document.getElementById('${fileId}').style.display=document.getElementById('${fileId}').style.display==='none'?'block':'none';">
+            📄 ${_escHtml(file)} <span style="color:var(--text-dim);font-size:0.45rem;">(${nodes.length} elements)</span>
+          </div>
+          <div id="${fileId}" style="display:none;padding-left:12px;background:rgba(0,0,0,0.2);border-radius:4px;padding:4px 8px;">`;
+          
+        nodes.forEach(n => {
+          const icon = n.node_type === 'class' ? '📦' : 'ƒ()';
+          html += `<div class="ctx-memory-item" style="cursor:pointer" onclick="ctxReadCodeFile('${_escHtml(repo + ':' + file)}#L${n.start_line}')">
+            <span>${icon} <span style="color:#a855f7;">${_escHtml(n.name)}</span></span>
+            <div style="color:var(--text-dim);font-size:0.45rem;">L${n.start_line}-${n.end_line}</div>
+          </div>`;
+        });
+        html += `</div></div>`;
+      }
+      html += `</div></div>`;
+    }
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = '<div class="ctx-welcome" style="padding:30px;color:#ef4444;">Failed to load tree: ' + _escHtml(e.message) + '</div>';
+  }
+}

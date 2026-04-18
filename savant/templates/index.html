@@ -3057,7 +3057,7 @@
   .dep-graph-tooltip .tt-meta { color: var(--text-dim); margin-bottom: 3px; }
   .dep-graph-tooltip .tt-desc {
     color: var(--text-dim); font-size: 0.5rem; margin-top: 4px;
-    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
   }
   .dep-graph-empty {
     display: flex; align-items: center; justify-content: center; min-height: 300px;
@@ -5198,6 +5198,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
       <span id="ws-detail-priority-badge"></span>
       <span id="ws-detail-elapsed" style="font-size:0.55rem;color:var(--cyan);font-family:var(--font-mono);"></span>
       <button class="ws-edit-btn" id="ws-detail-edit-btn" onclick="editCurrentWs()">✏ EDIT</button>
+      <button class="ws-edit-btn" id="ws-new-session-btn" style="color:var(--green);border-color:rgba(34,197,94,0.3);" onclick="openWsNewSessionModal()">▶ NEW SESSION</button>
       <button class="ws-edit-btn" style="color:var(--magenta);border-color:rgba(255,0,255,0.2);" onclick="generateWsContextPrompt()">📋 BRIDGE PROMPT</button>
       <button class="ws-edit-btn" id="ws-detail-toggle-btn" onclick="toggleCurrentWsStatus()">✕ CLOSE</button>
       <input type="color" id="ws-detail-color" title="Workspace color" onchange="saveWsColor(this.value)" style="width:28px;height:22px;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);cursor:pointer;padding:0;" />
@@ -5706,12 +5707,19 @@ function showLoadingScreen(cb) { if (cb) cb(); }
           </div>
 
           <div class="tutorial-section" style="margin-top:16px;">
-            <h4>🔍 Semantic Search</h4>
+            <h4>🔍 Search Modes</h4>
             <div class="tutorial-tool">
               <span class="tutorial-tool-icon">🔎</span>
               <div class="tutorial-tool-info">
                 <div class="tutorial-tool-name">code_search</div>
                 <div class="tutorial-tool-desc">Semantic code search across indexed repos. Accepts a natural-language query <code>q</code>, optional <code>repo</code> filter (name or list), <code>limit</code> (1–100, default 10), and <code>exclude_memory_bank</code> flag. Returns file paths, language, line range, content snippets, and distance scores.</div>
+              </div>
+            </div>
+            <div class="tutorial-tool">
+              <span class="tutorial-tool-icon">🏗️</span>
+              <div class="tutorial-tool-info">
+                <div class="tutorial-tool-name">structure_search</div>
+                <div class="tutorial-tool-desc">AST structure exploration. Query for codebase structures (classes, functions, etc.) across indexed repos by name. Returns AST node names, types, parent context, file paths, and snippets.</div>
               </div>
             </div>
             <div class="tutorial-tool">
@@ -5767,16 +5775,19 @@ function showLoadingScreen(cb) { if (cb) cb(); }
 <span class="comment">// 2. Search only in a specific project</span>
 <span class="highlight">code_search</span>(q: "database connection pool", repo: "savant-app")
 
-<span class="comment">// 3. Find relevant memory bank docs</span>
+<span class="comment">// 3. Find structural components by name</span>
+<span class="highlight">structure_search</span>(q: "UserRepository")
+
+<span class="comment">// 4. Find relevant memory bank docs</span>
 <span class="highlight">memory_bank_search</span>(q: "deployment architecture")
 
-<span class="comment">// 4. List all memory bank resources</span>
+<span class="comment">// 5. List all memory bank resources</span>
 <span class="highlight">memory_resources_list</span>()
 
-<span class="comment">// 5. Read a specific memory doc</span>
+<span class="comment">// 6. Read a specific memory doc</span>
 <span class="highlight">memory_resources_read</span>(uri: "memory/architecture.md")
 
-<span class="comment">// 6. Check which repos are indexed</span>
+<span class="comment">// 7. Check which repos are indexed</span>
 <span class="highlight">repo_status</span>()</div>
           </div>
 
@@ -6026,6 +6037,47 @@ function showLoadingScreen(cb) { if (cb) cb(); }
       <div class="ws-modal-actions">
         <button class="ws-modal-cancel" onclick="closeWsModal()">CANCEL</button>
         <button class="ws-modal-save" onclick="saveWorkspace()">SAVE</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ws-new-session-modal" class="ws-modal-overlay" style="display:none;" onclick="if(event.target===this)closeWsNewSessionModal()">
+    <div class="ws-modal" style="width:680px;max-width:90vw;">
+      <h3>START NEW SESSION</h3>
+      <label style="font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);display:block;margin-bottom:4px;">SESSION NAME</label>
+      <input type="text" id="ws-new-session-name" placeholder="e.g. API hardening sprint" />
+      <label style="font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);display:block;margin:10px 0 4px;">REPOSITORY DIRECTORY</label>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="ws-new-session-repo" placeholder="/path/to/repo" style="flex:1;" />
+        <button class="ws-modal-cancel" onclick="browseWsNewSessionRepo()" style="white-space:nowrap;">📂 BROWSE</button>
+      </div>
+      <label style="font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);display:block;margin:10px 0 4px;">PROVIDER</label>
+      <select id="ws-new-session-provider" style="width:100%;background:var(--bg-card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:0.65rem;font-family:var(--font-mono);"></select>
+      <div style="display:flex;gap:10px;align-items:flex-end;">
+        <div style="flex:1;">
+          <label style="font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);display:block;margin:10px 0 4px;">PERSONA (HERMES)</label>
+          <select id="ws-new-session-persona" style="width:100%;background:var(--bg-card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:0.65rem;font-family:var(--font-mono);">
+            <option value="engineer">engineer</option>
+            <option value="architect">architect</option>
+            <option value="reviewer">reviewer</option>
+          </select>
+        </div>
+        <div style="flex:2;">
+          <label style="font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);display:block;margin:10px 0 4px;">ABILITY TAGS (HERMES)</label>
+          <div id="ws-new-session-tag-pills" class="ab-tags-container" style="min-height:22px;margin-bottom:6px;"></div>
+          <input type="text" id="ws-new-session-tags" placeholder="type tag and press Enter" style="width:100%;" />
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin:10px 0 4px;font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);">
+        <input type="checkbox" id="ws-new-session-system-prompt-toggle" />
+        RUN ABILITY SETUP PROMPT (OPTIONAL FOR HERMES)
+      </label>
+      <label style="font-family:var(--font-mono);font-size:0.52rem;color:var(--text-dim);display:block;margin:10px 0 4px;">SEED PROMPT (OPTIONAL FOR HERMES)</label>
+      <textarea id="ws-new-session-seed" rows="6" placeholder="Describe what the agent should start with..."></textarea>
+      <div style="font-family:var(--font-mono);font-size:0.48rem;color:var(--text-dim);margin-top:8px;">This opens a fresh terminal tab, cds into the selected repo, runs the selected provider CLI, and sends your seed prompt. Ability setup prompt is optional.</div>
+      <div class="ws-modal-actions">
+        <button class="ws-modal-cancel" onclick="closeWsNewSessionModal()">CANCEL</button>
+        <button class="ws-modal-save" onclick="startWsNewSession()">START HERE</button>
       </div>
     </div>
   </div>
@@ -6436,6 +6488,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
       <button class="savant-subtab" onclick="switchCtxPanel('projects')">📁 Projects</button>
       <button class="savant-subtab" onclick="switchCtxPanel('code')">📄 Code</button>
       <button class="savant-subtab" onclick="switchCtxPanel('memory')">🧠 Memory Bank</button>
+      <button class="savant-subtab" onclick="switchCtxPanel('ast')">🌲 AST</button>
     </div>
 
     <!-- Search Panel -->
@@ -6504,6 +6557,17 @@ function showLoadingScreen(cb) { if (cb) cb(); }
           <div style="font-size:2rem;margin-bottom:12px;">📄</div>
           <div>Indexed code files</div>
           <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Index a project to browse its code files here</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AST Panel -->
+    <div class="ctx-panel" id="ctx-panel-ast" style="display:none;">
+      <div id="ctx-ast-list" class="ctx-memory-list">
+        <div class="ctx-welcome">
+          <div style="font-size:2rem;margin-bottom:12px;">🌲</div>
+          <div>AST nodes</div>
+          <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Index a project to browse its abstract syntax tree here</div>
         </div>
       </div>
     </div>

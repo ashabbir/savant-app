@@ -5,6 +5,7 @@ Follows the same pattern as workspace (8091) and abilities (8092) servers.
 
 Tools:
   code_search          — Semantic search across indexed repo code
+  structure_search     — AST structure search for classes, functions
   memory_bank_search   — Semantic search within memory bank markdown files
   memory_resources_list — List all memory bank resources (optional repo filter)
   memory_resources_read — Read a specific memory bank resource by URI
@@ -36,11 +37,12 @@ FLASK_URL = _args.flask_url
 mcp = FastMCP(
     "savant-context",
     instructions=(
-        "Semantic code search and memory bank across indexed repositories. "
+        "Semantic code search, AST structure exploration, and memory bank across indexed repositories. "
         "Use code_search(query, repo) for semantic search across repo source code. "
         "Use memory_bank_search(query, repo) for semantic search within memory bank markdown. "
         "Use memory_resources_list(repo) to browse available memory bank files; memory_resources_read(uri) to read one. "
         "Use repos_list() to see all indexed repos with README excerpts; repo_status() for index health. "
+        "Use structure_search(query) to find classes, functions, or language elements via substring AST matching. "
         "All tools accept an optional repo filter (string name or list of names)."
     ),
     host=_args.host,
@@ -85,6 +87,20 @@ def code_search(
     if exclude_memory_bank:
         params["exclude_memory_bank"] = "true"
     return _get("/api/context/search", params)
+
+
+@mcp.tool()
+def structure_search(
+    q: str = None,
+    query: str = None,
+    repo: str | list[str] = None,
+) -> dict:
+    """AST structure search for code (e.g. classes, functions)."""
+    effective_query = q or query or ""
+    params = {"query": effective_query}
+    if repo:
+        params["repo"] = ",".join(repo) if isinstance(repo, list) else repo
+    return _get("/api/context/ast/search", params)
 
 
 @mcp.tool()

@@ -998,6 +998,15 @@ function _setupTermViewIPC() {
       termView.webContents.send("terminal:command", "run-in-new-tab", { cwd, command });
     }
   });
+
+  // Run a command in a freshly created terminal tab, with optional follow-up input.
+  // Payload shape: { command: string, followup?: string, followupDelayMs?: number }
+  ipcMain.on("terminal:run-in-fresh-tab", (_event, { cwd, payload }) => {
+    if (!termViewVisible) showTermView(cwd);
+    if (termView && !termView.webContents.isDestroyed()) {
+      termView.webContents.send("terminal:command", "run-in-fresh-tab", { cwd, ...(payload || {}) });
+    }
+  });
   ipcMain.handle("terminal:is-drawer-open", () => termViewVisible);
 
   // Resize drag from terminal.html
