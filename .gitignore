@@ -20,3 +20,4 @@ savant/models/
 .claude/
 .copilot-plan.md
 arch-version*
+savant.db
