@@ -314,56 +314,123 @@ function _cxRenderFileDetail(file, container) {
  *   outer ring = functions, arc size ∝ function complexity,   color = score
  * Hovering a segment updates the detail panel on the right.
  */
-function _renderComplexityRadial(nodes, container) {
-  const files = _computeAstComplexity(nodes);
-  if (!files.length) {
+function _renderComplexityRadial(nodes, container, _fileLimit = 1500) {
+  const TYPED = new Set(['function', 'method', 'class']);
+
+  // Step 1 — group by file in O(n), counting only typed nodes
+  const byFile = {};
+  for (const n of nodes) {
+    if (!TYPED.has(n.node_type)) continue;
+    const key = (n.repo || '') + '::' + (n.path || '');
+    if (!byFile[key]) byFile[key] = [];
+    byFile[key].push(n);
+  }
+
+  const totalFiles = Object.keys(byFile).length;
+  if (!totalFiles) {
     container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim);">No function / method / class nodes found.</div>';
     return;
   }
+
+  // Limit-picker — update the top header bar (defined in context-ast.js)
+  if (typeof _updateAstLimitBar === 'function') _updateAstLimitBar('radial', totalFiles, _fileLimit);
+
+  const limited = _fileLimit !== 'all';
+  const cap     = limited ? Math.min(_fileLimit, totalFiles) : totalFiles;
 
   const cid      = 'ast-radial-' + Math.random().toString(36).substr(2, 9);
   const detailId = cid + '-info';
 
   container.innerHTML = `
-    <div style="display:flex; height:calc(80vh - 44px); overflow:hidden;">
-      <div id="${cid}" style="flex:1; overflow:hidden; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.12);"></div>
-      <div id="${detailId}" style="width:0;min-width:0;overflow:hidden;border-left:none;padding:0;flex-shrink:0;font-size:0.62rem;background:var(--bg-card);font-family:var(--font-mono);"></div>
+    <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+      <div style="display:flex;flex:1;overflow:hidden;">
+        <div id="${cid}" style="flex:1;overflow:hidden;position:relative;background:rgba(0,0,0,0.12);
+             display:flex;align-items:center;justify-content:center;">
+          <span style="color:var(--text-dim);font-size:0.75rem;">Computing complexity…</span>
+        </div>
+        <div id="${detailId}" style="width:0;min-width:0;overflow:hidden;border-left:none;padding:0;
+             flex-shrink:0;font-size:0.62rem;background:var(--bg-card);font-family:var(--font-mono);
+             transition:width 0.2s ease,min-width 0.2s ease,padding 0.2s ease;"></div>
+      </div>
     </div>
   `;
+
+  // Re-render hook (captures container + nodes via closure)
+  window._astRadialRerender = newLimit => _renderComplexityRadial(nodes, container, newLimit);
+
+  // Defer heavy work — lets the loading text paint first
+  setTimeout(() => {
+    const svgEl = document.getElementById(cid);
+    if (!svgEl) return;
+
+    // Step 2 — sort files by node count, take top cap, cap fns/file to 50
+    const MAX_FNS_COMPUTE = 50;
+    const MAX_FNS_RENDER  = 10;
+    const topKeys = Object.keys(byFile)
+      .sort((a, b) => byFile[b].length - byFile[a].length)
+      .slice(0, cap);
+    const filteredNodes = topKeys.flatMap(k => byFile[k].slice(0, MAX_FNS_COMPUTE));
+
+    // Step 3 — run complexity on small, pre-filtered dataset
+    const files = _computeAstComplexity(filteredNodes);
+    if (!files.length) {
+      svgEl.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim);">No data.</div>';
+      return;
+    }
+
+    // Step 4 — render
+    _drawRadialChart(cid, detailId, files, MAX_FNS_RENDER);
+  }, 20);
+}
+
+function _drawRadialChart(cid, detailId, files, MAX_FNS) {
+  const svgEl = document.getElementById(cid);
+  if (!svgEl) return;
+  svgEl.innerHTML = ''; // clear loading text
+
+  const W = svgEl.clientWidth  || 520;
+  const H = svgEl.clientHeight || 520;
+  const R = Math.min(W, H) / 2 * 0.86;
+
+  const _selectedArc = {};
 
   window._astRadialCloseDetail = window._astRadialCloseDetail || {};
   window._astRadialCloseDetail[cid] = function() {
     _setRadialDetailOpen(detailId, false);
+    d3.selectAll('#' + cid + ' path')
+      .attr('stroke', 'rgba(0,0,0,0.5)').attr('stroke-width', 0.5).style('filter', null);
+    _selectedArc[cid] = null;
   };
 
-  const svgEl = document.getElementById(cid);
-  const W     = svgEl.clientWidth  || 520;
-  const H     = svgEl.clientHeight || 480;
-  const R     = Math.min(W, H) / 2 * 0.88;
-
-  // D3 hierarchy
+  // Build hierarchy
   const hierData = {
     name: 'root',
-    children: files.map(f => ({
-      name:     f.path.split('/').pop(),
-      fullPath: f.path,
-      repo:     f.repo,
-      total:    f.total_complexity,
-      fnCount:  f.functions.length,
-      isFile:   true,
-      children: f.functions.length
-        ? f.functions.map(fn => ({
-            name:       fn.name,
-            value:      Math.max(1, fn.complexity),
-            complexity: fn.complexity,
-            line:       fn.start_line,
-            endLine:    fn.end_line,
-            nodeType:   fn.node_type,
-            childCount: fn.child_count,
-            isFile:     false,
-          }))
-        : [{ name: '(none)', value: 1, complexity: 0, isFile: false }],
-    }))
+    children: files.map(f => {
+      const topFns = f.functions.slice(0, MAX_FNS);
+      return {
+        name:      f.path.split('/').pop(),
+        fullPath:  f.path,
+        repo:      f.repo,
+        total:     f.total_complexity,
+        fnCount:   f.functions.length,
+        functions: f.functions,
+        isFile:    true,
+        children: topFns.length
+          ? topFns.map(fn => ({
+              name:       fn.name,
+              value:      Math.max(1, fn.complexity),
+              complexity: fn.complexity,
+              line:       fn.start_line,
+              endLine:    fn.end_line,
+              nodeType:   fn.node_type,
+              childCount: fn.child_count,
+              parentFile: f.path.split('/').pop(),
+              parentPath: f.path,
+              isFile:     false,
+            }))
+          : [{ name: '(none)', value: 1, complexity: 0, isFile: false }],
+      };
+    })
   };
 
   const root = d3.hierarchy(hierData)
@@ -372,7 +439,6 @@ function _renderComplexityRadial(nodes, container) {
 
   d3.partition().size([2 * Math.PI, 2])(root);
 
-  // Arc generator — inner ring: depth=1 (files), outer ring: depth=2 (fns)
   const arc = d3.arc()
     .startAngle(d  => d.x0)
     .endAngle(d    => d.x1)
@@ -395,78 +461,81 @@ function _renderComplexityRadial(nodes, container) {
     return '#f87171';
   };
 
-  // SVG
   const svg = d3.select('#' + cid)
-    .append('svg')
-    .attr('width', W)
-    .attr('height', H)
-    .attr('viewBox', `${-W/2} ${-H/2} ${W} ${H}`);
+    .append('svg').attr('width', W).attr('height', H).style('display', 'block');
 
-  // Glow filter
   const glowId = 'glow-' + cid.slice(-6);
   const defs   = svg.append('defs');
-  const filt   = defs.append('filter').attr('id', glowId);
+  const filt   = defs.append('filter').attr('id', glowId)
+    .attr('x', '-30%').attr('y', '-30%').attr('width', '160%').attr('height', '160%');
   filt.append('feGaussianBlur').attr('stdDeviation', '3').attr('result', 'blur');
-  const merge  = filt.append('feMerge');
-  merge.append('feMergeNode').attr('in', 'blur');
-  merge.append('feMergeNode').attr('in', 'SourceGraphic');
+  const fmerge = filt.append('feMerge');
+  fmerge.append('feMergeNode').attr('in', 'blur');
+  fmerge.append('feMergeNode').attr('in', 'SourceGraphic');
 
-  const g = svg.append('g');
+  const cx = W / 2, cy = H / 2;
+  const initialTransform = d3.zoomIdentity.translate(cx, cy);
+  const g = svg.append('g').attr('transform', initialTransform);
 
-  // Arcs
+  const zoom = d3.zoom().scaleExtent([0.2, 8])
+    .on('zoom', e => g.attr('transform', e.transform));
+  svg.call(zoom).call(zoom.transform, initialTransform);
+
   g.selectAll('path')
     .data(root.descendants().filter(d => d.depth > 0))
     .join('path')
     .attr('d', arc)
     .attr('fill',         d => d.data.isFile ? _fileColor(d.data.total) : _fnColor(d.data.complexity))
     .attr('fill-opacity', d => d.depth === 1 ? 0.5 : 0.78)
-    .attr('stroke', 'rgba(0,0,0,0.5)')
-    .attr('stroke-width', 0.5)
+    .attr('stroke', 'rgba(0,0,0,0.5)').attr('stroke-width', 0.5)
     .style('cursor', 'pointer')
-    .style('transition', 'fill-opacity 0.12s')
-    .on('mouseover', function(event, d) {
-      d3.select(this).attr('fill-opacity', 1).style('filter', `url(#${glowId})`);
+    .on('click', function(event, d) {
+      event.stopPropagation();
+      if (_selectedArc[cid] && _selectedArc[cid] !== this) {
+        const pd = d3.select(_selectedArc[cid]).datum();
+        d3.select(_selectedArc[cid])
+          .attr('stroke', 'rgba(0,0,0,0.5)').attr('stroke-width', 0.5)
+          .attr('fill-opacity', pd.depth === 1 ? 0.5 : 0.78).style('filter', null);
+      }
+      if (_selectedArc[cid] === this) {
+        _selectedArc[cid] = null;
+        _setRadialDetailOpen(detailId, false);
+        return;
+      }
+      _selectedArc[cid] = this;
+      d3.select(this).attr('stroke', '#fff').attr('stroke-width', 1.5)
+        .attr('fill-opacity', 1).style('filter', `url(#${glowId})`);
       _updateRadialDetail(detailId, d, `window._astRadialCloseDetail['${cid}']`);
-    })
-    .on('mouseout', function(event, d) {
-      d3.select(this).attr('fill-opacity', d.depth === 1 ? 0.5 : 0.78).style('filter', null);
     });
 
-  // Center circle & total score
+  svg.on('click', () => {
+    if (_selectedArc[cid]) {
+      const pd = d3.select(_selectedArc[cid]).datum();
+      d3.select(_selectedArc[cid])
+        .attr('stroke', 'rgba(0,0,0,0.5)').attr('stroke-width', 0.5)
+        .attr('fill-opacity', pd.depth === 1 ? 0.5 : 0.78).style('filter', null);
+      _selectedArc[cid] = null;
+    }
+    _setRadialDetailOpen(detailId, false);
+  });
+
   const totalScore = files.reduce((s, f) => s + f.total_complexity, 0);
-  const avgScore   = Math.round(totalScore / Math.max(files.length, 1));
-  const centerC    = _complexityColor(avgScore);
+  const centerC    = _complexityColor(Math.round(totalScore / Math.max(files.length, 1)));
 
-  g.append('circle')
-    .attr('r', R * 0.20)
-    .attr('fill', 'rgba(10,10,20,0.7)')
-    .attr('stroke', 'rgba(255,255,255,0.1)')
-    .attr('stroke-width', 1);
+  g.append('circle').attr('r', R * 0.20)
+    .attr('fill', 'rgba(10,10,20,0.7)').attr('stroke', 'rgba(255,255,255,0.1)')
+    .attr('stroke-width', 1).style('pointer-events', 'none');
+  g.append('text').attr('text-anchor', 'middle').attr('dy', '-0.35em')
+    .attr('fill', centerC.fg).attr('font-size', `${Math.max(13, R * 0.075)}px`)
+    .attr('font-weight', '700').style('pointer-events', 'none').text(totalScore);
+  g.append('text').attr('text-anchor', 'middle').attr('dy', '1em')
+    .attr('fill', 'rgba(255,255,255,0.35)').attr('font-size', `${Math.max(8, R * 0.042)}px`)
+    .style('pointer-events', 'none').text('total score');
 
-  g.append('text')
-    .attr('text-anchor', 'middle')
-    .attr('dy', '-0.35em')
-    .attr('fill', centerC.fg)
-    .attr('font-size', `${Math.max(13, R * 0.075)}px`)
-    .attr('font-weight', '700')
-    .text(totalScore);
-
-  g.append('text')
-    .attr('text-anchor', 'middle')
-    .attr('dy', '1em')
-    .attr('fill', 'rgba(255,255,255,0.35)')
-    .attr('font-size', `${Math.max(8, R * 0.042)}px`)
-    .text('total score');
-
-  // Legend footnote
-  svg.append('text')
-    .attr('x', -W/2 + 8).attr('y', H/2 - 32)
-    .attr('fill', 'rgba(255,255,255,0.3)').attr('font-size', '9px')
-    .text('inner = files  ·  outer = functions');
-  svg.append('text')
-    .attr('x', -W/2 + 8).attr('y', H/2 - 18)
+  const leg = svg.append('g').style('pointer-events', 'none');
+  leg.append('text').attr('x', 10).attr('y', H - 10)
     .attr('fill', 'rgba(255,255,255,0.25)').attr('font-size', '9px')
-    .text('arc size ∝ complexity score');
+    .text('inner = files  ·  outer = top functions  ·  scroll to zoom  ·  drag to pan  ·  click to inspect');
 }
 
 // ── Radial detail panel ───────────────────────────────────────────────────────
@@ -506,53 +575,98 @@ function _updateRadialDetail(detailId, d, onCloseName = '') {
 
   if (d.data.isFile) {
     const c = _complexityColor(d.data.total);
+    const parts = (d.data.fullPath || '').split('/');
+    const fileName = parts.pop();
+    const dirPath  = parts.join('/');
+    const ext      = fileName.includes('.') ? fileName.split('.').pop() : '—';
+    const avgScore = d.data.fnCount ? (d.data.total / d.data.fnCount).toFixed(1) : '—';
+    const fnList   = (d.data.functions || []).slice(0, 8);
     el.innerHTML = `
       ${_radialDetailHeader(onCloseName)}
-      <div style="border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:14px;">
-        <div style="color:var(--text-dim);font-size:0.56rem;letter-spacing:0.08em;margin-bottom:5px;">📄 FILE</div>
-        <div style="color:var(--text);font-weight:700;font-size:0.68rem;word-break:break-all;line-height:1.4;">${_escHtml(d.data.fullPath)}</div>
+      <div style="border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:12px;">
+        <div style="color:var(--text-dim);font-size:0.52rem;letter-spacing:0.08em;margin-bottom:5px;">📄 FILE</div>
+        <div style="color:var(--text);font-weight:700;font-size:0.68rem;word-break:break-all;line-height:1.4;">${_escHtml(fileName)}</div>
+        <div style="color:var(--text-dim);font-size:0.52rem;margin-top:4px;word-break:break-all;line-height:1.4;">${_escHtml(dirPath)}</div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
-        <div style="text-align:center;padding:10px 6px;background:${c.bg};border-radius:8px;border:1px solid ${c.fg}35;">
-          <div style="color:${c.fg};font-size:1.4rem;font-weight:700;">${d.data.total}</div>
-          <div style="color:var(--text-dim);font-size:0.55rem;margin-top:2px;">Total Score</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px;">
+        <div style="text-align:center;padding:9px 6px;background:${c.bg};border-radius:7px;border:1px solid ${c.fg}35;">
+          <div style="color:${c.fg};font-size:1.3rem;font-weight:700;">${d.data.total}</div>
+          <div style="color:var(--text-dim);font-size:0.5rem;margin-top:2px;">Total Score</div>
         </div>
-        <div style="text-align:center;padding:10px 6px;background:rgba(34,211,238,0.08);border-radius:8px;border:1px solid rgba(34,211,238,0.2);">
-          <div style="color:var(--cyan);font-size:1.4rem;font-weight:700;">${d.data.fnCount || 0}</div>
-          <div style="color:var(--text-dim);font-size:0.55rem;margin-top:2px;">Functions</div>
+        <div style="text-align:center;padding:9px 6px;background:rgba(34,211,238,0.08);border-radius:7px;border:1px solid rgba(34,211,238,0.2);">
+          <div style="color:var(--cyan);font-size:1.3rem;font-weight:700;">${d.data.fnCount || 0}</div>
+          <div style="color:var(--text-dim);font-size:0.5rem;margin-top:2px;">Functions</div>
+        </div>
+        <div style="text-align:center;padding:9px 6px;background:rgba(251,146,60,0.08);border-radius:7px;border:1px solid rgba(251,146,60,0.2);">
+          <div style="color:#fb923c;font-size:1.3rem;font-weight:700;">${avgScore}</div>
+          <div style="color:var(--text-dim);font-size:0.5rem;margin-top:2px;">Avg / fn</div>
+        </div>
+        <div style="text-align:center;padding:9px 6px;background:rgba(167,139,250,0.08);border-radius:7px;border:1px solid rgba(167,139,250,0.2);">
+          <div style="color:#a78bfa;font-size:1rem;font-weight:700;">.${_escHtml(ext)}</div>
+          <div style="color:var(--text-dim);font-size:0.5rem;margin-top:2px;">Extension</div>
         </div>
       </div>
-      <div style="padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;">
-        <div style="color:var(--text-dim);font-size:0.56rem;margin-bottom:4px;">Risk Level</div>
-        <div style="color:${c.fg};font-weight:700;font-size:1rem;">${c.label}</div>
-      </div>`;
+      <div style="padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:7px;margin-bottom:10px;">
+        <div style="color:var(--text-dim);font-size:0.52rem;margin-bottom:3px;">Risk Level</div>
+        <div style="color:${c.fg};font-weight:700;font-size:0.9rem;">${c.label}</div>
+      </div>
+      ${d.data.repo ? `<div style="padding:6px 10px;background:rgba(34,211,238,0.06);border-radius:6px;margin-bottom:10px;">
+        <span style="color:var(--text-dim);font-size:0.5rem;">Repo: </span><span style="color:var(--cyan);font-size:0.55rem;font-family:var(--font-mono);">${_escHtml(d.data.repo)}</span>
+      </div>` : ''}
+      ${fnList.length ? `
+      <div style="margin-top:4px;">
+        <div style="color:var(--text-dim);font-size:0.52rem;letter-spacing:0.06em;margin-bottom:6px;">TOP FUNCTIONS</div>
+        ${fnList.map(fn => {
+          const fc = _complexityColor(fn.complexity);
+          return `<div style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:5px;margin-bottom:3px;background:rgba(255,255,255,0.03);">
+            <span style="font-size:0.45rem;padding:1px 5px;border-radius:4px;background:${fc.bg};color:${fc.fg};font-weight:700;flex-shrink:0;">${fn.complexity}</span>
+            <span style="font-size:0.55rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_escHtml(fn.name || '(anon)')}</span>
+            <span style="font-size:0.48rem;color:var(--text-dim);flex-shrink:0;margin-left:auto;">L${fn.start_line}</span>
+          </div>`;
+        }).join('')}
+      </div>` : ''}`;
   } else {
     const c    = _complexityColor(d.data.complexity);
     const icon = d.data.nodeType === 'class' ? '🏛️' : (d.data.nodeType === 'method' ? '◆' : 'λ');
-    const span = (d.data.endLine || 0) - (d.data.line || 0);
+    const span = (d.data.endLine && d.data.line) ? (d.data.endLine - d.data.line) : 0;
+    const grade = c.label;
+    // Complexity thresholds explanation
+    const threshold = d.data.complexity <= 5 ? 'Simple, easy to test'
+      : d.data.complexity <= 10 ? 'Moderate complexity'
+      : d.data.complexity <= 20 ? 'High — consider refactoring'
+      : 'Very high — refactor strongly advised';
     el.innerHTML = `
       ${_radialDetailHeader(onCloseName)}
-      <div style="border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:14px;">
-        <div style="color:#a78bfa;font-size:0.58rem;letter-spacing:0.06em;margin-bottom:5px;">${icon} ${(d.data.nodeType || 'function').toUpperCase()}</div>
+      <div style="border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:12px;">
+        <div style="color:#a78bfa;font-size:0.52rem;letter-spacing:0.06em;margin-bottom:5px;">${icon} ${(d.data.nodeType || 'function').toUpperCase()}</div>
         <div style="color:var(--text);font-weight:700;font-size:0.68rem;word-break:break-all;line-height:1.4;">${_escHtml(d.data.name)}</div>
+        ${d.data.parentPath ? `<div style="color:var(--text-dim);font-size:0.5rem;margin-top:4px;word-break:break-all;">${_escHtml(d.data.parentPath)}</div>` : ''}
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
-        <div style="text-align:center;padding:10px 6px;background:${c.bg};border-radius:8px;border:1px solid ${c.fg}35;">
-          <div style="color:${c.fg};font-size:1.4rem;font-weight:700;">${d.data.complexity}</div>
-          <div style="color:var(--text-dim);font-size:0.55rem;margin-top:2px;">Score</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px;">
+        <div style="text-align:center;padding:9px 6px;background:${c.bg};border-radius:7px;border:1px solid ${c.fg}35;">
+          <div style="color:${c.fg};font-size:1.3rem;font-weight:700;">${d.data.complexity}</div>
+          <div style="color:var(--text-dim);font-size:0.5rem;margin-top:2px;">Complexity</div>
         </div>
-        <div style="text-align:center;padding:10px 6px;background:rgba(167,139,250,0.1);border-radius:8px;border:1px solid rgba(167,139,250,0.2);">
-          <div style="color:#a78bfa;font-size:1.4rem;font-weight:700;">${d.data.childCount || 0}</div>
-          <div style="color:var(--text-dim);font-size:0.55rem;margin-top:2px;">Nested</div>
+        <div style="text-align:center;padding:9px 6px;background:rgba(167,139,250,0.1);border-radius:7px;border:1px solid rgba(167,139,250,0.2);">
+          <div style="color:#a78bfa;font-size:1.3rem;font-weight:700;">${d.data.childCount || 0}</div>
+          <div style="color:var(--text-dim);font-size:0.5rem;margin-top:2px;">Nested</div>
+        </div>
+        <div style="text-align:center;padding:9px 6px;background:rgba(251,146,60,0.08);border-radius:7px;border:1px solid rgba(251,146,60,0.2);">
+          <div style="color:#fb923c;font-size:1.3rem;font-weight:700;">${span}</div>
+          <div style="color:var(--text-dim);font-size:0.5rem;margin-top:2px;">Lines</div>
+        </div>
+        <div style="text-align:center;padding:9px 6px;background:rgba(34,211,238,0.06);border-radius:7px;border:1px solid rgba(34,211,238,0.18);">
+          <div style="color:var(--cyan);font-size:0.75rem;font-weight:700;">${_escHtml(grade)}</div>
+          <div style="color:var(--text-dim);font-size:0.5rem;margin-top:2px;">Grade</div>
         </div>
       </div>
-      <div style="padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:8px;">
-        <div style="color:var(--text-dim);font-size:0.56rem;margin-bottom:3px;">Line Range</div>
-        <div style="color:var(--text);font-size:0.65rem;font-family:var(--font-mono);">L${d.data.line} – ${d.data.endLine} &nbsp;(${span} lines)</div>
+      <div style="padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:7px;margin-bottom:10px;">
+        <div style="color:var(--text-dim);font-size:0.52rem;margin-bottom:3px;">Line Range</div>
+        <div style="color:var(--text);font-size:0.62rem;font-family:var(--font-mono);">L${d.data.line || '?'} – ${d.data.endLine || '?'}</div>
       </div>
-      <div style="padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;">
-        <div style="color:var(--text-dim);font-size:0.56rem;margin-bottom:4px;">Risk Level</div>
-        <div style="color:${c.fg};font-weight:700;font-size:1rem;">${c.label}</div>
+      <div style="padding:8px 10px;background:${c.bg};border-radius:7px;border-left:3px solid ${c.fg};margin-bottom:10px;">
+        <div style="color:${c.fg};font-size:0.52rem;font-weight:600;margin-bottom:2px;">${threshold}</div>
+        <div style="color:var(--text-dim);font-size:0.48rem;">McCabe cyclomatic complexity score</div>
       </div>`;
   }
 }

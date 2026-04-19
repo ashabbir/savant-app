@@ -12,6 +12,9 @@ let _astProjects = [];
 let _astProjectPanelCollapsed = false;
 let _astSearchQuery = '';
 let _astSearchSelectionKey = '';
+let _treeFileLimit    = 1500;
+let _clusterFileLimit = 1500;
+let _treeShowLabels   = false;
 
 // ── File-list renderer (memory / code panels) ─────────────────────────────────
 // (Moved here from core so that AST-specific openFn 'ctxReadAst' resolves correctly)
@@ -132,35 +135,41 @@ async function ctxReadProjectAst(projectName, options = {}) {
 
 function _renderAstModal(container) {
   container.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);background:rgba(0,0,0,0.3);flex-shrink:0;flex-wrap:wrap;">
-      <div style="min-width:0;margin-right:auto;">
-        <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🌳 ${_escHtml(_astSelectedProject || 'Project AST')}</div>
-        <div style="font-family:var(--font-mono);font-size:0.48rem;color:var(--text-dim);margin-top:2px;">${(_astCurrentNodes || []).length} AST nodes</div>
+    <div style="display:flex;flex-direction:column;height:100%;">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);background:rgba(0,0,0,0.3);flex-shrink:0;flex-wrap:wrap;">
+        <div style="min-width:0;">
+          <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🌳 ${_escHtml(_astSelectedProject || 'Project AST')}</div>
+          <div style="font-family:var(--font-mono);font-size:0.48rem;color:var(--text-dim);margin-top:2px;">${(_astCurrentNodes || []).length} AST nodes</div>
+        </div>
+        <span style="font-size:0.58rem;color:var(--text-dim);font-weight:600;letter-spacing:0.05em;margin-right:4px;">VIEW</span>
+        <button id="ast-toggle-tree"
+          onclick="_setAstView('tree')"
+          style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--cyan);background:var(--cyan);color:#000;transition:all 0.15s;">
+          🌳 Tree
+        </button>
+        <button id="ast-toggle-complexity"
+          onclick="_setAstView('complexity')"
+          style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-dim);transition:all 0.15s;">
+          🔥 Complexity
+        </button>
+        <button id="ast-toggle-radial"
+          onclick="_setAstView('radial')"
+          style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-dim);transition:all 0.15s;">
+          ◎ Radial
+        </button>
+        <button id="ast-toggle-cluster"
+          onclick="_setAstView('cluster')"
+          style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-dim);transition:all 0.15s;">
+          ✦ Cluster
+        </button>
+        <span style="width:1px;height:14px;background:var(--border);margin:0 4px;flex-shrink:0;"></span>
+        <div id="ast-limit-bar" style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0;"></div>
+        <span style="flex:1;"></span>
+        ${_renderAstTypeaheadSearch()}
+        ${_renderAstSearchRecovery()}
       </div>
-      <span style="font-size:0.58rem;color:var(--text-dim);font-weight:600;letter-spacing:0.05em;margin-right:4px;">VIEW</span>
-      <button id="ast-toggle-tree"
-        onclick="_setAstView('tree')"
-        style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--cyan);background:var(--cyan);color:#000;transition:all 0.15s;">
-        🌳 Tree
-      </button>
-      <button id="ast-toggle-complexity"
-        onclick="_setAstView('complexity')"
-        style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-dim);transition:all 0.15s;">
-        🔥 Complexity
-      </button>
-      <button id="ast-toggle-radial"
-        onclick="_setAstView('radial')"
-        style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-dim);transition:all 0.15s;">
-        ◎ Radial
-      </button>
-      <button id="ast-toggle-cluster"
-        onclick="_setAstView('cluster')"
-        style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-dim);transition:all 0.15s;">
-        ✦ Cluster
-      </button>
-      ${_renderAstSearchRecovery()}
+      <div id="ast-modal-view-area" style="flex:1;min-height:0;overflow:hidden;"></div>
     </div>
-    <div id="ast-modal-view-area" style="height:calc(100% - 58px);min-height:460px;overflow:hidden;"></div>
   `;
   _renderAstView();
 }
@@ -194,18 +203,48 @@ function _renderAstView() {
     return;
   }
   if (_astViewMode === 'tree') {
-    const root = _buildUnifiedAstTree(nodes);
-    ctxRenderD3Tree(root, area, false, 3);
+    const totalFiles = _countUniqueFiles(nodes);
+    _updateAstLimitBar('tree', totalFiles, _treeFileLimit);
+    area.innerHTML = `
+      <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+        <div id="tree-render-host" style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+          <span style="color:var(--text-dim);font-size:0.75rem;">Building tree…</span>
+        </div>
+      </div>`;
+    window._astTreeRerender = newLimit => { _treeFileLimit = newLimit; _syncAstView(); };
+    setTimeout(() => {
+      const host = document.getElementById('tree-render-host');
+      if (!host) return;
+      host.style.display = 'block';
+      const limited = _limitNodesByFile(nodes, _treeFileLimit);
+      ctxRenderD3Tree(_buildUnifiedAstTree(limited), host, false, 3);
+    }, 20);
   } else if (_astViewMode === 'radial') {
-    area.innerHTML = _renderAstSearchToolbar() + '<div id="ast-view-render-host" style="height:calc(100% - 43px);overflow:hidden;"></div>';
+    _clearAstLimitBar();
+    area.innerHTML = '<div id="ast-view-render-host" style="height:100%;overflow:hidden;"></div>';
     const host = document.getElementById('ast-view-render-host');
     if (!host) return;
     _renderComplexityRadial(nodes, host);
   } else if (_astViewMode === 'cluster') {
-    const root = _buildUnifiedAstTree(nodes);
-    _renderRadialClusterTree(root, area);
+    const totalFiles = _countUniqueFiles(nodes);
+    _updateAstLimitBar('cluster', totalFiles, _clusterFileLimit);
+    area.innerHTML = `
+      <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+        <div id="cluster-render-host" style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+          <span style="color:var(--text-dim);font-size:0.75rem;">Building cluster…</span>
+        </div>
+      </div>`;
+    window._astClusterRerender = newLimit => { _clusterFileLimit = newLimit; _syncAstView(); };
+    setTimeout(() => {
+      const host = document.getElementById('cluster-render-host');
+      if (!host) return;
+      host.style.display = 'block';
+      const limited = _limitNodesByFile(nodes, _clusterFileLimit);
+      _renderRadialClusterTree(_buildUnifiedAstTree(limited), host);
+    }, 20);
   } else {
-    area.innerHTML = _renderAstSearchToolbar() + '<div id="ast-view-render-host" style="height:calc(100% - 43px);overflow:hidden;"></div>';
+    _clearAstLimitBar();
+    area.innerHTML = '<div id="ast-view-render-host" style="height:100%;overflow:hidden;"></div>';
     const host = document.getElementById('ast-view-render-host');
     if (!host) return;
     _renderComplexityHeatmap(nodes, host);
@@ -215,7 +254,7 @@ function _renderAstView() {
 function _renderAstNoSearchResults(area) {
   const cid = 'ast-empty-' + Math.random().toString(36).substr(2, 9);
   const msg = `
-    <div style="height:calc(100% - 43px);min-height:260px;display:flex;align-items:center;justify-content:center;padding:40px;text-align:center;color:var(--text-dim);font-size:0.68rem;line-height:1.7;">
+    <div style="height:100%;min-height:260px;display:flex;align-items:center;justify-content:center;padding:40px;text-align:center;color:var(--text-dim);font-size:0.68rem;line-height:1.7;">
       <div style="max-width:420px;">
         <div style="font-size:1.8rem;margin-bottom:10px;opacity:0.55;">⌕</div>
         <div>No AST nodes match "${_escHtml(_astSearchQuery)}"</div>
@@ -321,22 +360,136 @@ function _astIsNestedAstNode(parent, child) {
   return child.start_line >= parent.start_line && child.end_line <= parent.end_line;
 }
 
+function _astShowSearchDrop(input) {
+  const drop = document.getElementById('ast-search-dropdown');
+  if (!drop) return;
+  const q = (input.value || '').trim().toLowerCase();
+  const opts = _astTypeaheadOptions();
+  const filtered = q ? opts.filter(o => o.label.toLowerCase().includes(q)) : opts;
+  if (!filtered.length) { drop.style.display = 'none'; return; }
+  drop.innerHTML = filtered.slice(0, 60).map(o => {
+    const key = o.key.replace(/"/g, '&quot;');
+    const lbl = o.label.replace(/"/g, '&quot;');
+    return `<div onclick="_astSelectSearchOption(&quot;${key}&quot;,&quot;${lbl}&quot;)"
+      style="padding:5px 10px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.05);
+             white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);"
+      onmouseenter="this.style.background='rgba(255,255,255,0.08)'"
+      onmouseleave="this.style.background=''">
+      ${_escHtml(o.label)}
+    </div>`;
+  }).join('');
+  drop.style.display = 'block';
+}
+
+function _astHideSearchDrop() {
+  const drop = document.getElementById('ast-search-dropdown');
+  if (drop) drop.style.display = 'none';
+}
+
+function _astSelectSearchOption(key, label) {
+  _astSearchSelectionKey = key;
+  _astSearchQuery = label;
+  const input = document.getElementById('ast-view-search');
+  if (input) input.value = label;
+  _astHideSearchDrop();
+  _renderAstView();
+}
+
 function _renderAstTypeaheadSearch() {
-  const options = _astTypeaheadOptions();
   return `
-    <span style="font-size:0.52rem;color:var(--text-dim);font-weight:600;letter-spacing:0.08em;">SEARCH</span>
-    <input id="ast-view-search" type="text" value="${_escHtml(_astSearchQuery)}" autocomplete="off" list="ast-view-search-options"
-      oninput="astSetSearchQuery(this.value)"
-      onkeydown="if(event.key==='Escape')astClearSearchQuery()"
-      placeholder="Search AST nodes..."
-      style="width:260px;max-width:100%;background:var(--bg-main);color:var(--text);border:1px solid var(--border);border-radius:5px;padding:5px 9px;font-family:var(--font-mono);font-size:0.58rem;">
-    <datalist id="ast-view-search-options">
-      ${options.map(o => `<option value="${_escHtml(o.label)}"></option>`).join('')}
-    </datalist>
-    ${_astSearchQuery ? `<button class="ctx-btn-sm" onclick="astClearSearchQuery()" style="font-size:0.5rem;">Clear</button>` : ''}`;
+    <div style="position:relative;display:flex;align-items:center;gap:5px;">
+      <input id="ast-view-search" type="text" value="${_escHtml(_astSearchQuery)}" autocomplete="off"
+        oninput="astSetSearchQuery(this.value);_astShowSearchDrop(this)"
+        onfocus="_astShowSearchDrop(this)"
+        onblur="setTimeout(_astHideSearchDrop, 200)"
+        onkeydown="if(event.key==='Escape'){astClearSearchQuery();_astHideSearchDrop()}"
+        placeholder="Search nodes…"
+        style="width:200px;background:var(--bg-main);color:var(--text);border:1px solid var(--border);
+               border-radius:5px;padding:4px 8px;font-family:var(--font-mono);font-size:0.58rem;">
+      ${_astSearchQuery ? `<button class="ctx-btn-sm" onclick="astClearSearchQuery()" style="font-size:0.5rem;padding:2px 6px;">✕</button>` : ''}
+      <div id="ast-search-dropdown"
+           style="display:none;position:absolute;top:calc(100% + 3px);right:0;width:360px;max-height:260px;
+                  overflow-y:auto;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;
+                  z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,0.5);font-family:var(--font-mono);font-size:0.58rem;">
+      </div>
+    </div>`;
 }
 
 // ── Hierarchical tree builder for D3 ─────────────────────────────────────────
+
+/**
+ * Returns count of unique file paths in a flat node list.
+ */
+function _countUniqueFiles(nodes) {
+  const s = new Set();
+  for (const n of nodes) s.add((n.repo || '') + '::' + (n.path || ''));
+  return s.size;
+}
+
+/**
+ * Pre-filters nodes to the top N files by node count (descending).
+ * Keeps ALL node types so the tree hierarchy is accurate.
+ */
+function _limitNodesByFile(nodes, limit) {
+  if (limit === 'all') return nodes;
+  const counts = {};
+  for (const n of nodes) {
+    const k = (n.repo || '') + '::' + (n.path || '');
+    counts[k] = (counts[k] || 0) + 1;
+  }
+  const topKeys = new Set(
+    Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, limit).map(e => e[0])
+  );
+  return nodes.filter(n => topKeys.has((n.repo || '') + '::' + (n.path || '')));
+}
+
+/**
+ * Populates the #ast-limit-bar in the top header with FILES + limit buttons + optional Labels toggle + capNote.
+ * Called whenever the view switches or a new limit is selected.
+ */
+function _updateAstLimitBar(mode, totalFiles, currentLimit) {
+  const bar = document.getElementById('ast-limit-bar');
+  if (!bar) return;
+  const limited = currentLimit !== 'all';
+  const cap = limited ? Math.min(currentLimit, totalFiles) : totalFiles;
+  const capNote = totalFiles > cap
+    ? `<span style="font-size:0.55rem;color:var(--text-dim);">Top ${cap} of ${totalFiles}</span>`
+    : `<span style="font-size:0.55rem;color:var(--text-dim);">${totalFiles} files</span>`;
+  const opts = [500, 1000, 1500, 'all'];
+  const btns = opts.map(v => {
+    const active = (v === 'all' && !limited) || v === currentLimit;
+    const warn   = v === 'all' && totalFiles > 1500 ? '⚠' : '';
+    let onclick;
+    if (mode === 'tree')    onclick = `window._astTreeRerender&&window._astTreeRerender(${v === 'all' ? "'all'" : v})`;
+    else if (mode === 'cluster') onclick = `window._astClusterRerender&&window._astClusterRerender(${v === 'all' ? "'all'" : v})`;
+    else                    onclick = `window._astRadialRerender&&window._astRadialRerender(${v === 'all' ? "'all'" : v})`;
+    return `<button onclick="${onclick}"
+      style="padding:2px 7px;border-radius:4px;border:1px solid ${active ? '#a78bfa' : 'var(--border)'};
+             background:${active ? 'rgba(167,139,250,0.18)' : 'transparent'};
+             color:${active ? '#a78bfa' : 'var(--text-dim)'};font-size:0.6rem;cursor:pointer;"
+      >${v}${warn}</button>`;
+  }).join('');
+  const labelBtn = mode === 'tree' ? `
+    <span style="width:1px;height:12px;background:var(--border);margin:0 2px;flex-shrink:0;"></span>
+    <button id="tree-labels-btn" onclick="window._astTreeToggleLabels&&window._astTreeToggleLabels()"
+      style="padding:2px 7px;border-radius:4px;border:1px solid ${_treeShowLabels ? '#22d3ee' : 'var(--border)'};
+             background:${_treeShowLabels ? 'rgba(34,211,238,0.18)' : 'transparent'};
+             color:${_treeShowLabels ? '#22d3ee' : 'var(--text-dim)'};font-size:0.6rem;cursor:pointer;">Labels</button>
+  ` : '';
+  bar.innerHTML = `
+    <span style="font-size:0.55rem;color:var(--text-dim);opacity:0.55;margin-right:2px;flex-shrink:0;">FILES</span>
+    ${btns}
+    ${labelBtn}
+    <span style="width:1px;height:12px;background:var(--border);margin:0 4px;flex-shrink:0;"></span>
+    ${capNote}
+  `;
+}
+
+function _clearAstLimitBar() {
+  const bar = document.getElementById('ast-limit-bar');
+  if (bar) bar.innerHTML = '';
+}
+
 
 function _buildUnifiedAstTree(nodes) {
   const root = { name: "Context AST", type: "root", children: [] };
@@ -396,6 +549,9 @@ function _buildUnifiedAstTree(nodes) {
 
 // ── AST Interaction Helpers ───────────────────────────────────────────────────
 
+/**
+ * Depth-based collapse used for default initial state (e.g. "show up to class level").
+ */
 function _collapseAstToDepth(rootNode, targetType, updateFn) {
   const TYPE_LEVELS = { root:-1, repo:0, dir:1, file:2, class:3, function:4, method:4, variable:5 };
   const targetLvl = TYPE_LEVELS[targetType] ?? 99;
@@ -415,7 +571,69 @@ function _collapseAstToDepth(rootNode, targetType, updateFn) {
   if (updateFn) updateFn(rootNode);
 }
 
-function _showAstDrawer(d, drawerId, onCloseName = '') {
+/**
+ * Expand the tree so that every node of `targetType` is visible, along with
+ * all ancestors leading to it.  The rule per branch:
+ *
+ *   • Recurse into children first (depth-first).
+ *   • A target-type node is kept EXPANDED if any of its descendants is also
+ *     the target type (e.g. class→class→class all stay visible).
+ *   • A target-type node is COLLAPSED (children hidden) only when none of its
+ *     descendants share the target type — it is the deepest occurrence in that path.
+ *   • A non-target node is collapsed when no descendant is the target type.
+ *
+ * Examples  (targetType = 'class'):
+ *   dir → class → class → class → fn   →  dir → class → class → class(collapsed)
+ *   dir → class → fn                   →  dir → class(collapsed)
+ *
+ * Examples  (targetType = 'dir'):
+ *   dir → dir → class → fn             →  dir → dir(collapsed)
+ *   dir → class → fn                   →  dir(collapsed)
+ */
+function _expandToType(rootNode, targetType, updateFn) {
+  // Step 1 — fully expand the whole tree
+  rootNode.descendants().forEach(d => {
+    if (d._children) { d.children = d._children; d._children = null; }
+  });
+
+  // Step 2 — recurse depth-first; returns true if subtree contains targetType
+  function pruneAndCheck(d) {
+    const isTarget = d.data.type === targetType;
+
+    if (!d.children || !d.children.length) {
+      // Leaf — visible only if it IS the target
+      return isTarget;
+    }
+
+    // Recurse into all children first
+    let anyTargetBelow = false;
+    for (const c of d.children) {
+      if (pruneAndCheck(c)) anyTargetBelow = true;
+    }
+
+    if (isTarget) {
+      if (!anyTargetBelow) {
+        // This is the deepest target in this path — collapse its children
+        d._children = d.children;
+        d.children  = null;
+      }
+      // else: keep expanded so nested targets remain visible
+      return true;
+    } else {
+      if (!anyTargetBelow) {
+        // Dead end — collapse this whole branch
+        d._children = d.children;
+        d.children  = null;
+      }
+      return anyTargetBelow;
+    }
+  }
+
+  pruneAndCheck(rootNode);
+  if (updateFn) updateFn(rootNode);
+}
+
+function _showAstDrawer(d, drawerId, onCloseName = '', onToggleName = '') {
   const drawer = document.getElementById(drawerId);
   if (!drawer) return;
   _setAstDrawerOpen(drawerId, true);
@@ -440,11 +658,20 @@ function _showAstDrawer(d, drawerId, onCloseName = '') {
   }
 
   const typeIcon = { repo: '📦', dir: '📁', file: '📄', class: '🏛️', function: 'λ', method: '◆' }[d.data.type] || '❓';
+  const hasKids  = !!(d.children || d._children);
+  const isExpanded = !!d.children;
 
   drawer.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;margin:-16px -16px 14px;border-bottom:1px solid var(--border);position:sticky;top:-16px;background:var(--bg-card);z-index:5;">
       <span style="font-size:0.45rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);font-family:var(--font-mono);">Node Detail</span>
-      ${onCloseName ? `<button onclick="${onCloseName}()" title="Collapse panel" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:0.9rem;line-height:1;padding:2px 4px;border-radius:3px;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-dim)'">‹</button>` : ''}
+      <div style="display:flex;align-items:center;gap:4px;">
+        ${onToggleName && hasKids ? `<button onclick="${onToggleName}()" title="${isExpanded ? 'Collapse' : 'Expand'} node"
+          style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--text-dim);cursor:pointer;font-size:0.65rem;line-height:1;padding:2px 5px;"
+          onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-dim)'">${isExpanded ? '⊖' : '⊕'}</button>` : ''}
+        ${onCloseName ? `<button onclick="${onCloseName}()" title="Close panel"
+          style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:0.9rem;line-height:1;padding:2px 4px;border-radius:3px;"
+          onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-dim)'">‹</button>` : ''}
+      </div>
     </div>
     <div style="margin-bottom:8px;">
       <span title="AST node type" style="cursor:default;display:inline-block;padding:2px 8px;font-size:0.4rem;font-family:var(--font-mono);background:${c}22;border:1px solid ${c}55;border-radius:10px;color:${c};letter-spacing:0.5px;">${_escHtml(d.data.type || 'node')}</span>
@@ -560,26 +787,13 @@ function _renderAstInteractiveLegend(cid) {
           <span style="width:9px;height:9px;border-radius:50%;background:${color};display:inline-block;"></span> ${type}
         </span>`;
       }).join('')}
-      <div style="margin-left:auto;display:flex;align-items:center;gap:6px;position:relative;min-width:280px;max-width:420px;flex:1;justify-content:flex-end;">
-        ${_renderAstTypeaheadSearch()}
-      </div>
-    </div>`;
-}
-
-function _renderAstSearchToolbar() {
-  return `
-    <div style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border);background:rgba(0,0,0,0.15);">
-      <span style="font-size:0.58rem;color:var(--text-dim);font-style:italic;">Filtered view updates Tree, Cluster, Radial, and Complexity.</span>
-      <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
-        ${_renderAstTypeaheadSearch()}
-      </div>
     </div>`;
 }
 
 window._astActiveDrawMap = {};
 window._astLegClick = function(cid, type) {
   const meta = window._astActiveDrawMap[cid];
-  if (meta) _collapseAstToDepth(meta.root, type, meta.draw);
+  if (meta) _expandToType(meta.root, type, meta.draw);
 };
 
 
@@ -682,12 +896,17 @@ function _renderRadialClusterTree(data, container) {
         })
         .style('cursor', 'pointer')
         .on('click', (event, d) => {
-          if (d.children)   { d._children = d.children;  d.children  = null; }
-          else if (d._children) { d.children  = d._children; d._children = null; }
           d._x0 = d.x; d._y0 = d.y;
           selectedNodeId = d._id;
           draw(d);
-          _showAstDrawer(d, drawerId, `window._astClusterCloseDrawer['${cid}']`);
+          // Collapse/expand is only triggered from inside the info drawer
+          window._astClusterCollapseNode = window._astClusterCollapseNode || {};
+          window._astClusterCollapseNode[cid] = () => {
+            if (d.children)      { d._children = d.children;  d.children  = null; }
+            else if (d._children){ d.children  = d._children; d._children = null; }
+            draw(d);
+          };
+          _showAstDrawer(d, drawerId, `window._astClusterCloseDrawer['${cid}']`, `window._astClusterCollapseNode['${cid}']`);
         });
 
       enter.append('circle').attr('r', 0).attr('stroke-width', 1.5);
@@ -743,7 +962,7 @@ function ctxRenderD3Tree(data, container, isTab = false, expandDepth = 1) {
   container.innerHTML = _renderAstInteractiveLegend(cid) + `
     <div style="display:flex;height:${containerHeight};">
       <div id="${cid}" style="flex:1;overflow:hidden;position:relative;"></div>
-      <div id="${drawerId}" style="width:280px;border-left:1px solid var(--border);background:var(--bg-panel, rgba(0,0,0,0.15));padding:16px;overflow-y:auto;display:none;"></div>
+      <div id="${drawerId}" style="width:0;min-width:0;border-left:none;background:var(--bg-card);font-family:var(--font-mono);padding:0;overflow:hidden;display:block;flex-shrink:0;"></div>
     </div>
   `;
 
@@ -782,10 +1001,16 @@ function ctxRenderD3Tree(data, container, isTab = false, expandDepth = 1) {
         .attr('transform', () => { const s = source || scopeRoot; return `translate(${s.y0 ?? 0},${s.x0 ?? 0})`; })
         .style('cursor', 'pointer')
         .on('click', (event, d) => {
-          if (d.children) { d._children = d.children; d.children = null; }
-          else            { d.children  = d._children; d._children = null; }
-          draw(d, scopeRoot);
-          _showAstDrawer(d, drawerId);
+          // Collapse/expand is only triggered from inside the info drawer
+          window._astTreeCloseDrawer = window._astTreeCloseDrawer || {};
+          window._astTreeCloseDrawer[cid] = () => _setAstDrawerOpen(drawerId, false);
+          window._astTreeCollapseNode = window._astTreeCollapseNode || {};
+          window._astTreeCollapseNode[cid] = () => {
+            if (d.children)      { d._children = d.children;  d.children  = null; }
+            else if (d._children){ d.children  = d._children; d._children = null; }
+            draw(d, scopeRoot);
+          };
+          _showAstDrawer(d, drawerId, `window._astTreeCloseDrawer['${cid}']`, `window._astTreeCollapseNode['${cid}']`);
         });
 
       nodeEnter.append('circle')
@@ -796,6 +1021,7 @@ function ctxRenderD3Tree(data, container, isTab = false, expandDepth = 1) {
         .attr('fill-opacity', d => (d._children ? 0.3 : 0.9));
 
       nodeEnter.append('text')
+        .attr('class', 'node-label')
         .attr('dy', '0.32em')
         .attr('x', d => (d.children || d._children) ? -10 : 10)
         .attr('text-anchor', d => (d.children || d._children) ? 'end' : 'start')
@@ -815,6 +1041,8 @@ function ctxRenderD3Tree(data, container, isTab = false, expandDepth = 1) {
         .attr('r', 5)
         .attr('fill', d => nodeColor(d.data.type))
         .attr('fill-opacity', d => (d._children ? 0.35 : 0.9));
+      nodeUpdate.select('text.node-label')
+        .style('display', _treeShowLabels ? null : 'none');
       nodeUpdate.each(function(d) { d3.select(this).select('title').text(d.data.name + (d.data.line ? ` · L${d.data.line}` : '')); });
 
       node.exit().transition().duration(200)
@@ -838,6 +1066,19 @@ function ctxRenderD3Tree(data, container, isTab = false, expandDepth = 1) {
     }
 
     window._astActiveDrawMap[cid] = { root: hierRoot, draw: d => draw(hierRoot, hierRoot) };
+
+    // Register label toggle
+    window._astTreeToggleLabels = () => {
+      _treeShowLabels = !_treeShowLabels;
+      d3.selectAll('#' + cid + ' text.node-label')
+        .style('display', _treeShowLabels ? null : 'none');
+      const btn = document.getElementById('tree-labels-btn');
+      if (btn) {
+        btn.style.borderColor = _treeShowLabels ? '#22d3ee' : 'var(--border)';
+        btn.style.background = _treeShowLabels ? 'rgba(34,211,238,0.18)' : 'transparent';
+        btn.style.color = _treeShowLabels ? '#22d3ee' : 'var(--text-dim)';
+      }
+    };
 
     // Collapse to 'function' by default for tree
     _collapseAstToDepth(hierRoot, 'function');

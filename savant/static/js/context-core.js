@@ -15,6 +15,7 @@ let _ctxMemoryItems = [];
 let _ctxCodeSelectedProject = null;
 let _ctxCodeProjects = [];
 let _ctxCodeItems = [];
+let _ctxFileCardCache = {}; // uri → {expanded, content, language}
 // _ctxProjects is declared in globals.js
 
 // ── MCP connection ────────────────────────────────────────────────────────────
@@ -178,19 +179,27 @@ function ctxRenderProjectExplorer(containerId, projects, selectedName, onSelectF
     ? `<div class="ctx-welcome" style="padding:20px 10px;font-size:0.58rem;">${query ? 'No projects match search' : 'No projects yet'}</div>`
     : filtered.map(p => _ctxRenderProjectExplorerRow(p, selectedName, onSelectFn, options.indexStatus || {})).join('');
 
-  sidebar.innerHTML = `
-    <div class="ctx-project-explorer${state.collapsed ? ' collapsed' : ''}">
-      <div class="ctx-project-explorer-head">
-        <div class="ctx-project-explorer-title">${_escHtml(headTitle)}</div>
-        <button class="ctx-project-explorer-toggle" onclick="ctxToggleProjectExplorer('${_ctxJsString(containerId)}')" title="${state.collapsed ? 'Expand project explorer' : 'Collapse project explorer'}">${state.collapsed ? '›' : '‹'}</button>
-      </div>
-      ${state.collapsed ? '' : `
+  if (state.collapsed) {
+    sidebar.innerHTML = `
+      <div class="ctx-project-explorer collapsed">
+        <div class="ctx-explorer-collapsed-bar" onclick="ctxToggleProjectExplorer('${_ctxJsString(containerId)}')" title="Expand ${_escHtml(headTitle)}">
+          <span class="ctx-explorer-collapsed-icon">›</span>
+          <span class="ctx-explorer-collapsed-label">${_escHtml(headTitle)}</span>
+        </div>
+      </div>`;
+  } else {
+    sidebar.innerHTML = `
+      <div class="ctx-project-explorer">
+        <div class="ctx-project-explorer-head">
+          <div class="ctx-project-explorer-title">${_escHtml(headTitle)}</div>
+          <button class="ctx-project-explorer-toggle" onclick="ctxToggleProjectExplorer('${_ctxJsString(containerId)}')" title="Collapse project explorer">‹</button>
+        </div>
         <div class="ctx-project-explorer-search">
           <input type="text" value="${_escHtml(state.query || '')}" placeholder="${_escHtml(searchPlaceholder)}" oninput="ctxProjectExplorerSearch('${_ctxJsString(containerId)}', this.value)">
         </div>
         <div class="ctx-project-explorer-list">${bodyHtml}</div>
-      `}
-    </div>`;
+      </div>`;
+  }
   ctxSyncProjectExplorerLayout(containerId);
   return filtered.length > 0;
 }
@@ -212,13 +221,18 @@ function _ctxRenderProjectExplorerRow(project, selectedName, onSelectFn, indexSt
 }
 
 function _ctxProjectHealth(project, indexStatus = {}) {
-  const liveStatus = ((indexStatus[project.name] || {}).status || project.status || '').toString().toLowerCase();
+  const live      = indexStatus[project.name] || {};
+  const liveStatus = (live.status || project.status || '').toString().toLowerCase();
+  const phase      = (live.phase || '').toString();
   const indexed = !!(project.chunk_count > 0 || project.indexed_at);
-  const ast = !!(project.ast_node_count > 0);
+  const ast     = !!(project.ast_node_count > 0);
   const failStates = new Set(['error', 'failed', 'off', 'stalled']);
   const busyStates = new Set(['indexing', 'generating', 'ast_generating', 'ast_generation', 'queued', 'running', 'processing']);
   if (failStates.has(liveStatus)) return { tone: 'red', indexed, ast, label: 'Failed' };
-  if (busyStates.has(liveStatus)) return { tone: 'orange', indexed, ast, label: 'In Progress' };
+  if (busyStates.has(liveStatus)) {
+    const isAst = live.job_type === 'ast';
+    return { tone: 'orange', indexed, ast, label: isAst ? 'Generating AST' : 'Generating Index' };
+  }
   if (indexed && ast) return { tone: 'green', indexed: true, ast: true, label: 'Ready' };
   return { tone: 'orange', indexed, ast, label: indexed ? 'Partial' : 'Pending' };
 }
@@ -247,8 +261,8 @@ function ctxSyncProjectExplorerLayout(containerId) {
   sidebar.style.transition = 'width 0.18s ease,min-width 0.18s ease';
   sidebar.style.overflow = 'hidden';
   if (state.collapsed) {
-    sidebar.style.width = '34px';
-    sidebar.style.minWidth = '34px';
+    sidebar.style.width = '28px';
+    sidebar.style.minWidth = '28px';
   } else {
     sidebar.style.width = '240px';
     sidebar.style.minWidth = '200px';
@@ -271,8 +285,22 @@ function _ctxRenderDetail(indexStatus) {
   const p = _ctxProjects.find(pr => pr.name === _ctxSelectedProject);
   if (!p) return;
 
-  const liveStatus = (indexStatus[p.name] || {}).status || p.status || 'ready';
-  const statusCls  = liveStatus === 'indexing' ? 'indexing' : liveStatus === 'ready' ? 'ready' : 'off';
+  const live       = indexStatus[p.name] || {};
+  const liveStatus = (live.status || p.status || 'ready').toString().toLowerCase();
+  const phase      = (live.phase || '').toString();
+  const isAstPhase = live.job_type === 'ast';
+  const statusCls  = liveStatus === 'indexing'  ? 'indexing'
+                   : liveStatus === 'indexed'   ? 'ready'
+                   : liveStatus === 'ast_only'  ? 'ready'
+                   : liveStatus === 'stalled'   ? 'stalled'
+                   : liveStatus === 'error'     ? 'error'
+                   : liveStatus === 'ready'     ? 'ready'
+                   : 'added';
+  const statusLabel = liveStatus === 'indexing'
+    ? (isAstPhase ? 'Generating AST' : 'Generating Index')
+    : liveStatus === 'indexed'  ? 'Ready'
+    : liveStatus === 'ast_only' ? 'AST Ready'
+    : liveStatus.charAt(0).toUpperCase() + liveStatus.slice(1);
 
   let actionBtns = `
     <button class="ctx-btn-sm" onclick="ctxIndexProject('${_escHtml(p.name)}')">⚡ Index</button>
@@ -289,16 +317,31 @@ function _ctxRenderDetail(indexStatus) {
   const codeFiles = p.file_count || 0;
   const memBank   = p.memory_count || 0;
 
+  // Progress bars — separate index vs AST progress
   let progressHtml = '';
-  if (indexStatus[p.name] && indexStatus[p.name].progress != null) {
-    const pct = Math.round((indexStatus[p.name].progress || 0) * 100);
-    progressHtml = `<div class="ctx-det-section">
-      <div class="ctx-det-section-title">Indexing Progress</div>
-      <div style="background:rgba(255,255,255,0.06);border-radius:4px;height:6px;margin-top:6px;">
-        <div style="background:var(--cyan);height:6px;border-radius:4px;width:${pct}%;transition:width 0.3s;"></div>
-      </div>
-      <div style="font-size:0.55rem;color:var(--text-dim);margin-top:4px;">${pct}% complete</div>
-    </div>`;
+  if (live.status === 'indexing' && live.progress != null) {
+    const pct = Math.min(100, Math.round(live.progress || 0));
+    if (isAstPhase) {
+      progressHtml = `<div class="ctx-det-section">
+        <div class="ctx-det-section-title">AST Progress</div>
+        <div class="ctx-progress-phase ast">${_escHtml(phase)}</div>
+        <div class="ctx-progress-bar">
+          <div class="ctx-progress-fill ast" style="width:${pct}%"></div>
+        </div>
+        <div class="ctx-progress-label">${pct}% complete${live.files_done != null ? ' · ' + live.files_done + (live.total ? '/' + live.total : '') + ' files' : ''}</div>
+        ${live.current_file ? `<div class="ctx-progress-label" style="margin-top:2px;opacity:0.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_escHtml(live.current_file)}">${_escHtml(live.current_file.split('/').slice(-2).join('/'))}</div>` : ''}
+      </div>`;
+    } else {
+      progressHtml = `<div class="ctx-det-section">
+        <div class="ctx-det-section-title">Index Progress</div>
+        <div class="ctx-progress-phase">${_escHtml(phase)}</div>
+        <div class="ctx-progress-bar">
+          <div class="ctx-progress-fill" style="width:${pct}%"></div>
+        </div>
+        <div class="ctx-progress-label">${pct}% complete${live.files_done != null ? ' · ' + live.files_done + (live.total ? '/' + live.total : '') + ' files' : ''}</div>
+        ${live.current_file ? `<div class="ctx-progress-label" style="margin-top:2px;opacity:0.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_escHtml(live.current_file)}">${_escHtml(live.current_file.split('/').slice(-2).join('/'))}</div>` : ''}
+      </div>`;
+    }
   }
 
   let langHtml = '';
@@ -310,13 +353,11 @@ function _ctxRenderDetail(indexStatus) {
       <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">
         ${topLangs.map(([lang, count]) => {
           const pct = Math.max(1, Math.round((count / maxCount) * 100));
-          // Use different colors for different languages optionally, or just use primary brand color
-          const barColor = 'var(--cyan)';
           return `
             <div style="display:flex;align-items:center;gap:12px;font-size:0.55rem;font-family:var(--font-mono);">
               <span style="color:var(--text);width:75px;min-width:75px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_escHtml(lang)}">${_escHtml(lang)}</span>
               <div style="flex:1;height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;">
-                <div style="height:4px;background:${barColor};border-radius:2px;width:${pct}%;opacity:0.8;"></div>
+                <div style="height:4px;background:var(--cyan);border-radius:2px;width:${pct}%;opacity:0.8;"></div>
               </div>
               <span style="color:var(--text-dim);flex-shrink:0;width:30px;text-align:right;">${count}</span>
             </div>`;
@@ -325,11 +366,14 @@ function _ctxRenderDetail(indexStatus) {
     </div>`;
   }
 
+  const astStatus = p.ast_node_count > 0 ? 'ready' : (liveStatus === 'indexing' && isAstPhase ? 'indexing' : 'added');
+  const astLabel  = p.ast_node_count > 0 ? 'Generated' : (liveStatus === 'indexing' && isAstPhase ? 'Generating…' : 'Not generated');
+
   detail.innerHTML = `
     <div class="ctx-det-header">
       <div class="ctx-det-title">
         ${_escHtml(p.name)}
-        <span class="ctx-project-status ${statusCls}">${liveStatus}</span>
+        <span class="ctx-project-status ${statusCls}">${_escHtml(statusLabel)}</span>
       </div>
       <div class="ctx-det-path">${_escHtml(p.path || '')}</div>
       <div class="ctx-det-actions">${actionBtns}</div>
@@ -339,8 +383,12 @@ function _ctxRenderDetail(indexStatus) {
       <div class="ctx-det-grid">
         <div class="ctx-det-stat"><div class="ctx-det-stat-val">${codeFiles}</div><div class="ctx-det-stat-label">Total Files</div></div>
         <div class="ctx-det-stat"><div class="ctx-det-stat-val">${memBank}</div><div class="ctx-det-stat-label">Memory Bank</div></div>
-        <div class="ctx-det-stat"><div class="ctx-det-stat-val">${p.chunk_count || 0}</div><div class="ctx-det-stat-label">Chunks</div></div>
-        <div class="ctx-det-stat"><div class="ctx-det-stat-val">${p.ast_node_count || 0}</div><div class="ctx-det-stat-label">AST Nodes</div></div>
+        <div class="ctx-det-stat"><div class="ctx-det-stat-val">${p.chunk_count || 0}</div><div class="ctx-det-stat-label">Index Chunks</div></div>
+        <div class="ctx-det-stat" title="AST status: ${_escHtml(astLabel)}">
+          <div class="ctx-det-stat-val">${p.ast_node_count || 0}</div>
+          <div class="ctx-det-stat-label">AST Nodes</div>
+          <div style="margin-top:3px;"><span class="ctx-project-status ${astStatus}" style="font-size:0.42rem;padding:1px 5px;">${_escHtml(astLabel)}</span></div>
+        </div>
       </div>
     </div>
     ${progressHtml}
@@ -391,7 +439,7 @@ async function ctxConfirmAdd() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, path })
     });
-    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    if (!res.ok) { let _em = `HTTP ${res.status}`; try { const _ej = await res.json(); _em = _ej.error || _em; } catch {} throw new Error(_em); }
     showToast('success', `Project "${name}" added`);
     ctxCloseAddModal();
     ctxLoadProjects();
@@ -405,7 +453,7 @@ async function ctxIndexProject(name) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
     });
-    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    if (!res.ok) { let _em = `HTTP ${res.status}`; try { const _ej = await res.json(); _em = _ej.error || _em; } catch {} throw new Error(_em); }
     showToast('info', `Indexing "${name}" started...`);
     ctxStartPolling();
   } catch (e) { showToast('error', e.message); }
@@ -418,7 +466,7 @@ async function ctxGenerateAstProject(name) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
     });
-    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    if (!res.ok) { let _em = `HTTP ${res.status}`; try { const _ej = await res.json(); _em = _ej.error || _em; } catch {} throw new Error(_em); }
     showToast('info', `Generating AST for "${name}"...`);
     ctxStartPolling();
   } catch (e) { showToast('error', e.message); }
@@ -431,7 +479,7 @@ async function ctxReindexProject(name) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
     });
-    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    if (!res.ok) { let _em = `HTTP ${res.status}`; try { const _ej = await res.json(); _em = _ej.error || _em; } catch {} throw new Error(_em); }
     showToast('info', `Re-indexing "${name}" started...`);
     ctxStartPolling();
   } catch (e) { showToast('error', e.message); }
@@ -444,7 +492,7 @@ async function ctxStopIndexing(name) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
     });
-    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    if (!res.ok) { let _em = `HTTP ${res.status}`; try { const _ej = await res.json(); _em = _ej.error || _em; } catch {} throw new Error(_em); }
     const data = await res.json();
     showToast('info', data.stopping ? `Stopping "${name}"...` : `"${name}" reset to ready`);
     setTimeout(() => ctxLoadProjects(), 1000);
@@ -459,7 +507,7 @@ async function ctxPurgeProject(name) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
     });
-    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    if (!res.ok) { let _em = `HTTP ${res.status}`; try { const _ej = await res.json(); _em = _ej.error || _em; } catch {} throw new Error(_em); }
     showToast('success', `Index purged for "${name}"`);
     ctxLoadProjects();
   } catch (e) { showToast('error', e.message); }
@@ -469,7 +517,7 @@ async function ctxDeleteProject(name) {
   if (!confirm(`Delete project "${name}" and all its indexed data?`)) return;
   try {
     const res = await fetch(`/api/context/repos/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
+    if (!res.ok) { let _em = `HTTP ${res.status}`; try { const _ej = await res.json(); _em = _ej.error || _em; } catch {} throw new Error(_em); }
     showToast('success', `Project "${name}" deleted`);
     ctxLoadProjects();
   } catch (e) { showToast('error', e.message); }
@@ -664,7 +712,6 @@ function ctxSelectCodeProject(name) {
 function _ctxRenderFilteredProjectFiles(containerId, items, projectName, type) {
   const container = document.getElementById(containerId);
   if (!container) return;
-  const openFn = type === 'memory' ? 'ctxReadMemory' : 'ctxReadCodeFile';
   const filtered = (items || []).filter(i => (i.repo || i.repo_name) === projectName)
     .sort((a, b) => (a.path || a.uri || '').localeCompare(b.path || b.uri || ''));
   if (!filtered.length) {
@@ -674,18 +721,115 @@ function _ctxRenderFilteredProjectFiles(containerId, items, projectName, type) {
     </div>`;
     return;
   }
-  container.innerHTML = `
-    <div style="padding:12px;">
-      <div style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text-dim);margin:2px 2px 10px;">${filtered.length} ${type === 'memory' ? 'document' : 'file'}${filtered.length === 1 ? '' : 's'}</div>
-      ${filtered.map(d => `<div class="ctx-memory-item" onclick="${openFn}('${_escHtml(d.uri || d.path || '')}')">
-        <span>${_escHtml(d.path || d.uri || '')}</span>
-        <div style="display:flex;gap:8px;align-items:center;">
-          ${d.language ? '<span style="color:var(--text-dim);font-size:0.45rem;background:rgba(0,0,0,0.2);padding:1px 6px;border-radius:3px;">' + _escHtml(d.language) + '</span>' : ''}
-          ${d.chunk_count ? '<span style="color:var(--text-dim);font-size:0.5rem;">' + d.chunk_count + ' chunks</span>' : ''}
-        </div>
-      </div>`).join('')}
-    </div>`;
+  const count = filtered.length;
+  const noun  = type === 'memory' ? 'document' : 'file';
+  container.innerHTML = `<div class="ctx-file-cards">
+    <div class="ctx-file-cards-header">${count} ${noun}${count === 1 ? '' : 's'}</div>
+    ${filtered.map(item => _ctxBuildFileCard(item, type)).join('')}
+  </div>`;
 }
+
+function _ctxBuildFileCard(item, type) {
+  const uri      = item.uri || item.path || '';
+  const path     = item.path || uri;
+  const filename = path.split('/').pop() || path;
+  const lang     = (item.language || '').toLowerCase();
+  const chunks   = item.chunk_count || 0;
+  const uid      = 'fc_' + uri.split('').reduce((h, c) => (((h << 5) - h) + c.charCodeAt(0)) | 0, 0).toString(36).replace('-','n');
+  const icon     = type === 'memory' ? '📄' : _ctxLangIcon(lang);
+  const cached   = _ctxFileCardCache[uri];
+  const isExp    = !!(cached && cached.expanded);
+  const safUri   = _escHtml(uri);
+  const safType  = _escHtml(type);
+  return `<div class="ctx-file-card${isExp ? ' expanded' : ''}" id="${uid}">
+    <div class="ctx-file-card-head" onclick="ctxToggleFileCard('${safUri}','${safType}','${uid}')">
+      <div class="ctx-file-card-info">
+        <span class="ctx-file-card-icon">${icon}</span>
+        <span class="ctx-file-card-name" title="${_escHtml(path)}">${_escHtml(filename)}</span>
+        ${lang  ? `<span class="ctx-file-card-lang">${_escHtml(lang)}</span>` : ''}
+        ${chunks ? `<span class="ctx-file-card-chunks">${chunks} chunk${chunks===1?'':'s'}</span>` : ''}
+      </div>
+      <div class="ctx-file-card-actions">
+        <button class="ctx-file-card-open-btn" title="Open in viewer"
+          onclick="event.stopPropagation();openContextFile('${safUri}','${safType}')">↗</button>
+        <span class="ctx-file-card-toggle">${isExp ? '▲' : '▼'}</span>
+      </div>
+    </div>
+    <div class="ctx-file-card-path">${_escHtml(path)}</div>
+    <div class="ctx-file-card-body" id="${uid}_body" style="${isExp ? '' : 'display:none;'}">
+      ${isExp && cached ? _ctxRenderFileBody(cached.content, cached.language, type) : ''}
+    </div>
+  </div>`;
+}
+
+function _ctxLangIcon(lang) {
+  const m = { javascript:'🟨', js:'🟨', typescript:'🔷', ts:'🔷', jsx:'⚛', tsx:'⚛',
+              python:'🐍', py:'🐍', scala:'⚡', ruby:'💎', rb:'💎', java:'☕', go:'🐹',
+              rust:'🦀', css:'🎨', scss:'🎨', html:'🌐', json:'📋', markdown:'📝', md:'📝' };
+  return m[lang] || '📄';
+}
+
+function _ctxRenderFileBody(content, lang, type) {
+  if (!content) return '<div class="ctx-file-card-empty">No content</div>';
+  if (type === 'memory') {
+    const html = (window.marked) ? marked.parse(content) : `<pre>${_escHtml(content)}</pre>`;
+    return `<div class="ctx-file-card-markdown markdown-body">${html}</div>`;
+  }
+  return `<div class="ctx-file-card-code">
+    ${lang ? `<div class="ctx-file-card-code-lang">${_escHtml(lang)}</div>` : ''}
+    <pre class="ctx-file-card-pre">${_escHtml(content)}</pre>
+  </div>`;
+}
+
+async function ctxToggleFileCard(uri, type, uid) {
+  const card   = document.getElementById(uid);
+  const body   = document.getElementById(uid + '_body');
+  const toggle = card ? card.querySelector('.ctx-file-card-toggle') : null;
+  if (!card || !body) return;
+
+  const cached = _ctxFileCardCache[uri];
+  if (cached && cached.expanded) {
+    cached.expanded = false;
+    body.style.display = 'none';
+    card.classList.remove('expanded');
+    if (toggle) toggle.textContent = '▼';
+    return;
+  }
+
+  card.classList.add('expanded');
+  if (toggle) toggle.textContent = '▲';
+
+  if (cached && cached.content !== undefined) {
+    cached.expanded = true;
+    body.innerHTML  = _ctxRenderFileBody(cached.content, cached.language, type);
+    body.style.display = '';
+    return;
+  }
+
+  body.innerHTML = '<div class="ctx-file-card-loading">Loading…</div>';
+  body.style.display = '';
+
+  const ep = type === 'memory'
+    ? `/api/context/memory/read?uri=${encodeURIComponent(uri)}`
+    : `/api/context/code/read?uri=${encodeURIComponent(uri)}`;
+  try {
+    const res  = await fetch(ep);
+    let data = {};
+    try { data = await res.json(); } catch { data = { error: 'Bad response' }; }
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    const content = data.content || data.text || '';
+    _ctxFileCardCache[uri] = { expanded: true, content, language: data.language || '' };
+    body.innerHTML = _ctxRenderFileBody(content, data.language || '', type);
+  } catch (e) {
+    body.innerHTML = `<div class="ctx-file-card-err">Failed to load: ${_escHtml(e.message)}</div>`;
+    if (_ctxFileCardCache[uri]) _ctxFileCardCache[uri].expanded = false;
+    else _ctxFileCardCache[uri] = { expanded: false };
+  }
+}
+
+// Aliases so onclick="ctxReadMemory(...)" and onclick="ctxReadCodeFile(...)" work
+function ctxReadMemory(uri)   { openContextFile(uri, 'memory'); }
+function ctxReadCodeFile(uri) { openContextFile(uri, 'code');   }
 
 async function _ctxEnsureProjectsLoaded() {
   if (_ctxProjects && _ctxProjects.length) return;
@@ -747,7 +891,7 @@ function openContextFile(uri, type) {
 
   const endpoint = type === 'memory'
     ? `/api/context/memory/read?uri=${encodeURIComponent(uri)}`
-    : `/api/context/code/read?path=${encodeURIComponent(uri)}`;
+    : `/api/context/code/read?uri=${encodeURIComponent(uri)}`;
 
   fetch(endpoint).then(r => r.json()).then(data => {
     const text = data.content || data.text || '';

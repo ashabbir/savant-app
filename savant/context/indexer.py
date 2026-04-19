@@ -189,6 +189,78 @@ class Indexer:
         """,
     }
 
+    # Regex-based AST patterns — used when tree_sitter_languages is not installed
+    _REGEX_AST_PATTERNS = {
+        "scala": [
+            (r"^\s*(?:abstract\s+)?(?:case\s+)?class\s+(\w+)", "class"),
+            (r"^\s*(?:case\s+)?object\s+(\w+)", "class"),
+            (r"^\s*trait\s+(\w+)", "class"),
+            (r"^\s*(?:override\s+)?(?:final\s+)?(?:private\s+)?(?:protected\s+)?def\s+(\w+)", "function"),
+        ],
+        "javascript": [
+            (r"^\s*(?:export\s+)?(?:default\s+)?class\s+(\w+)", "class"),
+            (r"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)", "function"),
+            (r"^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\(", "function"),
+            (r"^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?function", "function"),
+            (r"^\s+(?:static\s+)?(?:async\s+)?(?:get\s+|set\s+)?(\w+)\s*\([^)]*\)\s*\{", "function"),
+        ],
+        "ruby": [
+            (r"^\s*class\s+(\w+)", "class"),
+            (r"^\s*module\s+(\w+)", "class"),
+            (r"^\s*def\s+(\w+)", "function"),
+        ],
+        "java": [
+            (r"^\s*(?:public\s+|private\s+|protected\s+)?(?:abstract\s+|final\s+)?class\s+(\w+)", "class"),
+            (r"^\s*(?:public\s+|private\s+|protected\s+)?interface\s+(\w+)", "class"),
+            (r"^\s*(?:public\s+|private\s+|protected\s+|static\s+|final\s+)*\w[\w<>,\s]*\s+(\w+)\s*\(", "function"),
+        ],
+        "go": [
+            (r"^\s*type\s+(\w+)\s+struct", "class"),
+            (r"^\s*type\s+(\w+)\s+interface", "class"),
+            (r"^\s*func\s+(?:\([^)]*\)\s+)?(\w+)\s*\(", "function"),
+        ],
+        "rust": [
+            (r"^\s*(?:pub\s+)?struct\s+(\w+)", "class"),
+            (r"^\s*(?:pub\s+)?enum\s+(\w+)", "class"),
+            (r"^\s*(?:pub\s+)?trait\s+(\w+)", "class"),
+            (r"^\s*(?:pub\s+)?fn\s+(\w+)", "function"),
+        ],
+        "kotlin": [
+            (r"^\s*(?:data\s+|abstract\s+|sealed\s+)?class\s+(\w+)", "class"),
+            (r"^\s*(?:data\s+)?object\s+(\w+)", "class"),
+            (r"^\s*interface\s+(\w+)", "class"),
+            (r"^\s*(?:override\s+)?(?:suspend\s+)?fun\s+(\w+)", "function"),
+        ],
+        "typescript": [
+            (r"^\s*(?:export\s+)?(?:abstract\s+)?class\s+(\w+)", "class"),
+            (r"^\s*(?:export\s+)?interface\s+(\w+)", "class"),
+            (r"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)", "function"),
+            (r"^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\(", "function"),
+            (r"^\s+(?:static\s+)?(?:public\s+|private\s+|protected\s+)?(?:async\s+)?(?:get\s+|set\s+)?(\w+)\s*\([^)]*\)\s*[:{]", "function"),
+        ],
+        "c_sharp": [
+            (r"^\s*(?:public|private|protected|internal)?\s*(?:abstract\s+|sealed\s+|static\s+)?class\s+(\w+)", "class"),
+            (r"^\s*(?:public|private|protected|internal)?\s*interface\s+(\w+)", "class"),
+            (r"^\s*(?:public|private|protected|internal|static|virtual|override|async)?\s*\w+\s+(\w+)\s*\(", "function"),
+        ],
+    }
+
+    def _extract_regex_ast(self, file_id: int, file_rel_path: str, content: str, lang_name: str):
+        """Regex-based AST extraction fallback when tree_sitter_languages is unavailable."""
+        import re
+        patterns = self._REGEX_AST_PATTERNS.get(lang_name)
+        if not patterns:
+            return
+        lines = content.split("\n")
+        for line_no, line in enumerate(lines, 1):
+            for pattern, node_type in patterns:
+                m = re.match(pattern, line)
+                if m:
+                    name = m.group(1)
+                    if name and len(name) > 1:
+                        self._safe_insert_ast_node(file_id, node_type, name, line_no, line_no, file_rel_path)
+                    break  # only first match per line
+
     def _extract_and_store_ast(self, file_id: int, file_rel_path: str, content: str):
         suffix = Path(file_rel_path).suffix.lower()
         if suffix not in self.EXTENSION_TO_LANG:
@@ -198,11 +270,16 @@ class Indexer:
 
         lang_name = self.EXTENSION_TO_LANG[suffix]
 
+        # Python always uses native ast module
+        if suffix == ".py":
+            self._extract_python_native_ast(file_id, file_rel_path, content)
+            return
+
         try:
             import tree_sitter_languages
         except ImportError:
-            if suffix == ".py":
-                self._extract_python_native_ast(file_id, file_rel_path, content)
+            # Fall back to regex-based extraction
+            self._extract_regex_ast(file_id, file_rel_path, content, lang_name)
             return
 
         try:
@@ -312,7 +389,7 @@ class Indexer:
         repo_name = repo_name or repo_path.name
 
         # Phase 1: Loading model
-        _set_status(repo_name, status="indexing", phase="Loading model",
+        _set_status(repo_name, status="indexing", phase="Loading model", job_type="index",
                     progress=0, total=0, files_done=0, chunks_done=0,
                     current_file="", error=None)
         ContextDB.update_repo_status(repo_name, "indexing")
@@ -465,7 +542,7 @@ class Indexer:
 
         repo_name = repo_name or repo_path.name
 
-        _set_status(repo_name, status="indexing", phase="Preparing AST generation",
+        _set_status(repo_name, status="indexing", phase="Preparing AST generation", job_type="ast",
                     progress=0, total=0, files_done=0, ast_nodes_done=0,
                     current_file="", error=None)
 
@@ -541,6 +618,14 @@ class Indexer:
                     errors += 1
 
             _set_status(repo_name, status="indexed", phase="Complete", progress=100)
+            # Persist final status so the project reflects AST availability after
+            # the live status dict is cleared (30s cleanup below).
+            current_repo = ContextDB.get_repo(repo_name)
+            if current_repo:
+                current_db_status = current_repo.get("status", "added")
+                # Keep "indexed" if already indexed; upgrade "added"/"error" → "ast_only"
+                if current_db_status not in ("indexed",):
+                    ContextDB.update_repo_status(repo_name, "ast_only")
             return {"repo_name": repo_name, "files_processed": files_indexed, "errors": errors}
 
         except _CancelledError:

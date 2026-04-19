@@ -1,6 +1,6 @@
 {
   "name": "savant",
-  "version": "7.1.0",
+  "version": "7.2.0",
   "description": "Savant — AI Session Dashboard",
   "main": "main.js",
   "scripts": {
@@ -18,7 +18,7 @@
     "appId": "com.icapital.savant",
     "productName": "Savant",
     "releaseInfo": {
-      "releaseNotes": "v7.1.0 HERO RELEASE: savant-context AST is live end-to-end — indexing now generates AST structures, project Overview shows AST node counts, the AST panel renders the generated tree, and MCP structure_search is production-hardened for reliable AST queries."
+      "releaseNotes": "v7.2.0 HERO RELEASE: AST Visualization — full interactive AST explorer with Tree, Cluster, and Radial Sunburst views. Partial rendering (500/1000/1500/all files) prevents browser lock on massive repos. Legend filters expand to target node type at any depth. Click = info panel only; collapse/expand via drawer controls. Node labels toggle on demand. Compact top-bar layout with FILES + view toggles in a single row. Search with live-filtering across all AST views."
     },
     "mac": {
       "category": "public.app-category.developer-tools",
