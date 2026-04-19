@@ -6535,6 +6535,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
             <div style="font-size:0.6rem;">No projects yet</div>
           </div>
         </div>
+        <button id="ctx-projects-toggle" onclick="ctxToggleProjectsPanel()" title="Collapse project selector" style="width:26px;min-width:26px;border:none;border-right:1px solid var(--border);background:rgba(34,211,238,0.08);color:var(--cyan);font-family:var(--font-mono);font-size:0.8rem;cursor:pointer;display:flex;align-items:center;justify-content:center;">‹</button>
         <!-- Right: detail pane -->
         <div class="ctx-proj-detail" id="ctx-proj-detail">
           <div class="ctx-welcome" style="padding:60px 20px;">

@@ -1,95 +1,151 @@
 // ── Context AST ───────────────────────────────────────────────────────────────
-// AST tab listing, project AST modal, view toggle controller, D3 tree renderer.
+// AST tab listing, embedded project viewer, view toggle controller, D3 tree renderer.
 // Depends on: context-core.js (_ctxProjects, _escHtml, etc.)
 //             context-complexity.js (_renderComplexityHeatmap, _renderComplexityRadial)
 //             D3.js (d3)
 
 // State shared with complexity module
 let _astViewMode    = 'tree';  // 'tree' | 'complexity' | 'radial'
-let _astCurrentNodes = null;   // raw flat node list for the currently open modal
+let _astCurrentNodes = null;   // raw flat node list for the currently selected project
+let _astSelectedProject = null;
+let _astProjects = [];
+let _astProjectPanelCollapsed = false;
+let _astSearchQuery = '';
+let _astSearchSelectionKey = '';
 
 // ── File-list renderer (memory / code panels) ─────────────────────────────────
 // (Moved here from core so that AST-specific openFn 'ctxReadAst' resolves correctly)
 
-// ── AST tab: project card grid ────────────────────────────────────────────────
+// ── AST tab: project tree + embedded visualizer ──────────────────────────────
 
 async function ctxLoadAst() {
   const container = document.getElementById('ctx-ast-list');
+  if (!container) return;
   try {
     const res = await fetch('/api/context/repos');
     if (!res.ok) throw new Error('API error');
     const data = await res.json();
-    const repos = data.repos || data || [];
-    if (!repos.length) {
-      container.innerHTML = `<div class="ctx-welcome">🌳 No projects found</div>`;
+    _astProjects = data.repos || data || [];
+    if (!_astProjects.length) {
+      container.innerHTML = `<div class="ctx-welcome">
+        <div style="font-size:2rem;margin-bottom:12px;">🌳</div>
+        <div>No projects found</div>
+        <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Add a project, then generate AST to visualize it here</div>
+      </div>`;
       return;
     }
+
+    if (!_astSelectedProject || !_astProjects.find(r => r.name === _astSelectedProject)) {
+      _astSelectedProject = _astProjects[0].name;
+    }
+
     container.innerHTML = `
-      <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:12px; padding:10px 0;">
-        ${repos.map(r => `
-          <div class="ctx-result-card" onclick="ctxReadProjectAst('${_escHtml(r.name)}')" style="cursor:pointer;">
-            <span style="color:var(--cyan);font-weight:700;">📦 ${r.name}</span>
+      <div class="ctx-proj-split" style="height:calc(100vh - 320px);min-height:520px;">
+        <div class="ctx-proj-sidebar" id="ctx-ast-project-panel" style="transition:width 0.18s ease,min-width 0.18s ease;overflow:hidden;"></div>
+        <button id="ctx-ast-project-toggle" onclick="ctxToggleAstProjectPanel()" title="Collapse project selector" style="width:26px;min-width:26px;border:none;border-right:1px solid var(--border);background:rgba(34,211,238,0.08);color:var(--cyan);font-family:var(--font-mono);font-size:0.8rem;cursor:pointer;display:flex;align-items:center;justify-content:center;">‹</button>
+        <div class="ctx-proj-detail" id="ctx-ast-visualization" style="background:rgba(0,0,0,0.08);">
+          <div class="ctx-welcome" style="padding:60px 20px;">
+            <div style="font-size:2rem;margin-bottom:12px;">🌳</div>
+            <div>Select a project</div>
+            <div style="color:var(--text-dim);font-size:0.55rem;margin-top:6px;">The AST visualization renders here</div>
           </div>
-        `).join('')}
+        </div>
       </div>`;
+    _renderAstProjectTree();
+    _applyAstProjectPanelState();
+    await ctxReadProjectAst(_astSelectedProject, { preserveView: true });
   } catch (e) {
     container.innerHTML = '<div style="padding:30px;color:#ef4444;">Failed to load: ' + _escHtml(e.message) + '</div>';
   }
 }
 
-// ── Project AST: open full-screen modal ───────────────────────────────────────
+function _renderAstProjectTree() {
+  ctxRenderProjectSidebar('ctx-ast-project-panel', _astProjects, _astSelectedProject, 'ctxReadProjectAst');
+}
 
-async function ctxReadProjectAst(projectName) {
-  const modalOverlay = document.getElementById('file-modal');
-  const modal        = modalOverlay.querySelector('.modal');
-  const title        = document.getElementById('modal-title');
-  const content      = document.getElementById('modal-content');
-  const contentMd    = document.getElementById('modal-content-md');
-  const openBtn      = document.getElementById('open-browser-btn');
-  const revealBtn    = document.getElementById('reveal-path-btn');
-  const copyBtn      = document.getElementById('copy-file-btn');
+function ctxToggleAstProjectPanel() {
+  _astProjectPanelCollapsed = !_astProjectPanelCollapsed;
+  _applyAstProjectPanelState();
+  if (_astCurrentNodes) setTimeout(_renderAstView, 220);
+}
 
-  title.innerHTML          = `<span style="color:var(--cyan);">🌳 Project AST:</span> ${projectName}`;
-  content.innerHTML        = '<div style="padding:40px;text-align:center;color:var(--text-dim);">Analyzing...</div>';
-  content.style.display    = '';
-  contentMd.style.display  = 'none';
-  if (openBtn)   openBtn.style.display   = 'none';
-  if (revealBtn) revealBtn.style.display = 'none';
-  if (copyBtn)   copyBtn.style.display   = 'none';
-  modal.classList.add('modal-full');
-  modalOverlay.classList.add('active');
+function _applyAstProjectPanelState() {
+  const panel = document.getElementById('ctx-ast-project-panel');
+  const toggle = document.getElementById('ctx-ast-project-toggle');
+  if (!panel || !toggle) return;
 
-  const originalClose = window.closeModal;
-  window.closeModal = function() {
-    modal.classList.remove('modal-full');
-    if (copyBtn) copyBtn.style.display = '';
-    _astCurrentNodes = null;
-    _astViewMode     = 'tree';
-    originalClose();
-    window.closeModal = originalClose;
-  };
+  if (_astProjectPanelCollapsed) {
+    panel.style.width = '0px';
+    panel.style.minWidth = '0px';
+    panel.style.borderRight = 'none';
+    toggle.textContent = '›';
+    toggle.title = 'Show project selector';
+  } else {
+    panel.style.width = '240px';
+    panel.style.minWidth = '200px';
+    panel.style.borderRight = '1px solid var(--border)';
+    toggle.textContent = '‹';
+    toggle.title = 'Collapse project selector';
+  }
+}
 
+function _showAstPanel() {
+  const astPanel = document.getElementById('ctx-panel-ast');
+  if (!astPanel || astPanel.style.display !== 'none') return;
+  document.querySelectorAll('.ctx-inner-tabs .savant-subtab').forEach(b => {
+    const isAst = b.dataset && b.dataset.panel === 'ast';
+    b.classList.toggle('active', isAst);
+  });
+  ['search', 'projects', 'memory', 'code', 'ast'].forEach(p => {
+    const el = document.getElementById('ctx-panel-' + p);
+    if (el) el.style.display = p === 'ast' ? 'block' : 'none';
+  });
+}
+
+// ── Project AST: render into the AST page right pane ─────────────────────────
+
+async function ctxReadProjectAst(projectName, options = {}) {
+  _astSelectedProject = projectName;
+  _showAstPanel();
+  _renderAstProjectTree();
+
+  let content = document.getElementById('ctx-ast-visualization');
+  if (!content) {
+    await ctxLoadAst();
+    content = document.getElementById('ctx-ast-visualization');
+    if (!content) return;
+  }
+
+  content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim);">Analyzing...</div>';
   try {
     const res = await fetch('/api/context/ast/list?repo=' + encodeURIComponent(projectName));
     if (!res.ok) throw new Error('API error');
     const data = await res.json();
     if (!data.nodes || !data.nodes.length) {
-      content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim);">No AST data.</div>';
+      content.innerHTML = `<div class="ctx-welcome" style="padding:60px 20px;">
+        <div style="font-size:2rem;margin-bottom:12px;">🌳</div>
+        <div>No AST data for ${_escHtml(projectName)}</div>
+        <div style="color:var(--text-dim);font-size:0.55rem;margin-top:6px;">Generate AST from the Projects panel, then return here</div>
+      </div>`;
       return;
     }
     _astCurrentNodes = data.nodes;
-    _astViewMode     = 'tree';
+    if (!options.preserveView) _astViewMode = 'tree';
     _renderAstModal(content);
   } catch (e) {
     content.innerHTML = `<div style="padding:40px;text-align:center;color:#ef4444;">Error: ${e.message}</div>`;
   }
 }
 
-// ── Modal shell: toggle bar ───────────────────────────────────────────────────
+// ── Viewer shell: toggle bar ──────────────────────────────────────────────────
 
 function _renderAstModal(container) {
   container.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;padding:10px 20px;border-bottom:1px solid var(--border);background:rgba(0,0,0,0.3);flex-shrink:0;">
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);background:rgba(0,0,0,0.3);flex-shrink:0;flex-wrap:wrap;">
+      <div style="min-width:0;margin-right:auto;">
+        <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🌳 ${_escHtml(_astSelectedProject || 'Project AST')}</div>
+        <div style="font-family:var(--font-mono);font-size:0.48rem;color:var(--text-dim);margin-top:2px;">${(_astCurrentNodes || []).length} AST nodes</div>
+      </div>
       <span style="font-size:0.58rem;color:var(--text-dim);font-weight:600;letter-spacing:0.05em;margin-right:4px;">VIEW</span>
       <button id="ast-toggle-tree"
         onclick="_setAstView('tree')"
@@ -111,8 +167,9 @@ function _renderAstModal(container) {
         style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-dim);transition:all 0.15s;">
         ✦ Cluster
       </button>
+      ${_renderAstSearchRecovery()}
     </div>
-    <div id="ast-modal-view-area"></div>
+    <div id="ast-modal-view-area" style="height:calc(100% - 58px);min-height:460px;overflow:hidden;"></div>
   `;
   _renderAstView();
 }
@@ -139,17 +196,157 @@ function _setAstView(mode) {
 function _renderAstView() {
   const area = document.getElementById('ast-modal-view-area');
   if (!area || !_astCurrentNodes) return;
+  const nodes = _filterAstNodesForSearch(_astCurrentNodes);
+  _syncAstSearchRecovery(nodes.length);
+  if (_astSearchQuery && !nodes.length) {
+    _renderAstNoSearchResults(area);
+    return;
+  }
   if (_astViewMode === 'tree') {
-    const root = _buildUnifiedAstTree(_astCurrentNodes);
+    const root = _buildUnifiedAstTree(nodes);
     ctxRenderD3Tree(root, area, false, 3);
   } else if (_astViewMode === 'radial') {
-    _renderComplexityRadial(_astCurrentNodes, area);
+    area.innerHTML = _renderAstSearchToolbar() + '<div id="ast-view-render-host" style="height:calc(100% - 43px);overflow:hidden;"></div>';
+    const host = document.getElementById('ast-view-render-host');
+    if (!host) return;
+    _renderComplexityRadial(nodes, host);
   } else if (_astViewMode === 'cluster') {
-    const root = _buildUnifiedAstTree(_astCurrentNodes);
+    const root = _buildUnifiedAstTree(nodes);
     _renderRadialClusterTree(root, area);
   } else {
-    _renderComplexityHeatmap(_astCurrentNodes, area);
+    area.innerHTML = _renderAstSearchToolbar() + '<div id="ast-view-render-host" style="height:calc(100% - 43px);overflow:hidden;"></div>';
+    const host = document.getElementById('ast-view-render-host');
+    if (!host) return;
+    _renderComplexityHeatmap(nodes, host);
   }
+}
+
+function _renderAstNoSearchResults(area) {
+  const msg = `
+    <div style="height:calc(100% - 43px);min-height:260px;display:flex;align-items:center;justify-content:center;padding:40px;text-align:center;color:var(--text-dim);font-size:0.68rem;line-height:1.7;">
+      <div style="max-width:420px;">
+        <div style="font-size:1.8rem;margin-bottom:10px;opacity:0.55;">⌕</div>
+        <div>No AST nodes match "${_escHtml(_astSearchQuery)}"</div>
+        <button class="ctx-btn-sm" onclick="astClearSearchQuery()" style="margin-top:12px;background:var(--cyan);color:#001018;border-color:var(--cyan);">Clear search</button>
+      </div>
+    </div>`;
+  if (_astViewMode === 'tree' || _astViewMode === 'cluster') {
+    const cid = 'ast-empty-' + Math.random().toString(36).substr(2, 9);
+    area.innerHTML = _renderAstInteractiveLegend(cid) + msg;
+  } else {
+    area.innerHTML = _renderAstSearchToolbar() + msg;
+  }
+}
+
+function _filterAstNodesForSearch(nodes) {
+  const q = (_astSearchQuery || '').trim().toLowerCase();
+  if (!q) return nodes;
+  const selected = _astSelectedSearchNode(nodes);
+  if (selected) {
+    return nodes.filter(n => _astNodeSearchKey(n) === _astNodeSearchKey(selected) || _astIsNestedAstNode(selected, n));
+  }
+  return nodes.filter(n => [
+    n.name,
+    n.node_type,
+    n.path,
+    n.repo,
+    n.start_line != null ? `l${n.start_line}` : '',
+  ].some(v => (v || '').toString().toLowerCase().includes(q)));
+}
+
+function astSetSearchQuery(value) {
+  _astSearchQuery = value || '';
+  _astSearchSelectionKey = '';
+  const selected = _astSelectedSearchNode(_astCurrentNodes || []);
+  _astSearchSelectionKey = selected ? _astNodeSearchKey(selected) : '';
+  _renderAstView();
+  setTimeout(() => {
+    const input = document.getElementById('ast-view-search');
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }, 0);
+}
+
+function astClearSearchQuery() {
+  _astSearchQuery = '';
+  _astSearchSelectionKey = '';
+  _syncAstSearchRecovery(0);
+  _renderAstView();
+}
+
+function _renderAstSearchRecovery() {
+  return `
+    <div id="ast-search-recovery" style="display:none;align-items:center;gap:8px;margin-left:4px;padding:3px 6px;border:1px solid rgba(34,211,238,0.35);border-radius:6px;background:rgba(34,211,238,0.08);font-family:var(--font-mono);">
+      <span id="ast-search-recovery-text" style="font-size:0.52rem;color:var(--text-dim);max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
+      <button class="ctx-btn-sm" onclick="astClearSearchQuery()" style="font-size:0.5rem;background:var(--cyan);color:#001018;border-color:var(--cyan);">Clear search</button>
+    </div>`;
+}
+
+function _syncAstSearchRecovery(matchCount) {
+  const el = document.getElementById('ast-search-recovery');
+  if (!el) return;
+  const text = document.getElementById('ast-search-recovery-text');
+  const hasQuery = !!(_astSearchQuery || '').trim();
+  el.style.display = hasQuery ? 'flex' : 'none';
+  if (text && hasQuery) {
+    const countText = matchCount === 0 ? 'no matches' : `${matchCount} match${matchCount === 1 ? '' : 'es'}`;
+    text.textContent = `Search: "${_astSearchQuery}" (${countText})`;
+  }
+}
+
+function _astNodeSearchKey(n) {
+  if (!n) return '';
+  return [n.repo || '', n.path || '', n.node_type || '', n.name || '', n.start_line ?? '', n.end_line ?? ''].join('::');
+}
+
+function _astSearchOptionLabel(n) {
+  const line = n && n.start_line != null ? ` · L${n.start_line}${n.end_line != null ? `-${n.end_line}` : ''}` : '';
+  return `${n.name || '(anonymous)'} · ${n.node_type || 'node'} · ${n.path || ''}${line}`;
+}
+
+function _astTypeaheadOptions(nodes = _astCurrentNodes || []) {
+  const seen = new Set();
+  return (nodes || []).reduce((acc, n) => {
+    const key = _astNodeSearchKey(n);
+    if (!key || seen.has(key)) return acc;
+    seen.add(key);
+    acc.push({ key, label: _astSearchOptionLabel(n), node: n });
+    return acc;
+  }, []).sort((a, b) => a.label.localeCompare(b.label)).slice(0, 200);
+}
+
+function _astSelectedSearchNode(nodes = _astCurrentNodes || []) {
+  const q = (_astSearchQuery || '').trim();
+  if (!q) return null;
+  const options = _astTypeaheadOptions(nodes);
+  if (_astSearchSelectionKey) {
+    const byKey = options.find(o => o.key === _astSearchSelectionKey);
+    if (byKey) return byKey.node;
+  }
+  const exact = options.find(o => o.label === q);
+  return exact ? exact.node : null;
+}
+
+function _astIsNestedAstNode(parent, child) {
+  if (!parent || !child || parent.repo !== child.repo || parent.path !== child.path) return false;
+  if (parent.start_line == null || parent.end_line == null || child.start_line == null || child.end_line == null) return false;
+  return child.start_line >= parent.start_line && child.end_line <= parent.end_line;
+}
+
+function _renderAstTypeaheadSearch() {
+  const options = _astTypeaheadOptions();
+  return `
+    <span style="font-size:0.52rem;color:var(--text-dim);font-weight:600;letter-spacing:0.08em;">SEARCH</span>
+    <input id="ast-view-search" type="text" value="${_escHtml(_astSearchQuery)}" autocomplete="off" list="ast-view-search-options"
+      oninput="astSetSearchQuery(this.value)"
+      onkeydown="if(event.key==='Escape')astClearSearchQuery()"
+      placeholder="Search AST nodes..."
+      style="width:260px;max-width:100%;background:var(--bg-main);color:var(--text);border:1px solid var(--border);border-radius:5px;padding:5px 9px;font-family:var(--font-mono);font-size:0.58rem;">
+    <datalist id="ast-view-search-options">
+      ${options.map(o => `<option value="${_escHtml(o.label)}"></option>`).join('')}
+    </datalist>
+    ${_astSearchQuery ? `<button class="ctx-btn-sm" onclick="astClearSearchQuery()" style="font-size:0.5rem;">Clear</button>` : ''}`;
 }
 
 // ── Hierarchical tree builder for D3 ─────────────────────────────────────────
@@ -231,10 +428,10 @@ function _collapseAstToDepth(rootNode, targetType, updateFn) {
   if (updateFn) updateFn(rootNode);
 }
 
-function _showAstDrawer(d, drawerId) {
+function _showAstDrawer(d, drawerId, onCloseName = '') {
   const drawer = document.getElementById(drawerId);
   if (!drawer) return;
-  drawer.style.display = 'block';
+  _setAstDrawerOpen(drawerId, true);
 
   const path = [];
   let curr = d;
@@ -258,6 +455,13 @@ function _showAstDrawer(d, drawerId) {
   const typeIcon = { repo: '📦', dir: '📁', file: '📄', class: '🏛️', function: 'λ', method: '◆' }[d.data.type] || '❓';
 
   drawer.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;margin:-16px -16px 14px;border-bottom:1px solid var(--border);position:sticky;top:-16px;background:var(--bg-card);z-index:5;">
+      <span style="font-size:0.45rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);font-family:var(--font-mono);">Node Detail</span>
+      ${onCloseName ? `<button onclick="${onCloseName}()" title="Collapse panel" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:0.9rem;line-height:1;padding:2px 4px;border-radius:3px;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-dim)'">‹</button>` : ''}
+    </div>
+    <div style="margin-bottom:8px;">
+      <span title="AST node type" style="cursor:default;display:inline-block;padding:2px 8px;font-size:0.4rem;font-family:var(--font-mono);background:${c}22;border:1px solid ${c}55;border-radius:10px;color:${c};letter-spacing:0.5px;">${_escHtml(d.data.type || 'node')}</span>
+    </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
       <span style="font-size:1.2rem;">${typeIcon}</span>
       <div style="flex:1;">
@@ -288,6 +492,76 @@ function _showAstDrawer(d, drawerId) {
   `;
 }
 
+function _setAstDrawerOpen(drawerId, open) {
+  const drawer = document.getElementById(drawerId);
+  if (!drawer) return;
+  drawer.style.transition = 'width 0.2s ease,min-width 0.2s ease,padding 0.2s ease';
+  drawer.style.display = 'block';
+  if (open) {
+    drawer.style.width = '320px';
+    drawer.style.minWidth = '280px';
+    drawer.style.padding = '16px';
+    drawer.style.borderLeft = '1px solid var(--border)';
+    drawer.style.overflowY = 'auto';
+  } else {
+    drawer.style.width = '0px';
+    drawer.style.minWidth = '0px';
+    drawer.style.padding = '0';
+    drawer.style.borderLeft = 'none';
+    drawer.style.overflow = 'hidden';
+  }
+}
+
+function _astAllDescendants(root) {
+  const out = [];
+  const visit = node => {
+    out.push(node);
+    [...(node.children || []), ...(node._children || [])].forEach(visit);
+  };
+  visit(root);
+  return out;
+}
+
+function _astExpandSubtree(node) {
+  if (!node) return;
+  if (node._children) {
+    node.children = node._children;
+    node._children = null;
+  }
+  (node.children || []).forEach(_astExpandSubtree);
+}
+
+function _astReadablePath(d) {
+  const parts = [];
+  let curr = d;
+  while (curr) {
+    if (curr.data.type !== 'root' && curr.data.name !== 'Context AST') parts.unshift(curr.data.name);
+    curr = curr.parent;
+  }
+  return parts.join(' / ');
+}
+
+function _astNodeColor(type) {
+  const map = { repo: '#22d3ee', dir: '#a78bfa', file: '#4ade80', function: '#fb923c', method: '#fb923c', class: '#f43f5e' };
+  return map[type] || '#94a3b8';
+}
+
+function _astNodeIcon(type) {
+  return { repo: '📦', dir: '📁', file: '📄', class: '🏛️', function: 'λ', method: '◆', root: '🌳' }[type] || '•';
+}
+
+function _renderAstEmptyDrawer(drawerId, title, body) {
+  const drawer = document.getElementById(drawerId);
+  if (!drawer) return;
+  _setAstDrawerOpen(drawerId, true);
+  drawer.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;margin:-16px -16px 14px;border-bottom:1px solid var(--border);position:sticky;top:-16px;background:var(--bg-card);z-index:5;">
+      <span style="font-size:0.45rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);font-family:var(--font-mono);">${_escHtml(title)}</span>
+    </div>
+    <div style="text-align:center;padding:34px 10px;color:var(--text-dim);font-size:0.6rem;line-height:1.7;">${body}</div>
+  `;
+}
+
 function _renderAstInteractiveLegend(cid) {
   return `
     <div style="display:flex;gap:16px;padding:8px 16px;font-size:0.58rem;color:var(--text-dim);align-items:center;border-bottom:1px solid var(--border);flex-wrap:wrap;background:rgba(0,0,0,0.15);">
@@ -299,7 +573,19 @@ function _renderAstInteractiveLegend(cid) {
           <span style="width:9px;height:9px;border-radius:50%;background:${color};display:inline-block;"></span> ${type}
         </span>`;
       }).join('')}
-      <span style="margin-left:auto;font-style:italic;">Click nodes to expand · Click type above to set depth</span>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:6px;position:relative;min-width:280px;max-width:420px;flex:1;justify-content:flex-end;">
+        ${_renderAstTypeaheadSearch()}
+      </div>
+    </div>`;
+}
+
+function _renderAstSearchToolbar() {
+  return `
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border);background:rgba(0,0,0,0.15);">
+      <span style="font-size:0.58rem;color:var(--text-dim);font-style:italic;">Filtered view updates Tree, Cluster, Radial, and Complexity.</span>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+        ${_renderAstTypeaheadSearch()}
+      </div>
     </div>`;
 }
 
@@ -319,9 +605,9 @@ function _renderRadialClusterTree(data, container) {
   const drawerId = cid + '-drawer';
 
   container.innerHTML = _renderAstInteractiveLegend(cid) + `
-    <div style="display:flex;height:${height - 36}px;">
+    <div style="display:flex;height:${height - 43}px;">
       <div id="${cid}" style="flex:1;overflow:hidden;position:relative;"></div>
-      <div id="${drawerId}" style="width:280px;border-left:1px solid var(--border);background:var(--bg-panel, rgba(0,0,0,0.15));padding:16px;overflow-y:auto;display:none;"></div>
+      <div id="${drawerId}" style="width:0;min-width:0;border-left:none;background:var(--bg-card);font-family:var(--font-mono);padding:0;overflow:hidden;display:block;flex-shrink:0;"></div>
     </div>
   `;
 
@@ -334,11 +620,6 @@ function _renderRadialClusterTree(data, container) {
     const cx = W / 2;
     const cy = H / 2;
 
-    const nodeColor = type => {
-      const map = { repo: '#22d3ee', dir: '#a78bfa', file: '#4ade80', function: '#fb923c', method: '#fb923c', class: '#f43f5e' };
-      return map[type] || '#94a3b8';
-    };
-
     const svg  = d3.select('#' + cid).append('svg').attr('width', W).attr('height', H);
     const zoom = d3.zoom().scaleExtent([0.08, 4]).on('zoom', e => gRoot.attr('transform', e.transform));
     svg.call(zoom);
@@ -350,20 +631,43 @@ function _renderRadialClusterTree(data, container) {
     let nodeId = 0;
     const hierRoot = d3.hierarchy(data);
     hierRoot.descendants().forEach(d => { d._id = ++nodeId; });
+    let activeRoot = hierRoot;
+    let selectedNodeId = null;
+    window._astClusterCloseDrawer = window._astClusterCloseDrawer || {};
 
     function radialPoint(angle, r) {
       return [r * Math.cos(angle - Math.PI / 2), r * Math.sin(angle - Math.PI / 2)];
     }
 
-    function draw(source) {
-      const visCount = hierRoot.descendants().length;
+    function zoomToScope(scopeRoot) {
+      const nodes = scopeRoot.descendants();
+      if (!nodes.length) return;
+      const pts = nodes.map(n => radialPoint(n.x || 0, n.y || 0));
+      const xs = pts.map(p => p[0]);
+      const ys = pts.map(p => p[1]);
+      const x0 = Math.min(...xs) - 60;
+      const x1 = Math.max(...xs) + 60;
+      const y0 = Math.min(...ys) - 60;
+      const y1 = Math.max(...ys) + 60;
+      const scale = Math.min(1.5, 0.86 / Math.max((x1 - x0) / Math.max(W, 1), (y1 - y0) / Math.max(H, 1)));
+      svg.transition().duration(420)
+        .call(zoom.transform, d3.zoomIdentity.translate(cx - scale * (x0 + x1) / 2, cy - scale * (y0 + y1) / 2).scale(scale));
+    }
+
+    function draw(source, reset = false) {
+      const scopeRoot = activeRoot || hierRoot;
+      const visCount = scopeRoot.descendants().length;
       const radius   = Math.max(120, Math.min(Math.max(W, H) * 0.42, visCount * 18));
       d3.tree()
         .size([2 * Math.PI, radius])
-        .separation((a, b) => (a.parent === b.parent ? 1 : 2) / Math.max(1, a.depth))(hierRoot);
+        .separation((a, b) => (a.parent === b.parent ? 1 : 2) / Math.max(1, a.depth))(scopeRoot);
 
-      const nodes = hierRoot.descendants();
-      const links = hierRoot.links();
+      const nodes = scopeRoot.descendants();
+      const links = scopeRoot.links();
+      if (reset) {
+        gLinks.selectAll('path').remove();
+        gNodes.selectAll('g.rc-node').remove();
+      }
 
       const linkSel = gLinks.selectAll('path').data(links, d => d.target._id);
       const diagonal = d3.linkRadial().angle(d => d.x).radius(d => d.y);
@@ -375,7 +679,7 @@ function _renderRadialClusterTree(data, container) {
         })
         .merge(linkSel)
         .transition().duration(280)
-        .attr('stroke', d => nodeColor(d.target.data.type) + '55')
+        .attr('stroke', d => _astNodeColor(d.target.data.type) + '55')
         .attr('d', diagonal);
 
       linkSel.exit().transition().duration(200)
@@ -394,8 +698,9 @@ function _renderRadialClusterTree(data, container) {
           if (d.children)   { d._children = d.children;  d.children  = null; }
           else if (d._children) { d.children  = d._children; d._children = null; }
           d._x0 = d.x; d._y0 = d.y;
+          selectedNodeId = d._id;
           draw(d);
-          _showAstDrawer(d, drawerId);
+          _showAstDrawer(d, drawerId, `window._astClusterCloseDrawer['${cid}']`);
         });
 
       enter.append('circle').attr('r', 0).attr('stroke-width', 1.5);
@@ -406,14 +711,30 @@ function _renderRadialClusterTree(data, container) {
 
       merged.select('circle')
         .attr('r', d => d.depth === 0 ? 7 : (d._children ? 5 : 4))
-        .attr('fill', d => nodeColor(d.data.type))
+        .attr('fill', d => _astNodeColor(d.data.type))
         .attr('fill-opacity', d => (d._children ? 0.35 : 0.9))
-        .attr('stroke', d => nodeColor(d.data.type));
+        .attr('stroke', d => d._id === selectedNodeId ? '#fff' : _astNodeColor(d.data.type))
+        .attr('stroke-width', d => d._id === selectedNodeId ? 3 : 1.5);
 
       merged.each(function(d) { d3.select(this).select('title').text(d.data.name + (d.data.line ? ` · L${d.data.line}` : '')); });
       nodeSel.exit().transition().duration(200).attr('transform', () => { const [x, y] = radialPoint(source.x, source.y); return `translate(${x},${y})`; }).remove();
       nodes.forEach(d => { d._x0 = d.x; d._y0 = d.y; });
     }
+
+    function clearClusterFilter() {
+      activeRoot = hierRoot;
+      selectedNodeId = null;
+      _collapseAstToDepth(hierRoot, 'class');
+      draw(hierRoot, true);
+      zoomToScope(hierRoot);
+      _setAstDrawerOpen(drawerId, false);
+    }
+
+    window._astClusterCloseDrawer[cid] = function() {
+      selectedNodeId = null;
+      _setAstDrawerOpen(drawerId, false);
+      draw(activeRoot || hierRoot);
+    };
 
     window._astActiveDrawMap[cid] = { root: hierRoot, draw: draw };
 
@@ -421,6 +742,7 @@ function _renderRadialClusterTree(data, container) {
     _collapseAstToDepth(hierRoot, 'class');
     draw(hierRoot);
     svg.call(zoom.transform, d3.zoomIdentity.translate(cx, cy).scale(0.72));
+    _setAstDrawerOpen(drawerId, false);
   }, 10);
 }
 
@@ -428,7 +750,7 @@ function _renderRadialClusterTree(data, container) {
 
 function ctxRenderD3Tree(data, container, isTab = false, expandDepth = 1) {
   const cid  = 'ast-tree-' + Math.random().toString(36).substr(2, 9);
-  const containerHeight = isTab ? 'calc(100vh - 140px)' : 'calc(80vh - 80px)';
+  const containerHeight = isTab ? 'calc(100vh - 140px)' : '100%';
   const drawerId = cid + '-drawer';
 
   container.innerHTML = _renderAstInteractiveLegend(cid) + `

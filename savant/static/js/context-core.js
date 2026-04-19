@@ -6,6 +6,7 @@ let _ctxInited = false;
 let _ctxPollingTimer = null;
 let _ctxLastIndexStatus = {};
 let _ctxSelectedProject = null;
+let _ctxProjectsPanelCollapsed = false;
 // _ctxProjects is declared in globals.js
 
 // ── MCP connection ────────────────────────────────────────────────────────────
@@ -122,30 +123,85 @@ async function ctxLoadProjects() {
 function ctxRenderProjects() { ctxRenderProjectsWithProgress({}); }
 
 function ctxRenderProjectsWithProgress(indexStatus) {
-  const sidebar = document.getElementById('ctx-projects-list');
-  if (!sidebar) return;
   if (!_ctxProjects.length) {
-    sidebar.innerHTML = `<div class="ctx-welcome">
-      <div style="font-size:2rem;margin-bottom:12px;">📦</div>
-      <div>No projects yet</div>
-      <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Add a project to get started</div>
-    </div>`;
+    ctxRenderProjectSidebar('ctx-projects-list', _ctxProjects, _ctxSelectedProject, 'ctxSelectProject', { indexStatus });
+    ctxApplyProjectsPanelState();
     return;
   }
   if (!_ctxSelectedProject) _ctxSelectedProject = _ctxProjects[0].name;
-  sidebar.innerHTML = _ctxProjects.map(p => {
-    const isActive = p.name === _ctxSelectedProject;
-    const liveStatus = (indexStatus[p.name] || {}).status || p.status || 'ready';
-    const statusCls = liveStatus === 'indexing' ? 'indexing' : liveStatus === 'ready' ? 'ready' : 'off';
-    return `<div class="ctx-proj-row${isActive ? ' active' : ''}" onclick="ctxSelectProject('${_escHtml(p.name)}')">
-      <div class="ctx-proj-row-name">${_escHtml(p.name)}</div>
-      <span class="ctx-project-status ${statusCls}">${liveStatus}</span>
-    </div>`;
-  }).join('');
+  if (!ctxRenderProjectSidebar('ctx-projects-list', _ctxProjects, _ctxSelectedProject, 'ctxSelectProject', { indexStatus })) return;
+  ctxApplyProjectsPanelState();
   _ctxRenderDetail(indexStatus);
 }
 
 function ctxSelectProject(name) { _ctxSelectedProject = name; ctxRenderProjects(); }
+
+function ctxToggleProjectsPanel() {
+  _ctxProjectsPanelCollapsed = !_ctxProjectsPanelCollapsed;
+  ctxApplyProjectsPanelState();
+}
+
+function ctxApplyProjectsPanelState() {
+  const panel = document.getElementById('ctx-projects-list');
+  const toggle = document.getElementById('ctx-projects-toggle');
+  if (!panel || !toggle) return;
+  if (!panel.style) panel.style = {};
+  if (!toggle.style) toggle.style = {};
+
+  panel.style.transition = 'width 0.18s ease,min-width 0.18s ease';
+  panel.style.overflow = 'hidden';
+
+  if (_ctxProjectsPanelCollapsed) {
+    panel.style.width = '0px';
+    panel.style.minWidth = '0px';
+    panel.style.borderRight = 'none';
+    toggle.textContent = '›';
+    toggle.title = 'Show project selector';
+  } else {
+    panel.style.width = '240px';
+    panel.style.minWidth = '200px';
+    panel.style.borderRight = '1px solid var(--border)';
+    toggle.textContent = '‹';
+    toggle.title = 'Collapse project selector';
+  }
+}
+
+function ctxRenderProjectSidebar(containerId, projects, selectedName, onSelectFn, options = {}) {
+  const sidebar = document.getElementById(containerId);
+  if (!sidebar) return false;
+
+  if (!projects.length) {
+    sidebar.innerHTML = options.emptyHtml || `<div class="ctx-welcome">
+      <div style="font-size:2rem;margin-bottom:12px;">📦</div>
+      <div>No projects yet</div>
+      <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Add a project to get started</div>
+    </div>`;
+    return false;
+  }
+
+  const indexStatus = options.indexStatus || {};
+  sidebar.innerHTML = projects.map(p => _ctxRenderProjectSidebarRow(p, selectedName, onSelectFn, indexStatus)).join('');
+  return true;
+}
+
+function _ctxRenderProjectSidebarRow(project, selectedName, onSelectFn, indexStatus = {}) {
+  const isActive = project.name === selectedName;
+  const liveStatus = (indexStatus[project.name] || {}).status || project.status || 'ready';
+  const statusCls = liveStatus === 'indexing' ? 'indexing' : liveStatus === 'ready' ? 'ready' : 'off';
+  return `<div class="ctx-proj-row${isActive ? ' active' : ''}" onclick="${onSelectFn}('${_ctxJsString(project.name)}')">
+    <div class="ctx-proj-row-name">${_escHtml(project.name)}</div>
+    <span class="ctx-project-status ${statusCls}">${_escHtml(liveStatus)}</span>
+  </div>`;
+}
+
+function _ctxJsString(value) {
+  return (value || '').toString()
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/</g, '\\x3c');
+}
 
 function _ctxRenderDetail(indexStatus) {
   const detail = document.getElementById('ctx-proj-detail');

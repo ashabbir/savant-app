@@ -327,14 +327,14 @@ function _renderComplexityRadial(nodes, container) {
   container.innerHTML = `
     <div style="display:flex; height:calc(80vh - 44px); overflow:hidden;">
       <div id="${cid}" style="flex:1; overflow:hidden; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.12);"></div>
-      <div id="${detailId}" style="width:268px; overflow-y:auto; border-left:1px solid var(--border); padding:16px; flex-shrink:0; font-size:0.62rem;">
-        <div style="text-align:center; color:var(--text-dim); margin-top:60px; line-height:1.8;">
-          <div style="font-size:2.2rem; margin-bottom:8px; opacity:0.5;">◎</div>
-          Hover a segment to<br>inspect complexity
-        </div>
-      </div>
+      <div id="${detailId}" style="width:0;min-width:0;overflow:hidden;border-left:none;padding:0;flex-shrink:0;font-size:0.62rem;background:var(--bg-card);font-family:var(--font-mono);"></div>
     </div>
   `;
+
+  window._astRadialCloseDetail = window._astRadialCloseDetail || {};
+  window._astRadialCloseDetail[cid] = function() {
+    _setRadialDetailOpen(detailId, false);
+  };
 
   const svgEl = document.getElementById(cid);
   const W     = svgEl.clientWidth  || 520;
@@ -426,7 +426,7 @@ function _renderComplexityRadial(nodes, container) {
     .style('transition', 'fill-opacity 0.12s')
     .on('mouseover', function(event, d) {
       d3.select(this).attr('fill-opacity', 1).style('filter', `url(#${glowId})`);
-      _updateRadialDetail(detailId, d);
+      _updateRadialDetail(detailId, d, `window._astRadialCloseDetail['${cid}']`);
     })
     .on('mouseout', function(event, d) {
       d3.select(this).attr('fill-opacity', d.depth === 1 ? 0.5 : 0.78).style('filter', null);
@@ -471,13 +471,43 @@ function _renderComplexityRadial(nodes, container) {
 
 // ── Radial detail panel ───────────────────────────────────────────────────────
 
-function _updateRadialDetail(detailId, d) {
+function _setRadialDetailOpen(detailId, open) {
   const el = document.getElementById(detailId);
   if (!el) return;
+  el.style.transition = 'width 0.2s ease,min-width 0.2s ease,padding 0.2s ease';
+  el.style.display = 'block';
+  if (open) {
+    el.style.width = '320px';
+    el.style.minWidth = '280px';
+    el.style.padding = '16px';
+    el.style.borderLeft = '1px solid var(--border)';
+    el.style.overflowY = 'auto';
+  } else {
+    el.style.width = '0px';
+    el.style.minWidth = '0px';
+    el.style.padding = '0';
+    el.style.borderLeft = 'none';
+    el.style.overflow = 'hidden';
+  }
+}
+
+function _radialDetailHeader(onCloseName) {
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;margin:-16px -16px 14px;border-bottom:1px solid var(--border);position:sticky;top:-16px;background:var(--bg-card);z-index:5;">
+      <span style="font-size:0.45rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);font-family:var(--font-mono);">Node Detail</span>
+      ${onCloseName ? `<button onclick="${onCloseName}()" title="Collapse panel" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:0.9rem;line-height:1;padding:2px 4px;border-radius:3px;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-dim)'">‹</button>` : ''}
+    </div>`;
+}
+
+function _updateRadialDetail(detailId, d, onCloseName = '') {
+  const el = document.getElementById(detailId);
+  if (!el) return;
+  _setRadialDetailOpen(detailId, true);
 
   if (d.data.isFile) {
     const c = _complexityColor(d.data.total);
     el.innerHTML = `
+      ${_radialDetailHeader(onCloseName)}
       <div style="border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:14px;">
         <div style="color:var(--text-dim);font-size:0.56rem;letter-spacing:0.08em;margin-bottom:5px;">📄 FILE</div>
         <div style="color:var(--text);font-weight:700;font-size:0.68rem;word-break:break-all;line-height:1.4;">${_escHtml(d.data.fullPath)}</div>
@@ -501,6 +531,7 @@ function _updateRadialDetail(detailId, d) {
     const icon = d.data.nodeType === 'class' ? '🏛️' : (d.data.nodeType === 'method' ? '◆' : 'λ');
     const span = (d.data.endLine || 0) - (d.data.line || 0);
     el.innerHTML = `
+      ${_radialDetailHeader(onCloseName)}
       <div style="border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:14px;">
         <div style="color:#a78bfa;font-size:0.58rem;letter-spacing:0.06em;margin-bottom:5px;">${icon} ${(d.data.nodeType || 'function').toUpperCase()}</div>
         <div style="color:var(--text);font-weight:700;font-size:0.68rem;word-break:break-all;line-height:1.4;">${_escHtml(d.data.name)}</div>

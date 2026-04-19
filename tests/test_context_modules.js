@@ -388,6 +388,15 @@ const AST_FUNCTIONS = [
   '_renderAstModal',
   '_setAstView',
   '_renderAstView',
+  '_renderAstNoSearchResults',
+  '_renderAstSearchRecovery',
+  '_syncAstSearchRecovery',
+  '_renderAstInteractiveLegend',
+  '_renderAstSearchToolbar',
+  '_renderAstTypeaheadSearch',
+  '_astTypeaheadOptions',
+  '_astSearchOptionLabel',
+  '_filterAstNodesForSearch',
   '_renderRadialClusterTree',
 ];
 
@@ -479,6 +488,69 @@ test('_setAstView updates mode without throwing', () => {
   astSandbox._setAstView('radial');
   astSandbox._setAstView('cluster');
   astSandbox._setAstView('tree');
+});
+
+test('_astTypeaheadOptions builds AST node suggestions', () => {
+  const nodes = [
+    { repo: 'r', path: 'app.py', node_type: 'class', name: 'RedisClient', start_line: 1, end_line: 30 },
+    { repo: 'r', path: 'app.py', node_type: 'method', name: 'connect', start_line: 5, end_line: 10 },
+  ];
+  const options = astSandbox._astTypeaheadOptions(nodes);
+  expect(options.length).toBe(2);
+  if (!options.some(o => o.label.includes('RedisClient') && o.label.includes('app.py'))) {
+    throw new Error('Expected RedisClient typeahead option with path context');
+  }
+});
+
+test('_renderAstTypeaheadSearch always renders datalist-backed input', () => {
+  const html = astSandbox._renderAstTypeaheadSearch();
+  if (!html.includes('list="ast-view-search-options"')) throw new Error('Search input is missing datalist list attribute');
+  if (!html.includes('<datalist id="ast-view-search-options">')) throw new Error('Search control is missing datalist');
+  if (!html.includes('oninput="astSetSearchQuery(this.value)"')) throw new Error('Search control is missing live typeahead input handler');
+});
+
+test('_renderAstSearchRecovery provides header-level clear button', () => {
+  const html = astSandbox._renderAstSearchRecovery();
+  if (!html.includes('id="ast-search-recovery"')) throw new Error('Header search recovery container missing');
+  if (!html.includes('onclick="astClearSearchQuery()"')) throw new Error('Header search recovery clear action missing');
+});
+
+test('_renderAstInteractiveLegend keeps search as typeahead', () => {
+  const html = astSandbox._renderAstInteractiveLegend('test-cid');
+  if (!html.includes('Depth filter:')) throw new Error('Legend missing depth filter controls');
+  if (!html.includes('list="ast-view-search-options"')) throw new Error('Legend search is not datalist-backed');
+  if (!html.includes('<datalist id="ast-view-search-options">')) throw new Error('Legend search missing datalist');
+});
+
+test('_renderAstSearchToolbar keeps search as typeahead', () => {
+  const html = astSandbox._renderAstSearchToolbar();
+  if (!html.includes('list="ast-view-search-options"')) throw new Error('Toolbar search is not datalist-backed');
+  if (!html.includes('<datalist id="ast-view-search-options">')) throw new Error('Toolbar search missing datalist');
+});
+
+test('_renderAstNoSearchResults keeps typeahead available for recovery', () => {
+  const area = { innerHTML: '' };
+  astSandbox.astSetSearchQuery('redi');
+  astSandbox._renderAstNoSearchResults(area);
+  if (!area.innerHTML.includes('No AST nodes match')) throw new Error('No-results message missing');
+  if (!area.innerHTML.includes('list="ast-view-search-options"')) throw new Error('No-results state lost typeahead search input');
+  if (!area.innerHTML.includes('onclick="astClearSearchQuery()"')) throw new Error('No-results state lost clear search action');
+  astSandbox.astClearSearchQuery();
+});
+
+test('_filterAstNodesForSearch exact typeahead selection includes nested children only', () => {
+  const nodes = [
+    { repo: 'r', path: 'app.py', node_type: 'class', name: 'RedisClient', start_line: 1, end_line: 30 },
+    { repo: 'r', path: 'app.py', node_type: 'method', name: 'connect', start_line: 5, end_line: 10 },
+    { repo: 'r', path: 'app.py', node_type: 'function', name: 'outside', start_line: 35, end_line: 40 },
+  ];
+  astSandbox.astSetSearchQuery(astSandbox._astSearchOptionLabel(nodes[0]));
+  const filtered = astSandbox._filterAstNodesForSearch(nodes);
+  expect(filtered.length).toBe(2);
+  if (!filtered.some(n => n.name === 'RedisClient')) throw new Error('Selected node missing from filtered results');
+  if (!filtered.some(n => n.name === 'connect')) throw new Error('Nested child missing from filtered results');
+  if (filtered.some(n => n.name === 'outside')) throw new Error('Non-child node should not be included');
+  astSandbox.astClearSearchQuery();
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────
