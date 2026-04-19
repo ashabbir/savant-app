@@ -110,19 +110,34 @@
   .ctx-proj-sidebar { width:240px; min-width:200px; border-right:1px solid var(--border); overflow-y:auto; background:rgba(0,0,0,0.15); flex-shrink:0; }
   .ctx-proj-detail { flex:1; overflow-y:auto; padding:0; background:rgba(0,0,0,0.05); }
 
+  .ctx-project-explorer { height:100%; display:flex; flex-direction:column; }
+  .ctx-project-explorer-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 8px 6px; border-bottom:1px solid rgba(255,255,255,0.06); }
+  .ctx-project-explorer-title { font-family:var(--font-mono); font-size:0.54rem; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-dim); font-weight:700; }
+  .ctx-project-explorer-toggle { border:1px solid var(--border); background:rgba(34,211,238,0.08); color:var(--cyan); border-radius:5px; width:22px; height:22px; font-family:var(--font-mono); font-size:0.7rem; cursor:pointer; line-height:1; }
+  .ctx-project-explorer-search { padding:8px; border-bottom:1px solid rgba(255,255,255,0.04); }
+  .ctx-project-explorer-search input { width:100%; box-sizing:border-box; background:var(--bg-main); border:1px solid var(--border); border-radius:5px; color:var(--text); padding:6px 8px; font-family:var(--font-mono); font-size:0.56rem; }
+  .ctx-project-explorer-list { overflow-y:auto; flex:1; }
+  /* Collapsed strip — full-height clickable tab that reopens the panel */
+  .ctx-project-explorer.collapsed { height:100%; display:flex; flex-direction:column; align-items:center; }
+  .ctx-explorer-collapsed-bar { flex:1; width:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; cursor:pointer; background:rgba(34,211,238,0.03); border-radius:4px; transition:background 0.15s; padding:8px 0; }
+  .ctx-explorer-collapsed-bar:hover { background:rgba(34,211,238,0.09); }
+  .ctx-explorer-collapsed-bar .ctx-explorer-collapsed-label { font-family:var(--font-mono); font-size:0.44rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-dim); writing-mode:vertical-rl; transform:rotate(180deg); }
+  .ctx-explorer-collapsed-bar .ctx-explorer-collapsed-icon { color:var(--cyan); font-size:0.8rem; }
+
   /* Left sidebar items */
-  .ctx-proj-row { padding:10px 14px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.04); transition:background 0.15s; }
+  .ctx-proj-row { position:relative; display:flex; align-items:stretch; gap:0; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.04); transition:background 0.15s; }
   .ctx-proj-row:hover { background:rgba(34,211,238,0.06); }
-  .ctx-proj-row.active { background:rgba(34,211,238,0.1); border-left:3px solid var(--cyan); }
+  .ctx-proj-row.active { background:rgba(34,211,238,0.1); }
+  .ctx-proj-status-line { width:3px; flex-shrink:0; background:rgba(255,255,255,0.1); }
+  .ctx-proj-status-line.green { background:#22c55e; }
+  .ctx-proj-status-line.orange { background:#f59e0b; }
+  .ctx-proj-status-line.red { background:#ef4444; }
+  .ctx-proj-row-main { padding:9px 10px 9px 11px; min-width:0; flex:1; }
   .ctx-proj-row-name { font-family:var(--font-mono); font-size:0.62rem; color:var(--text); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .ctx-proj-row-meta { font-family:var(--font-mono); font-size:0.48rem; color:var(--text-dim); margin-top:3px; display:flex; align-items:center; gap:6px; }
-  .ctx-proj-row-dot { width:6px; height:6px; border-radius:50%; display:inline-block; flex-shrink:0; }
-  .ctx-proj-row-dot.indexed { background:#22c55e; }
-  .ctx-proj-row-dot.indexing { background:#f59e0b; animation:pulse 1s infinite; }
-  .ctx-proj-row-dot.added { background:#94a3b8; }
-  .ctx-proj-row-dot.error { background:#ef4444; }
-  .ctx-proj-row-dot.cancelled { background:#f59e0b; }
-  .ctx-proj-row-dot.stalled { background:#fb7185; animation:pulse-red 1.5s ease-in-out infinite; }
+  .ctx-proj-row-meta { font-family:var(--font-mono); font-size:0.48rem; color:var(--text-dim); margin-top:4px; display:flex; align-items:center; gap:6px; }
+  .ctx-mini-flag { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:3px; font-size:0.45rem; font-weight:700; border:1px solid var(--border); color:var(--text-dim); background:rgba(255,255,255,0.04); }
+  .ctx-mini-flag.on { color:#22c55e; border-color:rgba(34,197,94,0.4); background:rgba(34,197,94,0.12); }
+  .ctx-mini-flag.off { color:#94a3b8; border-color:rgba(148,163,184,0.35); }
 
   /* Detail pane sections */
   .ctx-det-header { padding:20px 24px 16px; border-bottom:1px solid var(--border); }
@@ -142,6 +157,7 @@
 
   .ctx-project-status { font-size:0.55rem; font-family:var(--font-mono); padding:2px 8px; border-radius:10px; }
   .ctx-project-status.indexed { background:rgba(34,197,94,0.15); color:#22c55e; }
+  .ctx-project-status.ready   { background:rgba(34,197,94,0.15); color:#22c55e; }
   .ctx-project-status.indexing { background:rgba(245,158,11,0.15); color:#f59e0b; }
   .ctx-project-status.added { background:rgba(148,163,184,0.15); color:#94a3b8; }
   .ctx-project-status.error { background:rgba(239,68,68,0.15); color:#ef4444; }
@@ -149,7 +165,9 @@
   .ctx-project-status.stalled { background:rgba(251,113,133,0.15); color:#fb7185; }
   .ctx-progress-bar { width:100%; height:4px; background:rgba(255,255,255,0.05); border-radius:2px; margin-top:6px; overflow:hidden; }
   .ctx-progress-fill { height:100%; background:linear-gradient(90deg,#22d3ee,#a855f7); border-radius:2px; transition:width 0.3s; }
+  .ctx-progress-fill.ast { background:linear-gradient(90deg,#a855f7,#ec4899); }
   .ctx-progress-phase { font-family:var(--font-mono); font-size:0.6rem; color:#22d3ee; margin-top:6px; font-weight:600; }
+  .ctx-progress-phase.ast { color:#a855f7; }
   .ctx-progress-label { font-family:var(--font-mono); font-size:0.5rem; color:var(--text-dim); margin-top:3px; }
   .ctx-progress-file { font-family:var(--font-mono); font-size:0.45rem; color:var(--text-dim); margin-top:2px; opacity:0.7; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .ctx-memory-list { max-height:calc(100vh - 340px); overflow-y:auto; }
@@ -182,6 +200,48 @@
   .ctx-code-line:hover { background:rgba(255,255,255,0.03); }
   .ctx-code-num { display:inline-block; min-width:44px; padding:0 10px 0 12px; text-align:right; color:rgba(255,255,255,0.2); user-select:none; flex-shrink:0; border-right:1px solid rgba(255,255,255,0.06); }
   .ctx-code-text { padding-left:12px; white-space:pre; flex:1; }
+
+  /* ── Inline snippet cards (Code + Memory Bank tabs) ── */
+  .ctx-file-cards { padding:10px; display:flex; flex-direction:column; gap:6px; }
+  .ctx-file-cards-header { font-family:var(--font-mono); font-size:0.48rem; color:var(--text-dim); padding:0 4px 6px; }
+  .ctx-file-card { border:1px solid var(--border); border-radius:7px; overflow:hidden; background:rgba(0,0,0,0.18); transition:border-color 0.15s; }
+  .ctx-file-card:hover { border-color:rgba(34,211,238,0.2); }
+  .ctx-file-card.expanded { border-color:rgba(34,211,238,0.3); }
+  .ctx-file-card-head { display:flex; align-items:center; justify-content:space-between; padding:7px 11px; cursor:pointer; gap:8px; }
+  .ctx-file-card-head:hover { background:rgba(255,255,255,0.025); }
+  .ctx-file-card-info { display:flex; align-items:center; gap:6px; flex:1; min-width:0; }
+  .ctx-file-card-icon { font-size:0.72rem; flex-shrink:0; }
+  .ctx-file-card-name { font-family:var(--font-mono); font-size:0.62rem; color:var(--text); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ctx-file-card-lang { font-family:var(--font-mono); font-size:0.42rem; padding:1px 5px; border-radius:3px; background:rgba(34,211,238,0.1); color:var(--cyan); text-transform:uppercase; letter-spacing:0.05em; flex-shrink:0; }
+  .ctx-file-card-chunks { font-family:var(--font-mono); font-size:0.42rem; color:var(--text-dim); flex-shrink:0; }
+  .ctx-file-card-actions { display:flex; align-items:center; gap:5px; flex-shrink:0; }
+  .ctx-file-card-open-btn { background:none; border:1px solid var(--border); color:var(--text-dim); border-radius:4px; padding:1px 6px; font-size:0.52rem; cursor:pointer; font-family:var(--font-mono); line-height:1.6; }
+  .ctx-file-card-open-btn:hover { color:var(--cyan); border-color:rgba(34,211,238,0.4); }
+  .ctx-file-card-toggle { font-size:0.5rem; color:var(--text-dim); line-height:1; }
+  .ctx-file-card-path { font-family:var(--font-mono); font-size:0.42rem; color:var(--text-dim); padding:0 11px 6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ctx-file-card-body { border-top:1px solid rgba(255,255,255,0.05); max-height:480px; overflow-y:auto; }
+  .ctx-file-card-loading { padding:14px 16px; font-family:var(--font-mono); font-size:0.55rem; color:var(--text-dim); }
+  .ctx-file-card-empty   { padding:14px 16px; font-family:var(--font-mono); font-size:0.55rem; color:var(--text-dim); }
+  .ctx-file-card-err     { padding:14px 16px; font-family:var(--font-mono); font-size:0.55rem; color:#ef4444; }
+  .ctx-file-card-code { background:rgba(0,0,0,0.28); }
+  .ctx-file-card-code-lang { font-family:var(--font-mono); font-size:0.42rem; color:var(--text-dim); padding:5px 14px 3px; letter-spacing:0.06em; text-transform:uppercase; border-bottom:1px solid rgba(255,255,255,0.04); }
+  .ctx-file-card-pre { font-family:var(--font-mono); font-size:0.58rem; line-height:1.55; padding:11px 14px; margin:0; white-space:pre-wrap; word-break:break-word; color:#d4d4d4; }
+  .ctx-file-card-markdown { padding:14px 18px; font-size:0.65rem; line-height:1.65; color:var(--text); }
+  .ctx-file-card-markdown h1,.ctx-file-card-markdown h2,.ctx-file-card-markdown h3 { color:var(--cyan); font-family:var(--font-mono); margin:0.8em 0 0.4em; }
+  .ctx-file-card-markdown h1 { font-size:0.95rem; border-bottom:1px solid var(--border); padding-bottom:4px; }
+  .ctx-file-card-markdown h2 { font-size:0.8rem; }
+  .ctx-file-card-markdown h3 { font-size:0.7rem; }
+  .ctx-file-card-markdown p { margin:0.4em 0; }
+  .ctx-file-card-markdown ul,.ctx-file-card-markdown ol { padding-left:1.4em; margin:0.4em 0; }
+  .ctx-file-card-markdown li { margin:0.2em 0; }
+  .ctx-file-card-markdown code { font-family:var(--font-mono); background:rgba(0,0,0,0.3); padding:1px 5px; border-radius:3px; font-size:0.56rem; color:#a5f3fc; }
+  .ctx-file-card-markdown pre { background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:5px; padding:10px 12px; overflow-x:auto; margin:0.6em 0; }
+  .ctx-file-card-markdown pre code { background:none; padding:0; color:#d4d4d4; display:block; white-space:pre; }
+  .ctx-file-card-markdown blockquote { border-left:3px solid var(--cyan); margin:0.4em 0; padding:3px 10px; color:var(--text-dim); background:rgba(34,211,238,0.05); border-radius:0 4px 4px 0; }
+  .ctx-file-card-markdown a { color:#22d3ee; text-decoration:underline; }
+  .ctx-file-card-markdown table { border-collapse:collapse; margin:0.4em 0; width:100%; font-size:0.56rem; }
+  .ctx-file-card-markdown th,.ctx-file-card-markdown td { border:1px solid var(--border); padding:5px 9px; text-align:left; }
+  .ctx-file-card-markdown th { background:rgba(0,0,0,0.3); color:var(--cyan); }
 
   /* ── Workspace MCP View ── */
   .ws-mcp-status { display:flex; align-items:center; gap:14px; padding:8px 16px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:8px; margin-bottom:12px; font-family:var(--font-mono); font-size:0.6rem; color:var(--text-dim); flex-wrap:wrap; }
@@ -1439,6 +1499,13 @@
     display: flex;
     flex-direction: column;
     box-shadow: 0 0 40px var(--cyan-dim), 0 10px 40px rgba(0,0,0,0.5);
+  }
+
+  .modal.modal-full {
+    width: 96vw;
+    max-width: 96vw;
+    height: 92vh;
+    max-height: 92vh;
   }
 
   .modal-header {
@@ -6312,7 +6379,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
   </div>
 
   <!-- ═══ Workspace MCP View ═══ -->
-  <div id="workspace-mcp-view" style="display:none; max-width:900px; margin:0 auto;">
+  <div id="workspace-mcp-view" style="display:none;">
     <!-- Status Bar -->
     <div class="ws-mcp-status">
       <span class="ctx-status-item"><span class="ctx-dot" id="ws-mcp-dot"></span> savant-workspace</span>
@@ -6463,32 +6530,29 @@ function showLoadingScreen(cb) { if (cb) cb(); }
   </div>
 
   <!-- ═══ Context View (hidden unless context subtab active) ═══ -->
-  <div id="context-view" style="display:none; max-width:900px; margin:0 auto;">
+  <div id="context-view" style="display:none;">
     <!-- Status Bar -->
-    <div class="ctx-status-bar" id="ctx-status-bar" style="flex-direction:column;gap:0;padding:0;">
-      <div style="display:flex;align-items:center;gap:14px;padding:8px 16px;flex-wrap:wrap;">
-        <span class="ctx-status-item"><span class="ctx-dot" id="ctx-mcp-dot"></span> savant-context</span>
-        <span class="ctx-status-item">Port: <strong>8093</strong></span>
-        <span class="ctx-status-item">Status: <strong id="ctx-mcp-status-text">Checking...</strong></span>
-        <span class="ctx-status-divider">│</span>
-        <span class="ctx-status-item"><span class="ctx-dot" id="ctx-dot-vec"></span> sqlite-vec <span id="ctx-vec-ver"></span></span>
-        <span class="ctx-status-item"><span class="ctx-dot" id="ctx-dot-model"></span> Model <span id="ctx-model-status"></span></span>
-        <button class="ctx-btn-sm" onclick="ctxMcpTestConnection()" style="margin-left:auto;">⚡ Test</button>
-      </div>
-      <div style="display:flex;align-items:center;gap:14px;padding:4px 16px 8px;border-top:1px solid rgba(255,255,255,0.04);flex-wrap:wrap;">
-        <span class="ctx-status-item">Projects: <strong id="ctx-stat-repos">0</strong></span>
-        <span class="ctx-status-item">Files: <strong id="ctx-stat-files">0</strong></span>
-        <span class="ctx-status-item">Chunks: <strong id="ctx-stat-chunks">0</strong></span>
-      </div>
+    <div class="ctx-status-bar" id="ctx-status-bar">
+      <span class="ctx-status-item"><span class="ctx-dot" id="ctx-mcp-dot"></span> savant-context</span>
+      <span class="ctx-status-item">Port: <strong>8093</strong></span>
+      <span class="ctx-status-item">Status: <strong id="ctx-mcp-status-text">Checking...</strong></span>
+      <span class="ctx-status-divider">│</span>
+      <span class="ctx-status-item"><span class="ctx-dot" id="ctx-dot-vec"></span> sqlite-vec <span id="ctx-vec-ver"></span></span>
+      <span class="ctx-status-item"><span class="ctx-dot" id="ctx-dot-model"></span> Model <span id="ctx-model-status"></span></span>
+      <span class="ctx-status-divider">│</span>
+      <span class="ctx-status-item">Projects: <strong id="ctx-stat-repos">0</strong></span>
+      <span class="ctx-status-item">Files: <strong id="ctx-stat-files">0</strong></span>
+      <span class="ctx-status-item">Chunks: <strong id="ctx-stat-chunks">0</strong></span>
+      <button class="ctx-btn-sm" onclick="ctxMcpTestConnection()" style="margin-left:auto;">⚡ Test</button>
     </div>
 
-    <!-- Inner tabs: Search / Projects / Code / Memory Bank -->
+    <!-- Inner tabs: Search / AST / Projects / Code / Memory Bank -->
     <div class="ctx-inner-tabs">
-      <button class="savant-subtab active" onclick="switchCtxPanel('search')">🔍 Search</button>
-      <button class="savant-subtab" onclick="switchCtxPanel('projects')">📁 Projects</button>
-      <button class="savant-subtab" onclick="switchCtxPanel('code')">📄 Code</button>
-      <button class="savant-subtab" onclick="switchCtxPanel('memory')">🧠 Memory Bank</button>
-      <button class="savant-subtab" onclick="switchCtxPanel('ast')">🌲 AST</button>
+      <button class="savant-subtab active" data-panel="search" onclick="switchCtxPanel('search', this)">🔍 Search</button>
+      <button class="savant-subtab" data-panel="ast" onclick="switchCtxPanel('ast', this)">🌳 AST</button>
+      <button class="savant-subtab" data-panel="projects" onclick="switchCtxPanel('projects', this)">📁 Projects</button>
+      <button class="savant-subtab" data-panel="code" onclick="switchCtxPanel('code', this)">📄 Code</button>
+      <button class="savant-subtab" data-panel="memory" onclick="switchCtxPanel('memory', this)">🧠 Memory Bank</button>
     </div>
 
     <!-- Search Panel -->
@@ -6565,9 +6629,9 @@ function showLoadingScreen(cb) { if (cb) cb(); }
     <div class="ctx-panel" id="ctx-panel-ast" style="display:none;">
       <div id="ctx-ast-list" class="ctx-memory-list">
         <div class="ctx-welcome">
-          <div style="font-size:2rem;margin-bottom:12px;">🌲</div>
-          <div>AST nodes</div>
-          <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Index a project to browse its abstract syntax tree here</div>
+          <div style="font-size:2rem;margin-bottom:12px;">🌳</div>
+          <div>Generated AST structures</div>
+          <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Generate AST for a project to browse its structure here</div>
         </div>
       </div>
     </div>
@@ -6968,7 +7032,10 @@ function showLoadingScreen(cb) { if (cb) cb(); }
 <script src="/static/js/mcp-tab.js"></script>
 <script src="/static/js/knowledge.js"></script>
 <script src="/static/js/abilities.js"></script>
-<script src="/static/js/context-tab.js"></script>
+<script src="/static/js/context-core.js?v=4"></script>
+<script src="/static/js/context-complexity.js?v=13"></script>
+<script src="/static/js/context-ast.js?v=7"></script>
+<script src="/static/js/context-tab.js?v=2"></script>
 <script src="/static/js/workspace-mcp.js"></script>
 <script src="/static/js/dev-log.js"></script>
 

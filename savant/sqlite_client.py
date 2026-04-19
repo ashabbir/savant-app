@@ -244,14 +244,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_kge_unique ON kg_edges(source_id, target_i
 # Singleton client
 # ---------------------------------------------------------------------------
 
+# Per-thread connection pool — each thread gets its own sqlite3.Connection so
+# concurrent execute()/commit() calls across threads never corrupt shared state.
+# This fixes SQLITE_MISUSE ("bad parameter or other API misuse") and nested-
+# transaction errors that occur when the AST indexer background thread and
+# Flask request threads share a single connection object.
+_thread_local = threading.local()
+
+
 class SQLiteClient:
-    """Thread-safe SQLite client with singleton pattern."""
+    """Thread-safe SQLite client with singleton pattern.
+
+    Each thread transparently gets its own sqlite3.Connection via
+    ``_thread_local``.  The singleton only stores the db_path and the
+    initial schema-init connection; ``get_connection()`` always returns the
+    calling thread's private connection, creating one on first use.
+    """
 
     _instance: Optional['SQLiteClient'] = None
     _lock = threading.Lock()
+    _migration_lock = threading.Lock()   # serialise migration runs
 
     def __init__(self):
-        self.conn: Optional[sqlite3.Connection] = None
         self.db_path: Optional[str] = None
         self.connected = False
 
@@ -262,6 +276,29 @@ class SQLiteClient:
                 if cls._instance is None:
                     cls._instance = cls()
         return cls._instance
+
+    def _make_connection(self) -> sqlite3.Connection:
+        """Open a new sqlite3.Connection with standard pragma config."""
+        conn = sqlite3.connect(
+            self.db_path,
+            check_same_thread=False,
+            timeout=10.0,
+        )
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        # Load sqlite-vec extension so ctx_vec_chunks virtual table is
+        # accessible on every thread-local connection (not just the init thread).
+        try:
+            import sqlite_vec
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+        except Exception:
+            pass  # sqlite_vec optional; context search degrades gracefully
+        return conn
 
     def connect(self, db_path: Optional[str] = None) -> bool:
         if self.connected:
@@ -276,20 +313,12 @@ class SQLiteClient:
             os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
             logger.info(f"Connecting to SQLite: {self.db_path}")
 
-            self.conn = sqlite3.connect(
-                self.db_path,
-                check_same_thread=False,
-                timeout=10.0,
-            )
-            self.conn.row_factory = sqlite3.Row
+            # Open the schema-init connection and store it as the calling
+            # thread's local connection so the main thread reuses it.
+            init_conn = self._make_connection()
+            _thread_local.conn = init_conn
 
-            # Performance pragmas
-            self.conn.execute("PRAGMA journal_mode=WAL")
-            self.conn.execute("PRAGMA foreign_keys=ON")
-            self.conn.execute("PRAGMA busy_timeout=5000")
-            self.conn.execute("PRAGMA synchronous=NORMAL")
-
-            self._create_schema()
+            self._create_schema(init_conn)
             self.connected = True
             logger.info("SQLite connected successfully")
             return True
@@ -300,38 +329,44 @@ class SQLiteClient:
             return False
 
     def disconnect(self):
-        if self.conn:
-            self.conn.close()
-            self.conn = None
-            self.connected = False
-            logger.info("SQLite disconnected")
+        conn = getattr(_thread_local, "conn", None)
+        if conn:
+            conn.close()
+            _thread_local.conn = None
+        self.connected = False
+        logger.info("SQLite disconnected")
 
-    def _create_schema(self):
-        """Create all tables and indexes."""
-        self.conn.executescript(_SCHEMA_SQL)
-        self._run_migrations()
-        # Store schema version
-        self.conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-            ("schema_version", str(SCHEMA_VERSION))
-        )
-        self.conn.commit()
+    def _create_schema(self, conn: sqlite3.Connection):
+        """Create all tables and indexes, then auto-run any pending migrations."""
+        conn.executescript(_SCHEMA_SQL)
+        self._run_migrations(conn)
         logger.info("SQLite schema created/verified")
 
-    def _run_migrations(self):
-        """Run schema migrations for existing databases."""
-        try:
-            row = self.conn.execute(
-                "SELECT value FROM meta WHERE key = 'schema_version'"
-            ).fetchone()
-            current = int(row[0]) if row else 0
-        except Exception:
-            current = 0
+    def _stamp_version(self, conn: sqlite3.Connection, version: int):
+        """Write schema version to meta table."""
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            ("schema_version", str(version))
+        )
+        conn.commit()
+
+    def _run_migrations(self, conn: sqlite3.Connection):
+        """Run schema migrations automatically on startup. Each migration is
+        idempotent and its version is stamped immediately after it succeeds,
+        so a crash mid-way only re-runs the failed step next time."""
+        with self._migration_lock:
+            try:
+                row = conn.execute(
+                    "SELECT value FROM meta WHERE key = 'schema_version'"
+                ).fetchone()
+                current = int(row[0]) if row else 0
+            except Exception:
+                current = 0
 
         if current < 2:
             # v2: Drop FK constraint on jira_tickets.workspace_id, allow empty
             try:
-                self.conn.executescript("""
+                conn.executescript("""
                     CREATE TABLE IF NOT EXISTS _jira_tickets_new (
                         ticket_id       TEXT PRIMARY KEY,
                         workspace_id    TEXT DEFAULT '',
@@ -352,6 +387,7 @@ class SQLiteClient:
                     CREATE INDEX IF NOT EXISTS idx_jira_key ON jira_tickets(ticket_key);
                     CREATE INDEX IF NOT EXISTS idx_jira_created ON jira_tickets(created_at);
                 """)
+                self._stamp_version(conn, 2)
                 logger.info("Migration v2: jira_tickets FK constraint removed")
             except Exception as e:
                 logger.warning(f"Migration v2 skipped: {e}")
@@ -359,7 +395,7 @@ class SQLiteClient:
         if current < 3:
             # v3: Add experiences table for knowledge layer
             try:
-                self.conn.executescript("""
+                conn.executescript("""
                     CREATE TABLE IF NOT EXISTS experiences (
                         experience_id   TEXT PRIMARY KEY,
                         content         TEXT NOT NULL,
@@ -374,6 +410,7 @@ class SQLiteClient:
                     CREATE INDEX IF NOT EXISTS idx_exp_source ON experiences(source);
                     CREATE INDEX IF NOT EXISTS idx_exp_created ON experiences(created_at DESC);
                 """)
+                self._stamp_version(conn, 3)
                 logger.info("Migration v3: experiences table created")
             except Exception as e:
                 logger.warning(f"Migration v3 skipped: {e}")
@@ -381,7 +418,7 @@ class SQLiteClient:
         if current < 4:
             # v4: Knowledge graph — kg_nodes + kg_edges tables + migrate experiences
             try:
-                self.conn.executescript("""
+                conn.executescript("""
                     CREATE TABLE IF NOT EXISTS kg_nodes (
                         node_id     TEXT PRIMARY KEY,
                         node_type   TEXT NOT NULL,
@@ -412,33 +449,31 @@ class SQLiteClient:
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_kge_unique ON kg_edges(source_id, target_id, edge_type);
                 """)
                 # Migrate existing experiences → kg_nodes (type=insight)
-                rows = self.conn.execute("SELECT * FROM experiences").fetchall()
-                cols = [d[0] for d in self.conn.execute("SELECT * FROM experiences LIMIT 0").description] if rows else []
+                rows = conn.execute("SELECT * FROM experiences").fetchall()
+                cols = [d[0] for d in conn.execute("SELECT * FROM experiences LIMIT 0").description] if rows else []
                 for row in rows:
                     r = dict(zip(cols, row))
                     meta = json.dumps({"source": r.get("source", "note"), "files": r.get("files", "[]"), "repo": r.get("repo", "")})
                     title = (r.get("content", "") or "")[:120].split("\n")[0] or "Untitled insight"
-                    self.conn.execute(
+                    conn.execute(
                         "INSERT OR IGNORE INTO kg_nodes (node_id, node_type, title, content, metadata, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
                         (r["experience_id"], "insight", title, r.get("content", ""), meta, r.get("created_at", ""), r.get("updated_at", ""))
                     )
-                    # Auto-link to project node if workspace_id exists
                     ws_id = r.get("workspace_id", "")
                     if ws_id:
-                        # Ensure project node exists for this workspace
-                        ws_row = self.conn.execute("SELECT name FROM workspaces WHERE workspace_id = ?", (ws_id,)).fetchone()
+                        ws_row = conn.execute("SELECT name FROM workspaces WHERE workspace_id = ?", (ws_id,)).fetchone()
                         ws_name = ws_row[0] if ws_row else f"Project {ws_id[:8]}"
                         proj_id = f"proj_{ws_id}"
-                        self.conn.execute(
+                        conn.execute(
                             "INSERT OR IGNORE INTO kg_nodes (node_id, node_type, title, content, metadata, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
                             (proj_id, "project", ws_name, "", json.dumps({"workspace_id": ws_id}), r.get("created_at", ""), r.get("created_at", ""))
                         )
                         edge_id = f"edge_{r['experience_id']}_{proj_id}"
-                        self.conn.execute(
+                        conn.execute(
                             "INSERT OR IGNORE INTO kg_edges (edge_id, source_id, target_id, edge_type, weight, label, created_at) VALUES (?,?,?,?,?,?,?)",
                             (edge_id, r["experience_id"], proj_id, "applies_to", 1.0, "", r.get("created_at", ""))
                         )
-                self.conn.commit()
+                self._stamp_version(conn, 4)
                 migrated = len(rows)
                 logger.info(f"Migration v4: kg_nodes + kg_edges created, migrated {migrated} experiences")
             except Exception as e:
@@ -447,31 +482,39 @@ class SQLiteClient:
         if current < 5:
             # v5: Add status column to kg_nodes for staged/committed workflow
             try:
-                self.conn.execute("ALTER TABLE kg_nodes ADD COLUMN status TEXT DEFAULT 'staged' NOT NULL")
-                self.conn.execute("UPDATE kg_nodes SET status = 'committed' WHERE status = 'staged'")
-                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_kgn_status ON kg_nodes(status)")
-                self.conn.commit()
+                conn.execute("ALTER TABLE kg_nodes ADD COLUMN status TEXT DEFAULT 'staged' NOT NULL")
+                conn.execute("UPDATE kg_nodes SET status = 'committed' WHERE status = 'staged'")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_kgn_status ON kg_nodes(status)")
+                self._stamp_version(conn, 5)
                 logger.info("Migration v5: added status column to kg_nodes")
             except Exception as e:
-                # Column may already exist (e.g., fresh install created table with status)
+                # Column may already exist on fresh installs (table created with status already)
                 try:
-                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_kgn_status ON kg_nodes(status)")
-                    self.conn.commit()
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_kgn_status ON kg_nodes(status)")
+                    self._stamp_version(conn, 5)
                 except Exception:
                     pass
                 logger.info(f"Migration v5: status column already exists or skipped: {e}")
 
     def get_connection(self) -> sqlite3.Connection:
-        if self.conn is None:
-            if not self.connect():
-                raise RuntimeError("SQLite not connected")
-        return self.conn
+        """Return this thread's private connection, creating one if needed."""
+        conn = getattr(_thread_local, "conn", None)
+        if conn is None:
+            if not self.connected:
+                if not self.connect():
+                    raise RuntimeError("SQLite not connected")
+                # connect() already set _thread_local.conn
+                return _thread_local.conn
+            # Background/worker thread — open a fresh per-thread connection
+            conn = self._make_connection()
+            _thread_local.conn = conn
+        return conn
 
     def health_check(self) -> bool:
         try:
-            if self.conn:
-                self.conn.execute("SELECT 1")
-                return True
+            conn = self.get_connection()
+            conn.execute("SELECT 1")
+            return True
         except Exception as e:
             logger.error(f"SQLite health check failed: {e}")
         return False

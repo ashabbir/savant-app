@@ -41,6 +41,34 @@ function _peekNavState() {
 // Release notes
 const RELEASES = [
   {
+    version: 'v7.2.0',
+    date: '2026-04-19',
+    tag: 'major',
+    tagline: 'Interactive AST Explorer — Tree, Cluster, and Radial Sunburst. Partial rendering for massive repos. Smart depth filters.',
+    description: 'SAVANT v7.2.0 is the AST Visualization hero release. The AST Explorer is now a fully interactive, production-grade UI with three view modes — Tree, Cluster, and Radial Sunburst — each optimized for a different way of reading your codebase structure. Partial rendering (500/1000/1500/All files) means even the largest monorepos like ICN load instantly without locking the browser. Legend depth filters now correctly expand to all nodes of the selected type at any depth, including deeply nested chains of the same type. The entire control bar is now a single compact row: view toggles, FILES limit, Labels toggle, and search — all in one place.',
+    abilities: [
+      { icon: '🌳', name: 'Tree View', desc: 'Collapsible D3 tree with toggle labels on/off. Click opens node info; collapse/expand via ⊖/⊕ in the drawer — never on accidental click.' },
+      { icon: '🫧', name: 'Cluster View', desc: 'Radial cluster dendogram. Legend depth filters expand to ALL nodes of target type regardless of nesting depth — class chains like class→class→class stay fully visible.' },
+      { icon: '🌞', name: 'Radial Sunburst', desc: 'McCabe complexity sunburst with mouse scroll/pinch zoom. Detailed node panels with complexity scores, file paths, and parent context.' },
+      { icon: '⚡', name: 'Partial Rendering', desc: '500/1000/1500/All file limits prevent browser lock on massive repos. Default 1500 files. Switch limits without leaving the view.' },
+      { icon: '🎛️', name: 'Compact Top Bar', desc: 'View toggles + FILES limit + Labels toggle + Search all consolidated into a single header row. No wasted screen space.' },
+    ],
+    items: [
+      { type: 'feat', text: 'Tree view: labels toggle (hidden by default, show on demand)' },
+      { type: 'feat', text: 'Tree view: click = info drawer only; collapse/expand exclusively via ⊖/⊕ button in drawer header' },
+      { type: 'feat', text: 'Cluster view: same click/collapse separation — info drawer on click, collapse only from drawer' },
+      { type: 'feat', text: '_expandToType algorithm: expands to last occurrence of target type in each branch at any depth' },
+      { type: 'feat', text: 'Nested same-type chains (e.g. class→class→class) all remain visible when that type is filtered' },
+      { type: 'feat', text: 'Partial render limit: 500/1000/1500/All — replaces old 300/600/1200 values, default raised to 1500' },
+      { type: 'feat', text: 'FILES limit picker + Labels toggle moved into top header row (same row as view toggles + search)' },
+      { type: 'feat', text: 'Radial sunburst zoom via mouse scroll/pinch only — removed zoom buttons' },
+      { type: 'feat', text: 'Radial node detail panel enriched with complexity score, file path, and parent context' },
+      { type: 'fix', text: 'AST indexer: JSX and Scala files no longer produce "bad parameter" errors — regex fallback applied' },
+      { type: 'fix', text: 'Cluster/tree search restricted to top bar only — removed duplicate sub-bar search' },
+      { type: 'fix', text: 'Tree node info drawer: close/collapse icon always visible' },
+    ],
+  },
+  {
     version: 'v7.1.0',
     date: '2026-04-17',
     tag: 'minor',
