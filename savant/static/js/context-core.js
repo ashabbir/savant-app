@@ -186,13 +186,23 @@ function _ctxRenderDetail(indexStatus) {
   let langHtml = '';
   if (p.languages && Object.keys(p.languages).length) {
     const topLangs = Object.entries(p.languages).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const maxCount = topLangs.length > 0 ? topLangs[0][1] : 1;
     langHtml = `<div class="ctx-det-section">
       <div class="ctx-det-section-title">Languages</div>
-      <div class="ctx-det-langs">
-        ${topLangs.map(([lang, count]) => `<div class="ctx-det-lang-badge">
-          <span class="ctx-det-lang-name">${_escHtml(lang)}</span>
-          <span class="ctx-det-lang-count">${count}</span>
-        </div>`).join('')}
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">
+        ${topLangs.map(([lang, count]) => {
+          const pct = Math.max(1, Math.round((count / maxCount) * 100));
+          // Use different colors for different languages optionally, or just use primary brand color
+          const barColor = 'var(--cyan)';
+          return `
+            <div style="display:flex;align-items:center;gap:12px;font-size:0.55rem;font-family:var(--font-mono);">
+              <span style="color:var(--text);width:75px;min-width:75px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_escHtml(lang)}">${_escHtml(lang)}</span>
+              <div style="flex:1;height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;">
+                <div style="height:4px;background:${barColor};border-radius:2px;width:${pct}%;opacity:0.8;"></div>
+              </div>
+              <span style="color:var(--text-dim);flex-shrink:0;width:30px;text-align:right;">${count}</span>
+            </div>`;
+        }).join('')}
       </div>
     </div>`;
   }

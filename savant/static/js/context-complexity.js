@@ -197,19 +197,13 @@ function _cxRenderTreeChildren(childMap, parentEl, rightEl, depth) {
 // ── Right panel: overview ─────────────────────────────────────────────────────
 
 function _cxRenderOverview(files, container) {
-  const maxScore = files[0] ? files[0].total_complexity : 1;
-
   const topRows = files.slice(0, 15).map(f => {
     const c   = _complexityColor(f.total_complexity);
-    const pct = Math.round((f.total_complexity / maxScore) * 100);
     return `
-      <div style="display:flex;align-items:center;gap:12px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
-        <span style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text);width:160px;min-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_escHtml(f.path)}">${_escHtml(f.path)}</span>
-        <div style="flex:1;height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;">
-          <div style="height:4px;background:${c.fg};border-radius:2px;width:${pct}%;opacity:0.8;"></div>
-        </div>
-        <span style="font-size:0.52rem;color:var(--text-dim);flex-shrink:0;width:35px;text-align:right;">${f.functions.length} fns</span>
-        <span style="font-size:0.55rem;font-weight:700;color:${c.fg};flex-shrink:0;width:30px;text-align:right;">${f.total_complexity}</span>
+      <div style="display:flex;align-items:center;gap:12px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+        <span style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text); white-space:nowrap;">${_escHtml(f.path)}</span>
+        <span style="font-size:0.52rem;color:var(--text-dim); white-space:nowrap;">${f.functions.length} fns</span>
+        <span style="font-size:0.55rem;font-weight:700;color:${c.fg}; white-space:nowrap;">${f.total_complexity} &middot; ${c.label}</span>
       </div>`;
   }).join('');
 
@@ -263,27 +257,38 @@ function _cxRenderFileDetail(file, container) {
   }).join('');
 
   container.innerHTML = `
-    <div style="padding:18px 22px;">
-      <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--border);">
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:0.52rem;color:var(--text-dim);letter-spacing:0.08em;margin-bottom:5px;">📄 FILE ANALYSIS</div>
-          <div style="font-family:var(--font-mono);font-size:0.68rem;color:var(--text);word-break:break-all;line-height:1.5;">${_escHtml(file.path)}</div>
-          <div style="font-size:0.52rem;color:var(--cyan);margin-top:3px;">📦 ${_escHtml(file.repo)}</div>
+    <div style="padding:16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <span style="font-size:1.2rem;">📄</span>
+        <div style="flex:1;">
+          <div style="font-size:0.7rem;font-weight:bold;color:var(--text);word-break:break-all;">${_escHtml(file.path.split('/').pop())}</div>
+          <div style="font-size:0.5rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;">FILE</div>
         </div>
-        <div style="display:flex;gap:8px;flex-shrink:0;">
-          <div style="text-align:center;padding:10px 16px;background:${c.bg};border-radius:8px;border:1px solid ${c.fg}35;">
-            <div style="color:${c.fg};font-size:1.5rem;font-weight:700;">${file.total_complexity}</div>
-            <div style="color:var(--text-dim);font-size:0.5rem;margin-top:3px;">${c.label}</div>
+      </div>
+
+      <div class="kb-detail-section">
+        <h5>Metadata</h5>
+        <div style="font-size:0.55rem;color:var(--text-dim);">📦 ${_escHtml(file.repo)}</div>
+        <div style="font-size:0.55rem;color:var(--text-dim);font-family:var(--font-mono);word-break:break-all;margin-top:2px;">📁 ${_escHtml(file.path)}</div>
+      </div>
+
+      <div class="kb-detail-section">
+        <h5>Complexity Score</h5>
+        <div style="display:flex;gap:8px;margin-top:4px;">
+          <div style="text-align:center;padding:8px 12px;background:${c.bg};border-radius:6px;border:1px solid ${c.fg}35;">
+            <div style="color:${c.fg};font-size:1.2rem;font-weight:700;">${file.total_complexity}</div>
+            <div style="color:var(--text-dim);font-size:0.45rem;margin-top:2px;">${c.label}</div>
           </div>
-          <div style="text-align:center;padding:10px 16px;background:rgba(34,211,238,0.08);border-radius:8px;border:1px solid rgba(34,211,238,0.2);">
-            <div style="color:var(--cyan);font-size:1.5rem;font-weight:700;">${file.functions.length}</div>
-            <div style="color:var(--text-dim);font-size:0.5rem;margin-top:3px;">Functions</div>
+          <div style="text-align:center;padding:8px 12px;background:rgba(34,211,238,0.08);border-radius:6px;border:1px solid rgba(34,211,238,0.2);">
+            <div style="color:var(--cyan);font-size:1.2rem;font-weight:700;">${file.functions.length}</div>
+            <div style="color:var(--text-dim);font-size:0.45rem;margin-top:2px;">Functions</div>
           </div>
         </div>
       </div>
 
-      <div style="font-size:0.55rem;font-weight:700;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:10px;">FUNCTION BREAKDOWN</div>
-      <div style="overflow-x:auto;">
+      <div class="kb-detail-section" style="margin-top:16px;">
+        <h5>Function Breakdown</h5>
+        <div style="overflow-x:auto;background:var(--bg-main);border-radius:4px;">
         <table style="width:100%;border-collapse:collapse;">
           <thead>
             <tr style="border-bottom:1px solid var(--border);">
