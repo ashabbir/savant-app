@@ -883,9 +883,9 @@ content: |
       <h3>Indexing Pipeline</h3>
       ${_gSteps([
         { title: 'Walk file tree', desc: 'Traverse the repo, respecting .gitignore rules. Skip binaries, node_modules, etc.', color: 'var(--cyan)' },
+        { title: 'Extract AST nodes', desc: 'Parse source files (Python, JS, Go, etc.) using Tree-sitter to identify classes and functions', color: 'var(--magenta)' },
         { title: 'Chunk files', desc: 'Split into ~500-line segments with 50-line overlap for context continuity', color: 'var(--green)' },
-        { title: 'Generate embeddings', desc: '768-dimensional vectors using stsb-distilbert-base model (~260 MB, auto-downloads)', color: 'var(--magenta)' },
-        { title: 'Store in sqlite-vec', desc: 'Vectors stored alongside file path, line range, and content for fast KNN retrieval', color: 'var(--orange)' },
+        { title: 'Generate embeddings', desc: '768-dimensional vectors for KNN-based semantic retrieval', color: 'var(--orange)' },
       ])}
 
       <h3>Search Options</h3>
@@ -896,13 +896,16 @@ content: |
       <table class="guide-table">
         <tr><th>Tool</th><th>Purpose</th></tr>
         <tr><td><code>code_search(query, repo)</code></td><td>Semantic search across repo source code</td></tr>
-        <tr><td><code>structure_search(query, repo)</code></td><td>Structural internal lookup of AST components by pattern</td></tr>
+        <tr><td><code>structure_search(query, repo)</code></td><td>AST search for classes, functions, and symbols</td></tr>
         <tr><td><code>memory_bank_search(query, repo)</code></td><td>Search within memory bank markdown files</td></tr>
         <tr><td><code>repos_list()</code></td><td>List all indexed repos with README excerpts</td></tr>
         <tr><td><code>repo_status()</code></td><td>Index health: chunk count, last indexed, errors</td></tr>
         <tr><td><code>memory_resources_list(repo)</code></td><td>Browse available memory bank files</td></tr>
         <tr><td><code>memory_resources_read(uri)</code></td><td>Read a specific memory bank file</td></tr>
       </table>
+
+      <h3>AST Structure</h3>
+      <p>The <strong>AST</strong> tab (🌳) allows you to browse the logical hierarchy of your code. Instead of raw text search, it shows classes and functions categorized by file, enabling high-level architectural exploration.</p>
 
       <h3>Memory Bank</h3>
       <p>The memory bank stores markdown documents that AI agents can search and reference. Think of it as a project-scoped knowledge base for common patterns, decisions, and documentation.</p>

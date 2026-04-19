@@ -49,7 +49,8 @@ app.register_blueprint(knowledge_bp)
 
 @app.after_request
 def add_no_cache(response):
-    if response.content_type and 'text/html' in response.content_type:
+    ct = response.content_type or ''
+    if 'text/html' in ct or 'javascript' in ct or 'text/css' in ct:
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
@@ -3674,6 +3675,11 @@ def _auto_close_past_days(today=None):
 
 # ── Task API routes (SQLite-backed) ───────────────────────────────────────
 
+def _normalize_task(t):
+    if t and "task_id" in t and "id" not in t:
+        t["id"] = t["task_id"]
+    return t
+
 @app.route("/api/tasks/reorder", methods=["POST"])
 def api_tasks_reorder():
     data = request.get_json(force=True)
@@ -3700,6 +3706,10 @@ def api_tasks_list():
         tasks = TaskDB.list_all(workspace_id=ws_filter)
     else:
         tasks = TaskDB.list_all()
+
+    for t in tasks:
+        _normalize_task(t)
+
     return jsonify(tasks)
 
 @app.route("/api/tasks", methods=["POST"])
@@ -3742,7 +3752,7 @@ def api_tasks_create():
         "workspace_id": task.get("workspace_id"),
     })
     _emit_event("task_created", f"Task created: {title}", {"task_id": task["task_id"], "workspace_id": task.get("workspace_id")})
-    return jsonify(task)
+    return jsonify(_normalize_task(task))
 
 @app.route("/api/tasks/<task_id>", methods=["PUT"])
 def api_tasks_update(task_id):
@@ -3777,7 +3787,7 @@ def api_tasks_update(task_id):
         _log_task_event(task_id, "updated", {
             k: data[k] for k in ("title", "description", "priority", "date", "workspace_id", "session_id") if k in data
         })
-    return jsonify(updated)
+    return jsonify(_normalize_task(updated))
 
 @app.route("/api/tasks/<task_id>", methods=["DELETE"])
 def api_tasks_delete(task_id):

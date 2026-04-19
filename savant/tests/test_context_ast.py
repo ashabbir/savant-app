@@ -53,6 +53,7 @@ def test_js_ast_generation(client, tmp_path, monkeypatch):
     ContextDB.add_repo("repo-js", str(repo_dir))
 
     Indexer().index_repository(repo_dir, repo_name="repo-js")
+    Indexer().generate_ast_for_repository(repo_dir, repo_name="repo-js")
 
     resp = client.get("/api/context/ast/list?repo=repo-js")
     assert resp.status_code == 200

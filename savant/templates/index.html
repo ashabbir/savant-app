@@ -1441,6 +1441,13 @@
     box-shadow: 0 0 40px var(--cyan-dim), 0 10px 40px rgba(0,0,0,0.5);
   }
 
+  .modal.modal-full {
+    width: 96vw;
+    max-width: 96vw;
+    height: 92vh;
+    max-height: 92vh;
+  }
+
   .modal-header {
     display: flex;
     justify-content: space-between;
@@ -6482,13 +6489,13 @@ function showLoadingScreen(cb) { if (cb) cb(); }
       </div>
     </div>
 
-    <!-- Inner tabs: Search / Projects / Code / Memory Bank -->
+    <!-- Inner tabs: Search / AST / Projects / Code / Memory Bank -->
     <div class="ctx-inner-tabs">
-      <button class="savant-subtab active" onclick="switchCtxPanel('search')">🔍 Search</button>
-      <button class="savant-subtab" onclick="switchCtxPanel('projects')">📁 Projects</button>
-      <button class="savant-subtab" onclick="switchCtxPanel('code')">📄 Code</button>
-      <button class="savant-subtab" onclick="switchCtxPanel('memory')">🧠 Memory Bank</button>
-      <button class="savant-subtab" onclick="switchCtxPanel('ast')">🌲 AST</button>
+      <button class="savant-subtab active" data-panel="search" onclick="switchCtxPanel('search', this)">🔍 Search</button>
+      <button class="savant-subtab" data-panel="ast" onclick="switchCtxPanel('ast', this)">🌳 AST</button>
+      <button class="savant-subtab" data-panel="projects" onclick="switchCtxPanel('projects', this)">📁 Projects</button>
+      <button class="savant-subtab" data-panel="code" onclick="switchCtxPanel('code', this)">📄 Code</button>
+      <button class="savant-subtab" data-panel="memory" onclick="switchCtxPanel('memory', this)">🧠 Memory Bank</button>
     </div>
 
     <!-- Search Panel -->
@@ -6565,9 +6572,9 @@ function showLoadingScreen(cb) { if (cb) cb(); }
     <div class="ctx-panel" id="ctx-panel-ast" style="display:none;">
       <div id="ctx-ast-list" class="ctx-memory-list">
         <div class="ctx-welcome">
-          <div style="font-size:2rem;margin-bottom:12px;">🌲</div>
-          <div>AST nodes</div>
-          <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Index a project to browse its abstract syntax tree here</div>
+          <div style="font-size:2rem;margin-bottom:12px;">🌳</div>
+          <div>Generated AST structures</div>
+          <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Generate AST for a project to browse its structure here</div>
         </div>
       </div>
     </div>
@@ -6968,7 +6975,10 @@ function showLoadingScreen(cb) { if (cb) cb(); }
 <script src="/static/js/mcp-tab.js"></script>
 <script src="/static/js/knowledge.js"></script>
 <script src="/static/js/abilities.js"></script>
-<script src="/static/js/context-tab.js"></script>
+<script src="/static/js/context-core.js?v=2"></script>
+<script src="/static/js/context-complexity.js?v=4"></script>
+<script src="/static/js/context-ast.js?v=5"></script>
+<script src="/static/js/context-tab.js?v=2"></script>
 <script src="/static/js/workspace-mcp.js"></script>
 <script src="/static/js/dev-log.js"></script>
 
