@@ -40,7 +40,46 @@ function _gStats(stats) {
 
 const _guideTree = [
   // ═══════════════════════════════════════════════════════════════════════════
-  // 1. WHAT IS SAVANT
+  // 1. INTRODUCTION: THE SAVANT CODEBASE
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    id: 'intro-codebase', title: 'Introduction', children: [],
+    content: `
+      <h2>The Savant Codebase</h2>
+      <p>Savant is a <strong>unified AI Session Dashboard</strong> designed to monitor and manage real-time workflows from multiple AI coding assistants, including GitHub Copilot CLI, Cline, Claude Code, and Gemini.</p>
+
+      <h3>What is it for?</h3>
+      <p>Savant bridges the gap between local development and AI-assisted workflows. It provides a central hub to track session history, manage project-specific tasks, and build a persistent knowledge graph of your engineering domain.</p>
+
+      <h3>Who can use it?</h3>
+      ${_gStats([
+        { icon: '👥', value: 'Teams', label: 'Engineering Orgs', color: 'var(--cyan)' },
+        { icon: '💻', value: 'Devs', label: 'Individual Contributors', color: 'var(--green)' },
+        { icon: '🏛️', value: 'Leads', label: 'Tech Leads & Architects', color: 'var(--magenta)' },
+      ])}
+
+      <h3>How to use it?</h3>
+      <p>Run Savant as a companion dashboard alongside your terminal and IDE. As you interact with AI agents, Savant auto-detects sessions, allowing you to:</p>
+      <ul>
+        <li><strong>Monitor:</strong> See real-time status and activity of all AI assistants.</li>
+        <li><strong>Analyze:</strong> Evaluate code complexity and structural integrity via AST visualizations.</li>
+        <li><strong>Organize:</strong> Group sessions into workspaces and link them to JIRA/Tasks.</li>
+        <li><strong>Preserve:</strong> Build a knowledge graph that persists across sessions and teams.</li>
+      </ul>
+
+      <h3>Why use it?</h3>
+      <table class="guide-table">
+        <tr><th>Benefit</th><th>Description</th></tr>
+        <tr><td style="color:var(--cyan);">Eliminate Amnesia</td><td>AI agents often lack cross-session memory. Savant provides a persistent context and knowledge layer.</td></tr>
+        <tr><td style="color:var(--green);">Quality Control</td><td>Use AST-driven complexity heatmaps to identify technical debt before it merges.</td></tr>
+        <tr><td style="color:var(--orange);">Unified Visibility</td><td>Stop hunting for log files; see every prompt, tool call, and file change in one place.</td></tr>
+        <tr><td style="color:var(--magenta);">Streamlined Handoffs</td><td>Use workspaces to bundle all AI context for a specific feature, making reviews and handoffs effortless.</td></tr>
+      </table>
+    `
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 2. WHAT IS SAVANT
   // ═══════════════════════════════════════════════════════════════════════════
   {
     id: 'what-is-savant', title: 'What is Savant?', children: [],
@@ -97,6 +136,7 @@ const _guideTree = [
       { id: 'use-tasks', title: 'Managing Tasks', children: [] },
       { id: 'use-terminal', title: 'Terminal', children: [] },
       { id: 'use-mcp', title: 'MCP Tab', children: [] },
+      { id: 'use-visualizations', title: 'Context & Visualizations', children: [] },
       { id: 'use-search', title: 'Search & Navigation', children: [] },
     ],
     content: `
@@ -452,6 +492,46 @@ list_workspaces(status="open")</code></pre>
         <tr><td style="color:#14b8a6;">●</td><td>session</td><td>AI coding session traces and handoffs</td></tr>
         <tr><td style="color:#ef4444;">●</td><td>issue</td><td>Known bugs, tech debt</td></tr>
       </table>
+    `
+  },
+  {
+    id: 'use-visualizations', title: 'Context & Visualizations', _sub: true, children: [],
+    content: `
+      <h2>Context & Visualizations</h2>
+      <p>Savant uses <strong>Abstract Syntax Trees (AST)</strong> and advanced D3 visualizations to help you understand the structure and complexity of your codebase.</p>
+
+      <h3>AST Visualization Modes</h3>
+      ${_gFlow([
+        { icon: '🌳', title: 'Tree View', desc: 'Standard hierarchical structure of files and functions', color: 'var(--cyan)' },
+        { icon: '🔥', title: 'Heatmap', desc: 'McCabe-inspired complexity scores with risk levels', color: 'var(--red)' },
+        { icon: '◎', title: 'Radial Sunburst', desc: 'Circular map showing depth and complexity distribution', color: 'var(--magenta)' },
+        { icon: '✦', title: 'Cluster Tree', desc: 'Structural grouping of related code entities', color: 'var(--green)' },
+      ])}
+
+      <h3>Complexity: Why it Matters</h3>
+      <p>Savant computes a <strong>McCabe-inspired Cyclomatic Complexity score</strong> for every function and class. This measures the number of linearly independent paths through your code.</p>
+      
+      <div style="background:rgba(0,0,0,0.2);padding:12px;border-left:4px solid var(--orange);margin:15px 0;border-radius:0 6px 6px 0;">
+        <h4 style="margin-top:0;color:var(--orange);">The Cognitive Ceiling</h4>
+        <p style="font-size:0.5rem;margin-bottom:0;">Studies show that human working memory can handle approximately <strong>7 ± 2</strong> items. When a function's complexity exceeds <strong>10</strong>, it surpasses the average cognitive limit, making the code exponentially harder to maintain and test.</p>
+      </div>
+
+      <h3>Scoring & Thresholds</h3>
+      <table class="guide-table">
+        <tr><th>Score</th><th>Level</th><th>Action</th></tr>
+        <tr><td style="color:#4ade80;">1 - 5</td><td>Low</td><td>Healthy, readable code.</td></tr>
+        <tr><td style="color:#facc15;">6 - 10</td><td>Moderate</td><td>Keep an eye on this; consider refactoring.</td></tr>
+        <tr><td style="color:#fb923c;">11 - 20</td><td>Risky</td><td>Exceeds human cognitive capacity. Refactor strongly recommended.</td></tr>
+        <tr><td style="color:#f87171;">21+</td><td>High</td><td>Critical technical debt. High risk of bugs. Refactor immediately.</td></tr>
+      </table>
+
+      <h3>How to use these views</h3>
+      ${_gSteps([
+        { title: 'Generate AST', desc: 'Go to the Projects tab in the Context panel and click "Generate AST" for your repo.', color: 'var(--cyan)' },
+        { title: 'Switch Views', desc: 'Use the ◎ Radial or ✦ Cluster buttons to change visualization styles.', color: 'var(--magenta)' },
+        { title: 'Identify Hotspots', desc: 'Look for Red/Orange nodes in the Radial view — these are your most complex (and risky) functions.', color: 'var(--orange)' },
+        { title: 'Drill Down', desc: 'Click any node to see its specific complexity breakdown and file location.', color: 'var(--green)' },
+      ])}
     `
   },
   {
@@ -1659,7 +1739,7 @@ function openGuide(sectionId) {
   const tree = document.getElementById('guide-tree');
   tree.innerHTML = _guideRenderTree(_guideTree, 0);
   // Start collapsed — children hidden by CSS default
-  guideNavigate(sectionId || 'what-is-savant');
+  guideNavigate(sectionId || 'intro-codebase');
   document.getElementById('guide-search').value = '';
   document.getElementById('guide-search').focus();
 }

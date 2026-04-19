@@ -42,7 +42,6 @@ async function ctxLoadAst() {
     container.innerHTML = `
       <div class="ctx-proj-split" style="height:calc(100vh - 320px);min-height:520px;">
         <div class="ctx-proj-sidebar" id="ctx-ast-project-panel" style="transition:width 0.18s ease,min-width 0.18s ease;overflow:hidden;"></div>
-        <button id="ctx-ast-project-toggle" onclick="ctxToggleAstProjectPanel()" title="Collapse project selector" style="width:26px;min-width:26px;border:none;border-right:1px solid var(--border);background:rgba(34,211,238,0.08);color:var(--cyan);font-family:var(--font-mono);font-size:0.8rem;cursor:pointer;display:flex;align-items:center;justify-content:center;">‹</button>
         <div class="ctx-proj-detail" id="ctx-ast-visualization" style="background:rgba(0,0,0,0.08);">
           <div class="ctx-welcome" style="padding:60px 20px;">
             <div style="font-size:2rem;margin-bottom:12px;">🌳</div>
@@ -60,33 +59,25 @@ async function ctxLoadAst() {
 }
 
 function _renderAstProjectTree() {
-  ctxRenderProjectSidebar('ctx-ast-project-panel', _astProjects, _astSelectedProject, 'ctxReadProjectAst');
+  ctxRenderProjectExplorer('ctx-ast-project-panel', _astProjects, _astSelectedProject, 'ctxReadProjectAst', { indexStatus: _ctxLastIndexStatus });
 }
 
 function ctxToggleAstProjectPanel() {
   _astProjectPanelCollapsed = !_astProjectPanelCollapsed;
+  _ctxProjectExplorerState['ctx-ast-project-panel'] = _ctxProjectExplorerState['ctx-ast-project-panel'] || {};
+  _ctxProjectExplorerState['ctx-ast-project-panel'].collapsed = _astProjectPanelCollapsed;
   _applyAstProjectPanelState();
   if (_astCurrentNodes) setTimeout(_renderAstView, 220);
 }
 
 function _applyAstProjectPanelState() {
-  const panel = document.getElementById('ctx-ast-project-panel');
-  const toggle = document.getElementById('ctx-ast-project-toggle');
-  if (!panel || !toggle) return;
-
-  if (_astProjectPanelCollapsed) {
-    panel.style.width = '0px';
-    panel.style.minWidth = '0px';
-    panel.style.borderRight = 'none';
-    toggle.textContent = '›';
-    toggle.title = 'Show project selector';
+  _ctxProjectExplorerState['ctx-ast-project-panel'] = _ctxProjectExplorerState['ctx-ast-project-panel'] || {};
+  if (typeof _ctxProjectExplorerState['ctx-ast-project-panel'].collapsed === 'boolean') {
+    _astProjectPanelCollapsed = _ctxProjectExplorerState['ctx-ast-project-panel'].collapsed;
   } else {
-    panel.style.width = '240px';
-    panel.style.minWidth = '200px';
-    panel.style.borderRight = '1px solid var(--border)';
-    toggle.textContent = '‹';
-    toggle.title = 'Collapse project selector';
+    _ctxProjectExplorerState['ctx-ast-project-panel'].collapsed = _astProjectPanelCollapsed;
   }
+  ctxSyncProjectExplorerLayout('ctx-ast-project-panel');
 }
 
 function _showAstPanel() {
@@ -222,6 +213,7 @@ function _renderAstView() {
 }
 
 function _renderAstNoSearchResults(area) {
+  const cid = 'ast-empty-' + Math.random().toString(36).substr(2, 9);
   const msg = `
     <div style="height:calc(100% - 43px);min-height:260px;display:flex;align-items:center;justify-content:center;padding:40px;text-align:center;color:var(--text-dim);font-size:0.68rem;line-height:1.7;">
       <div style="max-width:420px;">
@@ -230,12 +222,7 @@ function _renderAstNoSearchResults(area) {
         <button class="ctx-btn-sm" onclick="astClearSearchQuery()" style="margin-top:12px;background:var(--cyan);color:#001018;border-color:var(--cyan);">Clear search</button>
       </div>
     </div>`;
-  if (_astViewMode === 'tree' || _astViewMode === 'cluster') {
-    const cid = 'ast-empty-' + Math.random().toString(36).substr(2, 9);
-    area.innerHTML = _renderAstInteractiveLegend(cid) + msg;
-  } else {
-    area.innerHTML = _renderAstSearchToolbar() + msg;
-  }
+  area.innerHTML = _renderAstInteractiveLegend(cid) + msg;
 }
 
 function _filterAstNodesForSearch(nodes) {

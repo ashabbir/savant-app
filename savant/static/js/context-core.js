@@ -7,6 +7,14 @@ let _ctxPollingTimer = null;
 let _ctxLastIndexStatus = {};
 let _ctxSelectedProject = null;
 let _ctxProjectsPanelCollapsed = false;
+let _ctxProjectExplorerState = {};
+let _ctxProjectExplorerRegistry = {};
+let _ctxMemorySelectedProject = null;
+let _ctxMemoryProjects = [];
+let _ctxMemoryItems = [];
+let _ctxCodeSelectedProject = null;
+let _ctxCodeProjects = [];
+let _ctxCodeItems = [];
 // _ctxProjects is declared in globals.js
 
 // ── MCP connection ────────────────────────────────────────────────────────────
@@ -124,12 +132,12 @@ function ctxRenderProjects() { ctxRenderProjectsWithProgress({}); }
 
 function ctxRenderProjectsWithProgress(indexStatus) {
   if (!_ctxProjects.length) {
-    ctxRenderProjectSidebar('ctx-projects-list', _ctxProjects, _ctxSelectedProject, 'ctxSelectProject', { indexStatus });
+    ctxRenderProjectExplorer('ctx-projects-list', _ctxProjects, _ctxSelectedProject, 'ctxSelectProject', { indexStatus });
     ctxApplyProjectsPanelState();
     return;
   }
   if (!_ctxSelectedProject) _ctxSelectedProject = _ctxProjects[0].name;
-  if (!ctxRenderProjectSidebar('ctx-projects-list', _ctxProjects, _ctxSelectedProject, 'ctxSelectProject', { indexStatus })) return;
+  if (!ctxRenderProjectExplorer('ctx-projects-list', _ctxProjects, _ctxSelectedProject, 'ctxSelectProject', { indexStatus })) return;
   ctxApplyProjectsPanelState();
   _ctxRenderDetail(indexStatus);
 }
@@ -137,61 +145,115 @@ function ctxRenderProjectsWithProgress(indexStatus) {
 function ctxSelectProject(name) { _ctxSelectedProject = name; ctxRenderProjects(); }
 
 function ctxToggleProjectsPanel() {
-  _ctxProjectsPanelCollapsed = !_ctxProjectsPanelCollapsed;
-  ctxApplyProjectsPanelState();
+  ctxToggleProjectExplorer('ctx-projects-list');
 }
 
 function ctxApplyProjectsPanelState() {
-  const panel = document.getElementById('ctx-projects-list');
-  const toggle = document.getElementById('ctx-projects-toggle');
-  if (!panel || !toggle) return;
-  if (!panel.style) panel.style = {};
-  if (!toggle.style) toggle.style = {};
-
-  panel.style.transition = 'width 0.18s ease,min-width 0.18s ease';
-  panel.style.overflow = 'hidden';
-
-  if (_ctxProjectsPanelCollapsed) {
-    panel.style.width = '0px';
-    panel.style.minWidth = '0px';
-    panel.style.borderRight = 'none';
-    toggle.textContent = '›';
-    toggle.title = 'Show project selector';
+  _ctxProjectExplorerState['ctx-projects-list'] = _ctxProjectExplorerState['ctx-projects-list'] || {};
+  if (typeof _ctxProjectExplorerState['ctx-projects-list'].collapsed === 'boolean') {
+    _ctxProjectsPanelCollapsed = _ctxProjectExplorerState['ctx-projects-list'].collapsed;
   } else {
-    panel.style.width = '240px';
-    panel.style.minWidth = '200px';
-    panel.style.borderRight = '1px solid var(--border)';
-    toggle.textContent = '‹';
-    toggle.title = 'Collapse project selector';
+    _ctxProjectExplorerState['ctx-projects-list'].collapsed = !!_ctxProjectsPanelCollapsed;
   }
+  ctxSyncProjectExplorerLayout('ctx-projects-list');
 }
 
 function ctxRenderProjectSidebar(containerId, projects, selectedName, onSelectFn, options = {}) {
-  const sidebar = document.getElementById(containerId);
-  if (!sidebar) return false;
-
-  if (!projects.length) {
-    sidebar.innerHTML = options.emptyHtml || `<div class="ctx-welcome">
-      <div style="font-size:2rem;margin-bottom:12px;">📦</div>
-      <div>No projects yet</div>
-      <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Add a project to get started</div>
-    </div>`;
-    return false;
-  }
-
-  const indexStatus = options.indexStatus || {};
-  sidebar.innerHTML = projects.map(p => _ctxRenderProjectSidebarRow(p, selectedName, onSelectFn, indexStatus)).join('');
-  return true;
+  return ctxRenderProjectExplorer(containerId, projects, selectedName, onSelectFn, options);
 }
 
-function _ctxRenderProjectSidebarRow(project, selectedName, onSelectFn, indexStatus = {}) {
+function ctxRenderProjectExplorer(containerId, projects, selectedName, onSelectFn, options = {}) {
+  const sidebar = document.getElementById(containerId);
+  if (!sidebar) return false;
+  const state = _ctxProjectExplorerState[containerId] || { query: '', collapsed: false };
+  _ctxProjectExplorerState[containerId] = state;
+  _ctxProjectExplorerRegistry[containerId] = { projects, selectedName, onSelectFn, options };
+  const query = (state.query || '').trim().toLowerCase();
+  const filtered = query
+    ? projects.filter(p => ((p.name || '') + ' ' + (p.path || '')).toLowerCase().includes(query))
+    : projects;
+  const headTitle = options.title || 'Project Explorer';
+  const searchPlaceholder = options.searchPlaceholder || 'Search projects...';
+  const bodyHtml = !filtered.length
+    ? `<div class="ctx-welcome" style="padding:20px 10px;font-size:0.58rem;">${query ? 'No projects match search' : 'No projects yet'}</div>`
+    : filtered.map(p => _ctxRenderProjectExplorerRow(p, selectedName, onSelectFn, options.indexStatus || {})).join('');
+
+  sidebar.innerHTML = `
+    <div class="ctx-project-explorer${state.collapsed ? ' collapsed' : ''}">
+      <div class="ctx-project-explorer-head">
+        <div class="ctx-project-explorer-title">${_escHtml(headTitle)}</div>
+        <button class="ctx-project-explorer-toggle" onclick="ctxToggleProjectExplorer('${_ctxJsString(containerId)}')" title="${state.collapsed ? 'Expand project explorer' : 'Collapse project explorer'}">${state.collapsed ? '›' : '‹'}</button>
+      </div>
+      ${state.collapsed ? '' : `
+        <div class="ctx-project-explorer-search">
+          <input type="text" value="${_escHtml(state.query || '')}" placeholder="${_escHtml(searchPlaceholder)}" oninput="ctxProjectExplorerSearch('${_ctxJsString(containerId)}', this.value)">
+        </div>
+        <div class="ctx-project-explorer-list">${bodyHtml}</div>
+      `}
+    </div>`;
+  ctxSyncProjectExplorerLayout(containerId);
+  return filtered.length > 0;
+}
+
+function _ctxRenderProjectExplorerRow(project, selectedName, onSelectFn, indexStatus = {}) {
   const isActive = project.name === selectedName;
-  const liveStatus = (indexStatus[project.name] || {}).status || project.status || 'ready';
-  const statusCls = liveStatus === 'indexing' ? 'indexing' : liveStatus === 'ready' ? 'ready' : 'off';
-  return `<div class="ctx-proj-row${isActive ? ' active' : ''}" onclick="${onSelectFn}('${_ctxJsString(project.name)}')">
-    <div class="ctx-proj-row-name">${_escHtml(project.name)}</div>
-    <span class="ctx-project-status ${statusCls}">${_escHtml(liveStatus)}</span>
+  const st = _ctxProjectHealth(project, indexStatus);
+  return `<div class="ctx-proj-row ctx-proj-row-${st.tone}${isActive ? ' active' : ''}" onclick="${onSelectFn}('${_ctxJsString(project.name)}')">
+    <span class="ctx-proj-status-line ${st.tone}"></span>
+    <div class="ctx-proj-row-main">
+      <div class="ctx-proj-row-name">${_escHtml(project.name)}</div>
+      <div class="ctx-proj-row-meta">
+        <span class="ctx-mini-flag ${st.indexed ? 'on' : 'off'}" title="Indexed">I</span>
+        <span class="ctx-mini-flag ${st.ast ? 'on' : 'off'}" title="AST Generated">A</span>
+        <span>${_escHtml(st.label)}</span>
+      </div>
+    </div>
   </div>`;
+}
+
+function _ctxProjectHealth(project, indexStatus = {}) {
+  const liveStatus = ((indexStatus[project.name] || {}).status || project.status || '').toString().toLowerCase();
+  const indexed = !!(project.chunk_count > 0 || project.indexed_at);
+  const ast = !!(project.ast_node_count > 0);
+  const failStates = new Set(['error', 'failed', 'off', 'stalled']);
+  const busyStates = new Set(['indexing', 'generating', 'ast_generating', 'ast_generation', 'queued', 'running', 'processing']);
+  if (failStates.has(liveStatus)) return { tone: 'red', indexed, ast, label: 'Failed' };
+  if (busyStates.has(liveStatus)) return { tone: 'orange', indexed, ast, label: 'In Progress' };
+  if (indexed && ast) return { tone: 'green', indexed: true, ast: true, label: 'Ready' };
+  return { tone: 'orange', indexed, ast, label: indexed ? 'Partial' : 'Pending' };
+}
+
+function ctxProjectExplorerSearch(containerId, value) {
+  _ctxProjectExplorerState[containerId] = _ctxProjectExplorerState[containerId] || { query: '', collapsed: false };
+  _ctxProjectExplorerState[containerId].query = value || '';
+  const reg = _ctxProjectExplorerRegistry[containerId];
+  if (!reg) return;
+  ctxRenderProjectExplorer(containerId, reg.projects, reg.selectedName, reg.onSelectFn, reg.options);
+}
+
+function ctxToggleProjectExplorer(containerId) {
+  _ctxProjectExplorerState[containerId] = _ctxProjectExplorerState[containerId] || { query: '', collapsed: false };
+  _ctxProjectExplorerState[containerId].collapsed = !_ctxProjectExplorerState[containerId].collapsed;
+  if (containerId === 'ctx-projects-list') _ctxProjectsPanelCollapsed = _ctxProjectExplorerState[containerId].collapsed;
+  const reg = _ctxProjectExplorerRegistry[containerId];
+  if (reg) ctxRenderProjectExplorer(containerId, reg.projects, reg.selectedName, reg.onSelectFn, reg.options);
+}
+
+function ctxSyncProjectExplorerLayout(containerId) {
+  const sidebar = document.getElementById(containerId);
+  if (!sidebar) return;
+  if (!sidebar.style) sidebar.style = {};
+  const state = _ctxProjectExplorerState[containerId] || {};
+  sidebar.style.transition = 'width 0.18s ease,min-width 0.18s ease';
+  sidebar.style.overflow = 'hidden';
+  if (state.collapsed) {
+    sidebar.style.width = '34px';
+    sidebar.style.minWidth = '34px';
+  } else {
+    sidebar.style.width = '240px';
+    sidebar.style.minWidth = '200px';
+  }
+  sidebar.style.borderRight = '1px solid var(--border)';
 }
 
 function _ctxJsString(value) {
@@ -514,10 +576,12 @@ async function ctxDoSearch() {
 async function ctxLoadMemory() {
   const container = document.getElementById('ctx-memory-list');
   try {
+    await _ctxEnsureProjectsLoaded();
     const res = await fetch('/api/context/memory/list');
     if (!res.ok) throw new Error('API error');
     const data = await res.json();
     const items = data.resources || data || [];
+    _ctxMemoryItems = items;
     if (!items.length) {
       container.innerHTML = `<div class="ctx-welcome">
         <div style="font-size:2rem;margin-bottom:12px;">🧠</div>
@@ -526,10 +590,30 @@ async function ctxLoadMemory() {
       </div>`;
       return;
     }
-    _ctxRenderFileList(container, items, 'ctx-mem', 'memory');
+    _ctxMemoryProjects = _ctxProjects.filter(p => _ctxMemoryItems.some(i => (i.repo || i.repo_name) === p.name));
+    if (!_ctxMemoryProjects.length) {
+      const names = Array.from(new Set(_ctxMemoryItems.map(i => i.repo || i.repo_name).filter(Boolean)));
+      _ctxMemoryProjects = names.map(name => ({ name, status: 'ready', ast_node_count: 0, chunk_count: 0 }));
+    }
+    if (!_ctxMemorySelectedProject || !_ctxMemoryProjects.find(p => p.name === _ctxMemorySelectedProject)) {
+      _ctxMemorySelectedProject = _ctxMemoryProjects[0].name;
+    }
+    container.innerHTML = `
+      <div class="ctx-proj-split">
+        <div class="ctx-proj-sidebar" id="ctx-memory-projects"></div>
+        <div class="ctx-proj-detail" id="ctx-memory-detail"></div>
+      </div>`;
+    ctxRenderProjectExplorer('ctx-memory-projects', _ctxMemoryProjects, _ctxMemorySelectedProject, 'ctxSelectMemoryProject', { indexStatus: _ctxLastIndexStatus });
+    _ctxRenderFilteredProjectFiles('ctx-memory-detail', _ctxMemoryItems, _ctxMemorySelectedProject, 'memory');
   } catch (e) {
     container.innerHTML = '<div class="ctx-welcome" style="padding:30px;color:#ef4444;">Failed to load: ' + _escHtml(e.message) + '</div>';
   }
+}
+
+function ctxSelectMemoryProject(name) {
+  _ctxMemorySelectedProject = name;
+  ctxRenderProjectExplorer('ctx-memory-projects', _ctxMemoryProjects, _ctxMemorySelectedProject, 'ctxSelectMemoryProject', { indexStatus: _ctxLastIndexStatus });
+  _ctxRenderFilteredProjectFiles('ctx-memory-detail', _ctxMemoryItems, _ctxMemorySelectedProject, 'memory');
 }
 
 // ── Code panel ────────────────────────────────────────────────────────────────
@@ -537,10 +621,12 @@ async function ctxLoadMemory() {
 async function ctxLoadCode() {
   const container = document.getElementById('ctx-code-list');
   try {
+    await _ctxEnsureProjectsLoaded();
     const res = await fetch('/api/context/code/list');
     if (!res.ok) throw new Error('API error');
     const data = await res.json();
     const items = data.files || data || [];
+    _ctxCodeItems = items;
     if (!items.length) {
       container.innerHTML = `<div class="ctx-welcome">
         <div style="font-size:2rem;margin-bottom:12px;">📄</div>
@@ -549,10 +635,66 @@ async function ctxLoadCode() {
       </div>`;
       return;
     }
-    _ctxRenderFileList(container, items, 'ctx-code', 'code');
+    _ctxCodeProjects = _ctxProjects.filter(p => _ctxCodeItems.some(i => (i.repo || i.repo_name) === p.name));
+    if (!_ctxCodeProjects.length) {
+      const names = Array.from(new Set(_ctxCodeItems.map(i => i.repo || i.repo_name).filter(Boolean)));
+      _ctxCodeProjects = names.map(name => ({ name, status: 'ready', ast_node_count: 0, chunk_count: 0 }));
+    }
+    if (!_ctxCodeSelectedProject || !_ctxCodeProjects.find(p => p.name === _ctxCodeSelectedProject)) {
+      _ctxCodeSelectedProject = _ctxCodeProjects[0].name;
+    }
+    container.innerHTML = `
+      <div class="ctx-proj-split">
+        <div class="ctx-proj-sidebar" id="ctx-code-projects"></div>
+        <div class="ctx-proj-detail" id="ctx-code-detail"></div>
+      </div>`;
+    ctxRenderProjectExplorer('ctx-code-projects', _ctxCodeProjects, _ctxCodeSelectedProject, 'ctxSelectCodeProject', { indexStatus: _ctxLastIndexStatus });
+    _ctxRenderFilteredProjectFiles('ctx-code-detail', _ctxCodeItems, _ctxCodeSelectedProject, 'code');
   } catch (e) {
     container.innerHTML = '<div class="ctx-welcome" style="padding:30px;color:#ef4444;">Failed to load: ' + _escHtml(e.message) + '</div>';
   }
+}
+
+function ctxSelectCodeProject(name) {
+  _ctxCodeSelectedProject = name;
+  ctxRenderProjectExplorer('ctx-code-projects', _ctxCodeProjects, _ctxCodeSelectedProject, 'ctxSelectCodeProject', { indexStatus: _ctxLastIndexStatus });
+  _ctxRenderFilteredProjectFiles('ctx-code-detail', _ctxCodeItems, _ctxCodeSelectedProject, 'code');
+}
+
+function _ctxRenderFilteredProjectFiles(containerId, items, projectName, type) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const openFn = type === 'memory' ? 'ctxReadMemory' : 'ctxReadCodeFile';
+  const filtered = (items || []).filter(i => (i.repo || i.repo_name) === projectName)
+    .sort((a, b) => (a.path || a.uri || '').localeCompare(b.path || b.uri || ''));
+  if (!filtered.length) {
+    container.innerHTML = `<div class="ctx-welcome" style="padding:60px 20px;">
+      <div style="font-size:1.7rem;margin-bottom:8px;">No files</div>
+      <div style="font-size:0.58rem;">No ${type === 'memory' ? 'memory bank documents' : 'code files'} for "${_escHtml(projectName)}"</div>
+    </div>`;
+    return;
+  }
+  container.innerHTML = `
+    <div style="padding:12px;">
+      <div style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text-dim);margin:2px 2px 10px;">${filtered.length} ${type === 'memory' ? 'document' : 'file'}${filtered.length === 1 ? '' : 's'}</div>
+      ${filtered.map(d => `<div class="ctx-memory-item" onclick="${openFn}('${_escHtml(d.uri || d.path || '')}')">
+        <span>${_escHtml(d.path || d.uri || '')}</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          ${d.language ? '<span style="color:var(--text-dim);font-size:0.45rem;background:rgba(0,0,0,0.2);padding:1px 6px;border-radius:3px;">' + _escHtml(d.language) + '</span>' : ''}
+          ${d.chunk_count ? '<span style="color:var(--text-dim);font-size:0.5rem;">' + d.chunk_count + ' chunks</span>' : ''}
+        </div>
+      </div>`).join('')}
+    </div>`;
+}
+
+async function _ctxEnsureProjectsLoaded() {
+  if (_ctxProjects && _ctxProjects.length) return;
+  try {
+    const res = await fetch('/api/context/repos');
+    if (!res.ok) return;
+    const data = await res.json();
+    _ctxProjects = data.repos || data || [];
+  } catch (e) { /* no-op */ }
 }
 
 // ── File list renderer ────────────────────────────────────────────────────────

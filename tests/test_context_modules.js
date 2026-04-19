@@ -533,6 +533,7 @@ test('_renderAstNoSearchResults keeps typeahead available for recovery', () => {
   astSandbox.astSetSearchQuery('redi');
   astSandbox._renderAstNoSearchResults(area);
   if (!area.innerHTML.includes('No AST nodes match')) throw new Error('No-results message missing');
+  if (!area.innerHTML.includes('Depth filter:')) throw new Error('No-results state lost depth filters');
   if (!area.innerHTML.includes('list="ast-view-search-options"')) throw new Error('No-results state lost typeahead search input');
   if (!area.innerHTML.includes('onclick="astClearSearchQuery()"')) throw new Error('No-results state lost clear search action');
   astSandbox.astClearSearchQuery();

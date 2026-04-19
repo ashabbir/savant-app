@@ -110,19 +110,28 @@
   .ctx-proj-sidebar { width:240px; min-width:200px; border-right:1px solid var(--border); overflow-y:auto; background:rgba(0,0,0,0.15); flex-shrink:0; }
   .ctx-proj-detail { flex:1; overflow-y:auto; padding:0; background:rgba(0,0,0,0.05); }
 
+  .ctx-project-explorer { height:100%; display:flex; flex-direction:column; }
+  .ctx-project-explorer-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 8px 6px; border-bottom:1px solid rgba(255,255,255,0.06); }
+  .ctx-project-explorer-title { font-family:var(--font-mono); font-size:0.54rem; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-dim); font-weight:700; }
+  .ctx-project-explorer-toggle { border:1px solid var(--border); background:rgba(34,211,238,0.08); color:var(--cyan); border-radius:5px; width:22px; height:22px; font-family:var(--font-mono); font-size:0.7rem; cursor:pointer; line-height:1; }
+  .ctx-project-explorer-search { padding:8px; border-bottom:1px solid rgba(255,255,255,0.04); }
+  .ctx-project-explorer-search input { width:100%; box-sizing:border-box; background:var(--bg-main); border:1px solid var(--border); border-radius:5px; color:var(--text); padding:6px 8px; font-family:var(--font-mono); font-size:0.56rem; }
+  .ctx-project-explorer-list { overflow-y:auto; flex:1; }
+
   /* Left sidebar items */
-  .ctx-proj-row { padding:10px 14px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.04); transition:background 0.15s; }
+  .ctx-proj-row { position:relative; display:flex; align-items:stretch; gap:0; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.04); transition:background 0.15s; }
   .ctx-proj-row:hover { background:rgba(34,211,238,0.06); }
-  .ctx-proj-row.active { background:rgba(34,211,238,0.1); border-left:3px solid var(--cyan); }
+  .ctx-proj-row.active { background:rgba(34,211,238,0.1); }
+  .ctx-proj-status-line { width:3px; flex-shrink:0; background:rgba(255,255,255,0.1); }
+  .ctx-proj-status-line.green { background:#22c55e; }
+  .ctx-proj-status-line.orange { background:#f59e0b; }
+  .ctx-proj-status-line.red { background:#ef4444; }
+  .ctx-proj-row-main { padding:9px 10px 9px 11px; min-width:0; flex:1; }
   .ctx-proj-row-name { font-family:var(--font-mono); font-size:0.62rem; color:var(--text); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .ctx-proj-row-meta { font-family:var(--font-mono); font-size:0.48rem; color:var(--text-dim); margin-top:3px; display:flex; align-items:center; gap:6px; }
-  .ctx-proj-row-dot { width:6px; height:6px; border-radius:50%; display:inline-block; flex-shrink:0; }
-  .ctx-proj-row-dot.indexed { background:#22c55e; }
-  .ctx-proj-row-dot.indexing { background:#f59e0b; animation:pulse 1s infinite; }
-  .ctx-proj-row-dot.added { background:#94a3b8; }
-  .ctx-proj-row-dot.error { background:#ef4444; }
-  .ctx-proj-row-dot.cancelled { background:#f59e0b; }
-  .ctx-proj-row-dot.stalled { background:#fb7185; animation:pulse-red 1.5s ease-in-out infinite; }
+  .ctx-proj-row-meta { font-family:var(--font-mono); font-size:0.48rem; color:var(--text-dim); margin-top:4px; display:flex; align-items:center; gap:6px; }
+  .ctx-mini-flag { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:3px; font-size:0.45rem; font-weight:700; border:1px solid var(--border); color:var(--text-dim); background:rgba(255,255,255,0.04); }
+  .ctx-mini-flag.on { color:#22c55e; border-color:rgba(34,197,94,0.4); background:rgba(34,197,94,0.12); }
+  .ctx-mini-flag.off { color:#94a3b8; border-color:rgba(148,163,184,0.35); }
 
   /* Detail pane sections */
   .ctx-det-header { padding:20px 24px 16px; border-bottom:1px solid var(--border); }
@@ -6535,7 +6544,6 @@ function showLoadingScreen(cb) { if (cb) cb(); }
             <div style="font-size:0.6rem;">No projects yet</div>
           </div>
         </div>
-        <button id="ctx-projects-toggle" onclick="ctxToggleProjectsPanel()" title="Collapse project selector" style="width:26px;min-width:26px;border:none;border-right:1px solid var(--border);background:rgba(34,211,238,0.08);color:var(--cyan);font-family:var(--font-mono);font-size:0.8rem;cursor:pointer;display:flex;align-items:center;justify-content:center;">‹</button>
         <!-- Right: detail pane -->
         <div class="ctx-proj-detail" id="ctx-proj-detail">
           <div class="ctx-welcome" style="padding:60px 20px;">
@@ -6976,9 +6984,9 @@ function showLoadingScreen(cb) { if (cb) cb(); }
 <script src="/static/js/mcp-tab.js"></script>
 <script src="/static/js/knowledge.js"></script>
 <script src="/static/js/abilities.js"></script>
-<script src="/static/js/context-core.js?v=3"></script>
+<script src="/static/js/context-core.js?v=4"></script>
 <script src="/static/js/context-complexity.js?v=5"></script>
-<script src="/static/js/context-ast.js?v=6"></script>
+<script src="/static/js/context-ast.js?v=7"></script>
 <script src="/static/js/context-tab.js?v=2"></script>
 <script src="/static/js/workspace-mcp.js"></script>
 <script src="/static/js/dev-log.js"></script>
