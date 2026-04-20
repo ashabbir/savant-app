@@ -618,14 +618,9 @@ class Indexer:
                     errors += 1
 
             _set_status(repo_name, status="indexed", phase="Complete", progress=100)
-            # Persist final status so the project reflects AST availability after
-            # the live status dict is cleared (30s cleanup below).
-            current_repo = ContextDB.get_repo(repo_name)
-            if current_repo:
-                current_db_status = current_repo.get("status", "added")
-                # Keep "indexed" if already indexed; upgrade "added"/"error" → "ast_only"
-                if current_db_status not in ("indexed",):
-                    ContextDB.update_repo_status(repo_name, "ast_only")
+            # Persist AST-generated marker so UI can distinguish explicit AST generation
+            # from regular indexing-only status once live status is cleared.
+            ContextDB.update_repo_status(repo_name, "ast_only")
             return {"repo_name": repo_name, "files_processed": files_indexed, "errors": errors}
 
         except _CancelledError:

@@ -16,6 +16,7 @@ let _ctxCodeSelectedProject = null;
 let _ctxCodeProjects = [];
 let _ctxCodeItems = [];
 let _ctxFileCardCache = {}; // uri → {expanded, content, language}
+const _CTX_REFRESH_STATE_KEY = 'savant.ctx.refreshState.v1';
 // _ctxProjects is declared in globals.js
 
 // ── MCP connection ────────────────────────────────────────────────────────────
@@ -27,10 +28,14 @@ async function ctxMcpTestConnection() {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 async function ctxInit() {
+  const pendingRefreshState = _ctxReadRefreshState();
   if (!_ctxInited) {
     _ctxInited = true;
     ctxMcpTestConnection();
     await ctxRefreshStatus();
+  }
+  if (pendingRefreshState && pendingRefreshState.ctx) {
+    _ctxApplyRefreshStateSeed(pendingRefreshState.ctx);
   }
   await ctxLoadProjects();
   if (_ctxPollingTimer && Object.keys(_ctxLastIndexStatus).length) {
@@ -39,6 +44,80 @@ async function ctxInit() {
   if (_ctxProjects.some(p => p.status === 'indexing') && !_ctxPollingTimer) {
     ctxStartPolling();
   }
+  if (pendingRefreshState && pendingRefreshState.ctx) {
+    await _ctxRestoreRefreshState(pendingRefreshState.ctx);
+  }
+}
+
+function _ctxGetActivePanel() {
+  const active = document.querySelector('.ctx-inner-tabs .savant-subtab.active');
+  return active ? (active.getAttribute('data-panel') || 'search') : 'search';
+}
+
+function _ctxCaptureRefreshState() {
+  const searchInput = document.getElementById('ctx-search-input');
+  const searchMode = document.getElementById('ctx-search-mode');
+  const searchRepo = document.getElementById('ctx-search-repo');
+  const astState = (typeof window.ctxAstGetViewState === 'function') ? window.ctxAstGetViewState() : null;
+  return {
+    savedAt: Date.now(),
+    ctx: {
+      panel: _ctxGetActivePanel(),
+      selectedProject: _ctxSelectedProject,
+      memorySelectedProject: _ctxMemorySelectedProject,
+      codeSelectedProject: _ctxCodeSelectedProject,
+      projectExplorerState: _ctxProjectExplorerState,
+      searchInput: searchInput ? searchInput.value : '',
+      searchMode: searchMode ? searchMode.value : 'all',
+      searchRepo: searchRepo ? searchRepo.value : '',
+      ast: astState,
+    },
+  };
+}
+
+function _ctxReadRefreshState() {
+  try {
+    const raw = sessionStorage.getItem(_CTX_REFRESH_STATE_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(_CTX_REFRESH_STATE_KEY);
+    return JSON.parse(raw);
+  } catch {
+    sessionStorage.removeItem(_CTX_REFRESH_STATE_KEY);
+    return null;
+  }
+}
+
+function _ctxApplyRefreshStateSeed(state) {
+  if (typeof state.selectedProject === 'string') _ctxSelectedProject = state.selectedProject;
+  if (typeof state.memorySelectedProject === 'string') _ctxMemorySelectedProject = state.memorySelectedProject;
+  if (typeof state.codeSelectedProject === 'string') _ctxCodeSelectedProject = state.codeSelectedProject;
+  if (state.projectExplorerState && typeof state.projectExplorerState === 'object') {
+    _ctxProjectExplorerState = state.projectExplorerState;
+  }
+  if (state.ast && typeof window.ctxAstRestoreViewState === 'function') {
+    window.ctxAstRestoreViewState(state.ast);
+  }
+}
+
+async function _ctxRestoreRefreshState(state) {
+  const panel = ['search', 'memory', 'code', 'ast'].includes(state.panel) ? state.panel : 'search';
+  switchCtxPanel(panel);
+  const searchInput = document.getElementById('ctx-search-input');
+  const searchMode = document.getElementById('ctx-search-mode');
+  const searchRepo = document.getElementById('ctx-search-repo');
+  if (searchInput && typeof state.searchInput === 'string') searchInput.value = state.searchInput;
+  if (searchMode && typeof state.searchMode === 'string') searchMode.value = state.searchMode;
+  if (searchRepo && typeof state.searchRepo === 'string') searchRepo.value = state.searchRepo;
+}
+
+function ctxRefreshPagePreserveState() {
+  try {
+    const state = _ctxCaptureRefreshState();
+    sessionStorage.setItem(_CTX_REFRESH_STATE_KEY, JSON.stringify(state));
+  } catch (e) {
+    // no-op; fall through to plain reload if storage unavailable
+  }
+  window.location.reload();
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────────
@@ -90,12 +169,11 @@ function switchCtxPanel(panel, btnElement) {
     }
   });
 
-  ['search', 'projects', 'memory', 'code', 'ast'].forEach(p => {
+  ['search', 'memory', 'code', 'ast'].forEach(p => {
     const el = document.getElementById('ctx-panel-' + p);
     if (el) el.style.display = p === panel ? 'block' : 'none';
   });
 
-  if (panel === 'projects') ctxLoadProjects();
   if (panel === 'memory')   ctxLoadMemory();
   if (panel === 'code')     ctxLoadCode();
   if (panel === 'ast')      ctxLoadAst();
@@ -124,6 +202,9 @@ async function ctxLoadProjects() {
     ctxRenderProjects();
     ctxPopulateRepoFilter();
     ctxRefreshStatus();
+    if (typeof window.ctxHandleProjectsUpdate === 'function') {
+      window.ctxHandleProjectsUpdate();
+    }
   } catch (e) {
     showToast('error', 'Failed to load projects: ' + e.message);
   }
@@ -166,6 +247,16 @@ function ctxRenderProjectSidebar(containerId, projects, selectedName, onSelectFn
 function ctxRenderProjectExplorer(containerId, projects, selectedName, onSelectFn, options = {}) {
   const sidebar = document.getElementById(containerId);
   if (!sidebar) return false;
+  const activeEl = document.activeElement;
+  const wasSearchFocused = !!(
+    activeEl &&
+    activeEl.tagName === 'INPUT' &&
+    activeEl.closest &&
+    activeEl.closest('.ctx-project-explorer-search') &&
+    sidebar.contains(activeEl)
+  );
+  const searchSelStart = wasSearchFocused && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
+  const searchSelEnd = wasSearchFocused && typeof activeEl.selectionEnd === 'number' ? activeEl.selectionEnd : null;
   const state = _ctxProjectExplorerState[containerId] || { query: '', collapsed: false };
   _ctxProjectExplorerState[containerId] = state;
   _ctxProjectExplorerRegistry[containerId] = { projects, selectedName, onSelectFn, options };
@@ -173,8 +264,20 @@ function ctxRenderProjectExplorer(containerId, projects, selectedName, onSelectF
   const filtered = query
     ? projects.filter(p => ((p.name || '') + ' ' + (p.path || '')).toLowerCase().includes(query))
     : projects;
-  const headTitle = options.title || 'Project Explorer';
+  const headTitle = Object.prototype.hasOwnProperty.call(options, 'title')
+    ? (options.title || '')
+    : '';
+  const collapsedLabel = Object.prototype.hasOwnProperty.call(options, 'collapsedLabel')
+    ? (options.collapsedLabel || '')
+    : headTitle;
+  const showTitle = options.showTitle !== false && !!headTitle;
   const searchPlaceholder = options.searchPlaceholder || 'Search projects...';
+  const addProjectBtn = options.showAddProject !== false
+    ? '<button class="ctx-btn ctx-btn-primary ctx-project-explorer-add" onclick="ctxAddProject()" title="Add project">+</button>'
+    : '';
+  const refreshBtn = options.showRefresh !== false
+    ? '<button class="ctx-btn ctx-project-explorer-refresh" onclick="ctxRefreshPagePreserveState()" title="Refresh page">↻</button>'
+    : '';
   const bodyHtml = !filtered.length
     ? `<div class="ctx-welcome" style="padding:20px 10px;font-size:0.58rem;">${query ? 'No projects match search' : 'No projects yet'}</div>`
     : filtered.map(p => _ctxRenderProjectExplorerRow(p, selectedName, onSelectFn, options.indexStatus || {})).join('');
@@ -182,23 +285,38 @@ function ctxRenderProjectExplorer(containerId, projects, selectedName, onSelectF
   if (state.collapsed) {
     sidebar.innerHTML = `
       <div class="ctx-project-explorer collapsed">
-        <div class="ctx-explorer-collapsed-bar" onclick="ctxToggleProjectExplorer('${_ctxJsString(containerId)}')" title="Expand ${_escHtml(headTitle)}">
+        <div class="ctx-explorer-collapsed-bar" onclick="ctxToggleProjectExplorer('${_ctxJsString(containerId)}')" title="Expand">
           <span class="ctx-explorer-collapsed-icon">›</span>
-          <span class="ctx-explorer-collapsed-label">${_escHtml(headTitle)}</span>
+          ${collapsedLabel ? `<span class="ctx-explorer-collapsed-label">${_escHtml(collapsedLabel)}</span>` : ''}
         </div>
       </div>`;
   } else {
     sidebar.innerHTML = `
       <div class="ctx-project-explorer">
         <div class="ctx-project-explorer-head">
-          <div class="ctx-project-explorer-title">${_escHtml(headTitle)}</div>
-          <button class="ctx-project-explorer-toggle" onclick="ctxToggleProjectExplorer('${_ctxJsString(containerId)}')" title="Collapse project explorer">‹</button>
+          <div class="ctx-project-explorer-head-left">
+            ${showTitle ? `<div class="ctx-project-explorer-title">${_escHtml(headTitle)}</div>` : ''}
+            ${addProjectBtn}
+            ${refreshBtn}
+          </div>
+          <div class="ctx-project-explorer-head-right">
+            <button class="ctx-project-explorer-toggle" onclick="ctxToggleProjectExplorer('${_ctxJsString(containerId)}')" title="Collapse project explorer">‹</button>
+          </div>
         </div>
         <div class="ctx-project-explorer-search">
           <input type="text" value="${_escHtml(state.query || '')}" placeholder="${_escHtml(searchPlaceholder)}" oninput="ctxProjectExplorerSearch('${_ctxJsString(containerId)}', this.value)">
         </div>
         <div class="ctx-project-explorer-list">${bodyHtml}</div>
       </div>`;
+  }
+  if (!state.collapsed && wasSearchFocused) {
+    const nextSearchInput = sidebar.querySelector('.ctx-project-explorer-search input');
+    if (nextSearchInput) {
+      nextSearchInput.focus({ preventScroll: true });
+      if (searchSelStart != null && searchSelEnd != null && nextSearchInput.setSelectionRange) {
+        nextSearchInput.setSelectionRange(searchSelStart, searchSelEnd);
+      }
+    }
   }
   ctxSyncProjectExplorerLayout(containerId);
   return filtered.length > 0;
@@ -279,15 +397,18 @@ function _ctxJsString(value) {
     .replace(/</g, '\\x3c');
 }
 
-function _ctxRenderDetail(indexStatus) {
-  const detail = document.getElementById('ctx-proj-detail');
-  if (!detail) return;
-  const p = _ctxProjects.find(pr => pr.name === _ctxSelectedProject);
-  if (!p) return;
-
-  const live       = indexStatus[p.name] || {};
+function ctxRenderProjectOverview(detailEl, project, indexStatus = {}, options = {}) {
+  if (!detailEl || !project) return;
+  const actionsOnlyHeader = !!options.actionsOnlyHeader;
+  const hideStatusText = !!options.hideStatusText;
+  const hideProgressText = !!options.hideProgressText;
+  const hideAstStatusText = !!options.hideAstStatusText;
+  const complexityNodes = options.complexityNodes || [];
+  const analysis = options.analysis || null;
+  const p = project;
+  const live = indexStatus[p.name] || {};
   const liveStatus = (live.status || p.status || 'ready').toString().toLowerCase();
-  const phase      = (live.phase || '').toString();
+  const phase = (live.phase || '').toString();
   const isAstPhase = live.job_type === 'ast';
   const statusCls  = liveStatus === 'indexing'  ? 'indexing'
                    : liveStatus === 'indexed'   ? 'ready'
@@ -306,7 +427,6 @@ function _ctxRenderDetail(indexStatus) {
     <button class="ctx-btn-sm" onclick="ctxIndexProject('${_escHtml(p.name)}')">⚡ Index</button>
     <button class="ctx-btn-sm" onclick="ctxReindexProject('${_escHtml(p.name)}')">🔄 Re-index</button>
     <button class="ctx-btn-sm" onclick="ctxGenerateAstProject('${_escHtml(p.name)}')">🌳 AST</button>
-    <button class="ctx-btn-sm" onclick="ctxReadProjectAst('${_escHtml(p.name)}')">👁 View AST</button>
     <button class="ctx-btn-sm" onclick="ctxPurgeProject('${_escHtml(p.name)}')">🗑 Purge</button>
     <button class="ctx-btn-sm" onclick="ctxDeleteProject('${_escHtml(p.name)}')">✕ Delete</button>`;
 
@@ -315,32 +435,46 @@ function _ctxRenderDetail(indexStatus) {
   }
 
   const codeFiles = p.file_count || 0;
-  const memBank   = p.memory_count || 0;
-
-  // Progress bars — separate index vs AST progress
+  const memBank = p.memory_count || 0;
   let progressHtml = '';
   if (live.status === 'indexing' && live.progress != null) {
     const pct = Math.min(100, Math.round(live.progress || 0));
     if (isAstPhase) {
-      progressHtml = `<div class="ctx-det-section">
-        <div class="ctx-det-section-title">AST Progress</div>
-        <div class="ctx-progress-phase ast">${_escHtml(phase)}</div>
-        <div class="ctx-progress-bar">
-          <div class="ctx-progress-fill ast" style="width:${pct}%"></div>
-        </div>
-        <div class="ctx-progress-label">${pct}% complete${live.files_done != null ? ' · ' + live.files_done + (live.total ? '/' + live.total : '') + ' files' : ''}</div>
-        ${live.current_file ? `<div class="ctx-progress-label" style="margin-top:2px;opacity:0.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_escHtml(live.current_file)}">${_escHtml(live.current_file.split('/').slice(-2).join('/'))}</div>` : ''}
-      </div>`;
+      if (hideProgressText) {
+        progressHtml = `<div class="ctx-det-section">
+          <div class="ctx-progress-bar">
+            <div class="ctx-progress-fill ast" style="width:${pct}%"></div>
+          </div>
+        </div>`;
+      } else {
+        progressHtml = `<div class="ctx-det-section">
+          <div class="ctx-det-section-title">AST Progress</div>
+          <div class="ctx-progress-phase ast">${_escHtml(phase)}</div>
+          <div class="ctx-progress-bar">
+            <div class="ctx-progress-fill ast" style="width:${pct}%"></div>
+          </div>
+          <div class="ctx-progress-label">${pct}% complete${live.files_done != null ? ' · ' + live.files_done + (live.total ? '/' + live.total : '') + ' files' : ''}</div>
+          ${live.current_file ? `<div class="ctx-progress-label" style="margin-top:2px;opacity:0.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_escHtml(live.current_file)}">${_escHtml(live.current_file.split('/').slice(-2).join('/'))}</div>` : ''}
+        </div>`;
+      }
     } else {
-      progressHtml = `<div class="ctx-det-section">
-        <div class="ctx-det-section-title">Index Progress</div>
-        <div class="ctx-progress-phase">${_escHtml(phase)}</div>
-        <div class="ctx-progress-bar">
-          <div class="ctx-progress-fill" style="width:${pct}%"></div>
-        </div>
-        <div class="ctx-progress-label">${pct}% complete${live.files_done != null ? ' · ' + live.files_done + (live.total ? '/' + live.total : '') + ' files' : ''}</div>
-        ${live.current_file ? `<div class="ctx-progress-label" style="margin-top:2px;opacity:0.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_escHtml(live.current_file)}">${_escHtml(live.current_file.split('/').slice(-2).join('/'))}</div>` : ''}
-      </div>`;
+      if (hideProgressText) {
+        progressHtml = `<div class="ctx-det-section">
+          <div class="ctx-progress-bar">
+            <div class="ctx-progress-fill" style="width:${pct}%"></div>
+          </div>
+        </div>`;
+      } else {
+        progressHtml = `<div class="ctx-det-section">
+          <div class="ctx-det-section-title">Index Progress</div>
+          <div class="ctx-progress-phase">${_escHtml(phase)}</div>
+          <div class="ctx-progress-bar">
+            <div class="ctx-progress-fill" style="width:${pct}%"></div>
+          </div>
+          <div class="ctx-progress-label">${pct}% complete${live.files_done != null ? ' · ' + live.files_done + (live.total ? '/' + live.total : '') + ' files' : ''}</div>
+          ${live.current_file ? `<div class="ctx-progress-label" style="margin-top:2px;opacity:0.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_escHtml(live.current_file)}">${_escHtml(live.current_file.split('/').slice(-2).join('/'))}</div>` : ''}
+        </div>`;
+      }
     }
   }
 
@@ -367,29 +501,135 @@ function _ctxRenderDetail(indexStatus) {
   }
 
   const astStatus = p.ast_node_count > 0 ? 'ready' : (liveStatus === 'indexing' && isAstPhase ? 'indexing' : 'added');
-  const astLabel  = p.ast_node_count > 0 ? 'Generated' : (liveStatus === 'indexing' && isAstPhase ? 'Generating…' : 'Not generated');
+  const statusFailed = liveStatus === 'error' || liveStatus === 'failed' || liveStatus === 'stalled';
+  const astGenerated = liveStatus === 'ast_only' || p.status === 'ast_only';
+  const indexTone = statusFailed
+    ? 'red'
+    : (liveStatus === 'indexing' && !isAstPhase)
+      ? 'orange'
+      : ((p.chunk_count || 0) > 0 || p.indexed_at)
+        ? 'green'
+        : 'grey';
+  const astTone = statusFailed
+    ? 'red'
+    : (liveStatus === 'indexing' && isAstPhase)
+      ? 'orange'
+      : astGenerated
+        ? 'green'
+        : 'grey';
+  const indexLabel = statusFailed
+    ? 'Failed'
+    : (liveStatus === 'indexing' && !isAstPhase)
+      ? 'Generating Index'
+      : ((p.chunk_count || 0) > 0 || p.indexed_at)
+        ? 'Indexed'
+        : 'Not Indexed';
+  const astLabel = statusFailed
+    ? 'Failed'
+    : (liveStatus === 'indexing' && isAstPhase)
+      ? 'Generating AST'
+      : astGenerated
+        ? 'Generated'
+        : 'Not Generated';
+  const toneColor = tone => tone === 'green'
+    ? '#22c55e'
+    : tone === 'orange'
+      ? '#f59e0b'
+      : tone === 'red'
+        ? '#ef4444'
+        : '#94a3b8';
+  const statusChip = (tone, label) => `<span title="${_escHtml(label)}" style="display:inline-flex;align-items:center;gap:6px;">
+      <span style="
+        display:inline-flex;
+        width:10px;
+        height:10px;
+        border-radius:999px;
+        border:1px solid ${toneColor(tone)};
+        background:${toneColor(tone)};
+        box-shadow:0 0 6px ${toneColor(tone)}55;
+        vertical-align:middle;
+      "></span>
+      <span style="font-size:0.44rem;color:var(--text-dim);font-family:var(--font-mono);">${_escHtml(label)}</span>
+    </span>`;
 
-  detail.innerHTML = `
-    <div class="ctx-det-header">
+  const headerHtml = actionsOnlyHeader
+    ? ''
+    : `<div class="ctx-det-header">
       <div class="ctx-det-title">
         ${_escHtml(p.name)}
-        <span class="ctx-project-status ${statusCls}">${_escHtml(statusLabel)}</span>
+        ${hideStatusText ? '' : `<span class="ctx-project-status ${statusCls}">${_escHtml(statusLabel)}</span>`}
       </div>
       <div class="ctx-det-path">${_escHtml(p.path || '')}</div>
       <div class="ctx-det-actions">${actionBtns}</div>
-    </div>
+    </div>`;
+  const overviewActionsHtml = actionsOnlyHeader
+    ? `<div class="ctx-det-actions" style="margin-top:12px;">${actionBtns}</div>`
+    : '';
+  let complexitySummaryHtml = '';
+  if (actionsOnlyHeader) {
+    const compute = (typeof window !== 'undefined' && typeof window._computeAstComplexity === 'function')
+      ? window._computeAstComplexity
+      : null;
+    if (compute && Array.isArray(complexityNodes) && complexityNodes.length) {
+      const files = compute(complexityNodes);
+      const totalFns = files.reduce((s, f) => s + (f.functions ? f.functions.length : 0), 0);
+      const totalScore = files.reduce((s, f) => s + (f.total_complexity || 0), 0);
+      const avgFile = files.length ? Math.round(totalScore / files.length) : 0;
+      const highRisk = files.filter(f => (f.total_complexity || 0) > 20).length;
+      const avgColor = avgFile <= 5 ? '#4ade80' : avgFile <= 10 ? '#facc15' : avgFile <= 20 ? '#fb923c' : '#f87171';
+      const riskColor = highRisk > 0 ? '#f87171' : '#4ade80';
+      const card = (value, labelTop, labelBottom, color) => `
+        <div class="ctx-det-stat">
+          <div class="ctx-det-stat-val" style="color:${color};">${value}</div>
+          <div class="ctx-det-stat-label">${labelTop} ${labelBottom}</div>
+        </div>`;
+      complexitySummaryHtml = `
+        <div style="margin-top:12px;">
+          <div style="font-family:var(--font-mono);font-size:0.48rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:8px;">Complexity</div>
+          <div style="display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:8px;">
+            ${card(files.length, 'Files', 'Analyzed', 'var(--cyan)')}
+            ${card(totalFns, 'Functions', 'Classes', 'var(--cyan)')}
+            ${card(avgFile, 'Avg File', 'Score', avgColor)}
+            ${card(highRisk, 'High-Risk', 'Files', riskColor)}
+          </div>
+        </div>`;
+    }
+  }
+  const analysisSummaryHtml = analysis && analysis.summary
+    ? `<div style="margin-top:12px;">
+        <div style="font-family:var(--font-mono);font-size:0.48rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:8px;">Analysis</div>
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(110px,1fr));gap:8px;">
+          <div class="ctx-det-stat"><div class="ctx-det-stat-val">${analysis.summary.totalFindings || 0}</div><div class="ctx-det-stat-label">Total Findings</div></div>
+          <div class="ctx-det-stat"><div class="ctx-det-stat-val">${(analysis.summary.by_category && analysis.summary.by_category.structural) || 0}</div><div class="ctx-det-stat-label">Structural</div></div>
+          <div class="ctx-det-stat"><div class="ctx-det-stat-val">${(analysis.summary.by_category && analysis.summary.by_category.security) || 0}</div><div class="ctx-det-stat-label">Security</div></div>
+          <div class="ctx-det-stat"><div class="ctx-det-stat-val">${(analysis.summary.by_category && analysis.summary.by_category.modernization) || 0}</div><div class="ctx-det-stat-label">Modernization</div></div>
+          <div class="ctx-det-stat"><div class="ctx-det-stat-val">${(analysis.summary.by_category && analysis.summary.by_category.dead_code) || 0}</div><div class="ctx-det-stat-label">Dead Code</div></div>
+        </div>
+      </div>`
+    : '';
+
+  detailEl.innerHTML = `
+    ${headerHtml}
     <div class="ctx-det-section">
       <div class="ctx-det-section-title">Overview</div>
       <div class="ctx-det-grid">
         <div class="ctx-det-stat"><div class="ctx-det-stat-val">${codeFiles}</div><div class="ctx-det-stat-label">Total Files</div></div>
         <div class="ctx-det-stat"><div class="ctx-det-stat-val">${memBank}</div><div class="ctx-det-stat-label">Memory Bank</div></div>
-        <div class="ctx-det-stat"><div class="ctx-det-stat-val">${p.chunk_count || 0}</div><div class="ctx-det-stat-label">Index Chunks</div></div>
+        <div class="ctx-det-stat" title="Index status: ${_escHtml(indexLabel)}">
+          <div class="ctx-det-stat-val">${p.chunk_count || 0}</div>
+          <div class="ctx-det-stat-label">Index Chunks</div>
+          <div style="margin-top:3px;">${statusChip(indexTone, indexLabel)}</div>
+        </div>
         <div class="ctx-det-stat" title="AST status: ${_escHtml(astLabel)}">
           <div class="ctx-det-stat-val">${p.ast_node_count || 0}</div>
           <div class="ctx-det-stat-label">AST Nodes</div>
-          <div style="margin-top:3px;"><span class="ctx-project-status ${astStatus}" style="font-size:0.42rem;padding:1px 5px;">${_escHtml(astLabel)}</span></div>
+          <div style="margin-top:3px;">${statusChip(astTone, astLabel)}</div>
+          ${hideAstStatusText ? '' : `<div style="margin-top:3px;"><span class="ctx-project-status ${astStatus}" style="font-size:0.42rem;padding:1px 5px;">${_escHtml(astLabel)}</span></div>`}
         </div>
       </div>
+      ${complexitySummaryHtml}
+      ${analysisSummaryHtml}
+      ${overviewActionsHtml}
     </div>
     ${progressHtml}
     ${langHtml}
@@ -401,6 +641,14 @@ function _ctxRenderDetail(indexStatus) {
       </div>
     </div>` : ''}
   `;
+}
+
+function _ctxRenderDetail(indexStatus) {
+  const detail = document.getElementById('ctx-proj-detail');
+  if (!detail) return;
+  const p = _ctxProjects.find(pr => pr.name === _ctxSelectedProject);
+  if (!p) return;
+  ctxRenderProjectOverview(detail, p, indexStatus);
 }
 
 // ── Project CRUD ──────────────────────────────────────────────────────────────
@@ -553,6 +801,9 @@ function ctxStartPolling() {
       const status = await res.json();
       _ctxLastIndexStatus = status;
       ctxRenderProjectsWithProgress(status);
+      if (typeof window.ctxHandleIndexStatusUpdate === 'function') {
+        window.ctxHandleIndexStatusUpdate(status);
+      }
       const anyIndexing = Object.values(status).some(s => s.status === 'indexing');
       if (!anyIndexing) {
         clearInterval(_ctxPollingTimer);

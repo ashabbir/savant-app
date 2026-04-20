@@ -24,7 +24,10 @@ let passed = 0, failed = 0;
 
 function test(name, fn) {
   try {
-    fn();
+    const result = fn();
+    if (result && typeof result.then === 'function') {
+      throw new Error('Async tests are not supported in this harness');
+    }
     console.log(`  ✓  ${name}`);
     passed++;
   } catch (e) {
@@ -80,6 +83,7 @@ function makeSandbox(extras = {}) {
     closeModal:  () => {},
     innerHeight: 800,
     innerWidth:  1200,
+    location: { reload: () => {} },
   };
 
   return Object.assign({
@@ -88,6 +92,7 @@ function makeSandbox(extras = {}) {
     window:   win,
     // Storage
     localStorage: { getItem: () => null, setItem: () => {} },
+    sessionStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     // Timers
     setTimeout:    (fn) => 0,
     clearTimeout:  () => {},
@@ -202,6 +207,7 @@ const CORE_FUNCTIONS = [
   '_ctxRenderFileList',
   '_ctxRenderDetail',
   '_escHtml',
+  'ctxRefreshPagePreserveState',
 ];
 
 CORE_FUNCTIONS.forEach(fnName => {
@@ -269,6 +275,104 @@ test('ctxCloseAddModal does not throw when element missing', () => {
   coreSandbox.ctxCloseAddModal();
 });
 
+test('ctxRefreshPagePreserveState stores state and reloads page', () => {
+  let storageKey = null;
+  let storageValue = null;
+  let reloaded = false;
+  const activeTab = {
+    getAttribute: (name) => (name === 'data-panel' ? 'ast' : null),
+  };
+  const elById = {
+    'ctx-search-input': { value: 'redis client' },
+    'ctx-search-mode': { value: 'all' },
+    'ctx-search-repo': { value: 'my-repo' },
+  };
+  const sb = makeSandbox({
+    document: {
+      getElementById: (id) => elById[id] || { value: '', innerHTML: '', style: {}, classList: { add: () => {}, remove: () => {} } },
+      querySelector: (sel) => (sel === '.ctx-inner-tabs .savant-subtab.active' ? activeTab : null),
+      querySelectorAll: () => [],
+      createElement: () => ({ style: {}, appendChild: () => {} }),
+    },
+    sessionStorage: {
+      getItem: () => null,
+      setItem: (k, v) => { storageKey = k; storageValue = v; },
+      removeItem: () => {},
+    },
+    window: {
+      location: { reload: () => { reloaded = true; } },
+      ctxAstGetViewState: () => ({ viewMode: 'overview', selectedProject: 'my-repo' }),
+    },
+  });
+  loadFile(sb, 'context-core.js');
+  sb.ctxRefreshPagePreserveState();
+  expect(storageKey).toBe('savant.ctx.refreshState.v1');
+  if (!storageValue || !storageValue.includes('"panel":"ast"')) {
+    throw new Error('Expected saved refresh state to include active panel');
+  }
+  expect(reloaded).toBeTruthy();
+});
+
+test('ctxRenderProjectExplorer uses preserve-state refresh action', () => {
+  let html = '';
+  const sidebar = {
+    contains: () => false,
+    style: {},
+    set innerHTML(v) { html = v; },
+    get innerHTML() { return html; },
+    querySelector: () => null,
+  };
+  const sb = makeSandbox({
+    document: {
+      getElementById: (id) => (id === 'ctx-ast-project-panel' ? sidebar : { innerHTML: '', style: {}, classList: { add: () => {}, remove: () => {} } }),
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      createElement: () => ({ style: {}, appendChild: () => {} }),
+    },
+  });
+  loadFile(sb, 'context-core.js');
+  sb.ctxRenderProjectExplorer('ctx-ast-project-panel', [{ name: 'my-repo', status: 'ready' }], 'my-repo', 'ctxReadProjectAst', { indexStatus: {} });
+  if (!html.includes('ctxRefreshPagePreserveState()')) {
+    throw new Error('Expected refresh button to call ctxRefreshPagePreserveState');
+  }
+});
+
+test('ctxRenderProjectOverview renders analysis section when provided', () => {
+  const detail = { innerHTML: '' };
+  const sb = makeSandbox({
+    window: {
+      _computeAstComplexity: () => ([{ functions: [{}, {}], total_complexity: 12 }, { functions: [{}], total_complexity: 8 }]),
+    },
+  });
+  loadFile(sb, 'context-core.js');
+  sb.ctxRenderProjectOverview(detail, {
+    name: 'repo-x',
+    status: 'indexed',
+    path: '/tmp/repo-x',
+    file_count: 10,
+    memory_count: 1,
+    chunk_count: 20,
+    ast_node_count: 5,
+    languages: {},
+  }, {}, {
+    actionsOnlyHeader: true,
+    hideStatusText: true,
+    hideProgressText: true,
+    hideAstStatusText: true,
+    complexityNodes: [{ node_type: 'function', name: 'f', start_line: 1, end_line: 10, path: 'a.py', repo: 'repo-x' }],
+    analysis: {
+      summary: {
+        totalFindings: 3,
+        by_category: { structural: 1, security: 1, modernization: 0, dead_code: 1 },
+      },
+      topFindings: [{ title: 'Deep control nesting', rule_id: 'deep_nesting', path: 'a.py', line: 12, detail: 'Depth 5' }],
+    },
+  });
+  if (!detail.innerHTML.includes('Analysis')) throw new Error('Expected analysis section heading');
+  if (!detail.innerHTML.includes('Total Findings')) throw new Error('Expected total findings card');
+  if (detail.innerHTML.includes('Deep control nesting')) throw new Error('Overview should not render detailed finding rows');
+});
+
 // ── Suite: context-complexity.js exports ─────────────────────────────────────
 
 console.log('\n── context-complexity.js — exported globals ────────────────────────');
@@ -282,6 +386,7 @@ try { loadFile(compSandbox, 'context-complexity.js'); } catch (e) {
 const COMPLEXITY_FUNCTIONS = [
   '_computeAstComplexity',
   '_complexityColor',
+  '_anAnalyzeProjectSource',
   '_renderComplexityHeatmap',
   '_renderComplexityRadial',
   '_updateRadialDetail',
@@ -365,6 +470,67 @@ test('_computeAstComplexity sorts files by total_complexity descending', () => {
   expect(result[0].total_complexity >= result[1].total_complexity).toBeTruthy();
 });
 
+test('_anAnalyzeProjectSource detects structural/security/dead-code signals', () => {
+  const nodes = [
+    { repo: 'r', path: 'app.py', node_type: 'class', name: 'Service', start_line: 1, end_line: 40 },
+    { repo: 'r', path: 'app.py', node_type: 'function', name: 'danger', start_line: 5, end_line: 30 },
+  ];
+  const docs = [{
+    path: 'app.py',
+    language: 'Python',
+    content: `
+API_KEY = "super-secret-key"
+
+def danger(a, b, c, d, e, f):
+    if a:
+        if b:
+            if c:
+                if d:
+                    if e:
+                        eval("print(1)")
+    return True
+    print("unreachable")
+`.trim()
+  }];
+  const out = compSandbox._anAnalyzeProjectSource(nodes, docs);
+  expect(out).toBeTruthy();
+  expect(out.summary.totalFindings > 0).toBeTruthy();
+  if (!out.findings.some(f => f.rule_id === 'hardcoded_secret')) throw new Error('Expected hardcoded secret finding');
+  if (!out.findings.some(f => f.rule_id === 'insecure_call')) throw new Error('Expected insecure call finding');
+  if (!out.findings.some(f => f.rule_id === 'deep_nesting')) throw new Error('Expected deep nesting finding');
+  if (!out.findings.some(f => f.rule_id === 'parameter_overload')) throw new Error('Expected parameter overload finding');
+  if (!out.findings.some(f => f.rule_id === 'unreachable_code')) throw new Error('Expected unreachable code finding');
+});
+
+test('_anAnalyzeProjectSource computes category summary counts', () => {
+  const nodes = [{ repo: 'r', path: 'x.js', node_type: 'function', name: 'x', start_line: 1, end_line: 20 }];
+  const docs = [{ path: 'x.js', language: 'JavaScript', content: 'const PASSWORD = "p@ss";\nfunction x(){ return 1;\nconsole.log(2);\n}\n' }];
+  const out = compSandbox._anAnalyzeProjectSource(nodes, docs);
+  expect(out.summary.by_category).toBeTruthy();
+  if (typeof out.summary.by_category.security !== 'number') throw new Error('Missing security category count');
+  if (typeof out.summary.by_category.dead_code !== 'number') throw new Error('Missing dead_code category count');
+});
+
+test('_cxRenderFileDetail renders per-file analysis findings section', () => {
+  compSandbox.window = compSandbox.window || {};
+  compSandbox.window._ctxCurrentAstAnalysis = {
+    findings: [
+      { path: 'src/a.py', severity: 'high', category: 'security', rule_id: 'hardcoded_secret', title: 'Hardcoded secret', line: 12, detail: 'Literal secret-like value assigned in source.' },
+      { path: 'src/a.py', severity: 'medium', category: 'structural', rule_id: 'deep_nesting', title: 'Deep control nesting', line: 18, detail: 'Detected nesting depth 5 (threshold: 4).' },
+    ],
+  };
+  const container = { innerHTML: '' };
+  const file = {
+    repo: 'r',
+    path: 'src/a.py',
+    total_complexity: 22,
+    functions: [{ node_type: 'function', name: 'x', start_line: 1, end_line: 20, child_count: 2, complexity: 8 }],
+  };
+  compSandbox._cxRenderFileDetail(file, container);
+  if (!container.innerHTML.includes('Analysis Findings')) throw new Error('Expected per-file analysis section');
+  if (!container.innerHTML.includes('Hardcoded secret')) throw new Error('Expected finding title in per-file section');
+});
+
 // ── Suite: context-ast.js exports ────────────────────────────────────────────
 
 console.log('\n── context-ast.js — exported globals ──────────────────────────────');
@@ -391,8 +557,9 @@ const AST_FUNCTIONS = [
   '_renderAstNoSearchResults',
   '_renderAstSearchRecovery',
   '_syncAstSearchRecovery',
+  'ctxAstGetViewState',
+  'ctxAstRestoreViewState',
   '_renderAstInteractiveLegend',
-  '_renderAstSearchToolbar',
   '_renderAstTypeaheadSearch',
   '_astTypeaheadOptions',
   '_astSearchOptionLabel',
@@ -490,6 +657,28 @@ test('_setAstView updates mode without throwing', () => {
   astSandbox._setAstView('tree');
 });
 
+test('ctxAstRestoreViewState + ctxAstGetViewState round-trip AST UI state', () => {
+  astSandbox.ctxAstRestoreViewState({
+    selectedProject: 'repo-x',
+    viewMode: 'cluster',
+    searchQuery: 'redis',
+    searchSelectionKey: 'r::app.py::class::RedisClient::1::20',
+    treeFileLimit: 'all',
+    clusterFileLimit: 500,
+    treeShowLabels: true,
+    projectPanelCollapsed: true,
+  });
+  const state = astSandbox.ctxAstGetViewState();
+  expect(state.selectedProject).toBe('repo-x');
+  expect(state.viewMode).toBe('cluster');
+  expect(state.searchQuery).toBe('redis');
+  expect(state.searchSelectionKey).toBe('r::app.py::class::RedisClient::1::20');
+  expect(state.treeFileLimit).toBe('all');
+  expect(state.clusterFileLimit).toBe(500);
+  expect(state.treeShowLabels).toBeTruthy();
+  expect(state.projectPanelCollapsed).toBeTruthy();
+});
+
 test('_astTypeaheadOptions builds AST node suggestions', () => {
   const nodes = [
     { repo: 'r', path: 'app.py', node_type: 'class', name: 'RedisClient', start_line: 1, end_line: 30 },
@@ -502,11 +691,12 @@ test('_astTypeaheadOptions builds AST node suggestions', () => {
   }
 });
 
-test('_renderAstTypeaheadSearch always renders datalist-backed input', () => {
+test('_renderAstTypeaheadSearch renders interactive dropdown search input', () => {
   const html = astSandbox._renderAstTypeaheadSearch();
-  if (!html.includes('list="ast-view-search-options"')) throw new Error('Search input is missing datalist list attribute');
-  if (!html.includes('<datalist id="ast-view-search-options">')) throw new Error('Search control is missing datalist');
-  if (!html.includes('oninput="astSetSearchQuery(this.value)"')) throw new Error('Search control is missing live typeahead input handler');
+  if (!html.includes('id="ast-view-search"')) throw new Error('Search input is missing');
+  if (!html.includes('_astShowSearchDrop(this)')) throw new Error('Search input is missing dropdown show handler');
+  if (!html.includes('id="ast-search-dropdown"')) throw new Error('Search dropdown container is missing');
+  if (!html.includes('astSetSearchQuery(this.value)')) throw new Error('Search input is missing query update handler');
 });
 
 test('_renderAstSearchRecovery provides header-level clear button', () => {
@@ -515,26 +705,18 @@ test('_renderAstSearchRecovery provides header-level clear button', () => {
   if (!html.includes('onclick="astClearSearchQuery()"')) throw new Error('Header search recovery clear action missing');
 });
 
-test('_renderAstInteractiveLegend keeps search as typeahead', () => {
+test('_renderAstInteractiveLegend keeps interactive search controls', () => {
   const html = astSandbox._renderAstInteractiveLegend('test-cid');
   if (!html.includes('Depth filter:')) throw new Error('Legend missing depth filter controls');
-  if (!html.includes('list="ast-view-search-options"')) throw new Error('Legend search is not datalist-backed');
-  if (!html.includes('<datalist id="ast-view-search-options">')) throw new Error('Legend search missing datalist');
+  if (!html.includes("window._astLegClick('test-cid', 'repo')")) throw new Error('Legend click handler missing');
 });
 
-test('_renderAstSearchToolbar keeps search as typeahead', () => {
-  const html = astSandbox._renderAstSearchToolbar();
-  if (!html.includes('list="ast-view-search-options"')) throw new Error('Toolbar search is not datalist-backed');
-  if (!html.includes('<datalist id="ast-view-search-options">')) throw new Error('Toolbar search missing datalist');
-});
-
-test('_renderAstNoSearchResults keeps typeahead available for recovery', () => {
+test('_renderAstNoSearchResults keeps search available for recovery', () => {
   const area = { innerHTML: '' };
   astSandbox.astSetSearchQuery('redi');
   astSandbox._renderAstNoSearchResults(area);
   if (!area.innerHTML.includes('No AST nodes match')) throw new Error('No-results message missing');
   if (!area.innerHTML.includes('Depth filter:')) throw new Error('No-results state lost depth filters');
-  if (!area.innerHTML.includes('list="ast-view-search-options"')) throw new Error('No-results state lost typeahead search input');
   if (!area.innerHTML.includes('onclick="astClearSearchQuery()"')) throw new Error('No-results state lost clear search action');
   astSandbox.astClearSearchQuery();
 });

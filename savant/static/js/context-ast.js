@@ -5,7 +5,7 @@
 //             D3.js (d3)
 
 // State shared with complexity module
-let _astViewMode    = 'tree';  // 'tree' | 'complexity' | 'radial'
+let _astViewMode    = 'overview';  // 'overview' | 'complexity' | 'tree' | 'radial' | 'cluster'
 let _astCurrentNodes = null;   // raw flat node list for the currently selected project
 let _astSelectedProject = null;
 let _astProjects = [];
@@ -15,6 +15,33 @@ let _astSearchSelectionKey = '';
 let _treeFileLimit    = 1500;
 let _clusterFileLimit = 1500;
 let _treeShowLabels   = false;
+let _astAnalysisByProject = {};
+let _astAnalysisInflight = {};
+
+function ctxAstGetViewState() {
+  return {
+    selectedProject: _astSelectedProject,
+    viewMode: _astViewMode,
+    searchQuery: _astSearchQuery,
+    searchSelectionKey: _astSearchSelectionKey,
+    treeFileLimit: _treeFileLimit,
+    clusterFileLimit: _clusterFileLimit,
+    treeShowLabels: _treeShowLabels,
+    projectPanelCollapsed: _astProjectPanelCollapsed,
+  };
+}
+
+function ctxAstRestoreViewState(state = {}) {
+  if (!state || typeof state !== 'object') return;
+  if (typeof state.selectedProject === 'string') _astSelectedProject = state.selectedProject;
+  if (typeof state.viewMode === 'string') _astViewMode = state.viewMode;
+  if (typeof state.searchQuery === 'string') _astSearchQuery = state.searchQuery;
+  if (typeof state.searchSelectionKey === 'string') _astSearchSelectionKey = state.searchSelectionKey;
+  if (state.treeFileLimit === 'all' || typeof state.treeFileLimit === 'number') _treeFileLimit = state.treeFileLimit;
+  if (state.clusterFileLimit === 'all' || typeof state.clusterFileLimit === 'number') _clusterFileLimit = state.clusterFileLimit;
+  if (typeof state.treeShowLabels === 'boolean') _treeShowLabels = state.treeShowLabels;
+  if (typeof state.projectPanelCollapsed === 'boolean') _astProjectPanelCollapsed = state.projectPanelCollapsed;
+}
 
 // ── File-list renderer (memory / code panels) ─────────────────────────────────
 // (Moved here from core so that AST-specific openFn 'ctxReadAst' resolves correctly)
@@ -65,6 +92,38 @@ function _renderAstProjectTree() {
   ctxRenderProjectExplorer('ctx-ast-project-panel', _astProjects, _astSelectedProject, 'ctxReadProjectAst', { indexStatus: _ctxLastIndexStatus });
 }
 
+function ctxHandleProjectsUpdate() {
+  if (_ctxProjects && _ctxProjects.length) {
+    const prevSelected = _astSelectedProject;
+    _astProjects = _ctxProjects.map(p => ({ ...p }));
+    if (!_astSelectedProject || !_astProjects.find(r => r.name === _astSelectedProject)) {
+      _astSelectedProject = _astProjects.length ? _astProjects[0].name : null;
+    } else {
+      _astSelectedProject = prevSelected;
+    }
+  }
+  const astPanel = document.getElementById('ctx-panel-ast');
+  if (!astPanel || astPanel.style.display === 'none') return;
+  _renderAstProjectTree();
+  if (_astViewMode === 'overview' && document.getElementById('ast-modal-view-area')) {
+    _renderAstView();
+    _astPrimeAnalysis(_astSelectedProject);
+  }
+}
+
+function ctxHandleIndexStatusUpdate(_status) {
+  const s = (_status && _astSelectedProject) ? _status[_astSelectedProject] : null;
+  if (s && s.status === 'indexing') {
+    delete _astAnalysisByProject[_astSelectedProject];
+  }
+  const astPanel = document.getElementById('ctx-panel-ast');
+  if (!astPanel || astPanel.style.display === 'none') return;
+  _renderAstProjectTree();
+  if (_astViewMode === 'overview' && document.getElementById('ast-modal-view-area')) {
+    _renderAstView();
+  }
+}
+
 function ctxToggleAstProjectPanel() {
   _astProjectPanelCollapsed = !_astProjectPanelCollapsed;
   _ctxProjectExplorerState['ctx-ast-project-panel'] = _ctxProjectExplorerState['ctx-ast-project-panel'] || {};
@@ -90,7 +149,7 @@ function _showAstPanel() {
     const isAst = b.dataset && b.dataset.panel === 'ast';
     b.classList.toggle('active', isAst);
   });
-  ['search', 'projects', 'memory', 'code', 'ast'].forEach(p => {
+  ['search', 'memory', 'code', 'ast'].forEach(p => {
     const el = document.getElementById('ctx-panel-' + p);
     if (el) el.style.display = p === 'ast' ? 'block' : 'none';
   });
@@ -115,19 +174,50 @@ async function ctxReadProjectAst(projectName, options = {}) {
     const res = await fetch('/api/context/ast/list?repo=' + encodeURIComponent(projectName));
     if (!res.ok) throw new Error('API error');
     const data = await res.json();
-    if (!data.nodes || !data.nodes.length) {
-      content.innerHTML = `<div class="ctx-welcome" style="padding:60px 20px;">
-        <div style="font-size:2rem;margin-bottom:12px;">🌳</div>
-        <div>No AST data for ${_escHtml(projectName)}</div>
-        <div style="color:var(--text-dim);font-size:0.55rem;margin-top:6px;">Generate AST from the Projects panel, then return here</div>
-      </div>`;
-      return;
-    }
-    _astCurrentNodes = data.nodes;
-    if (!options.preserveView) _astViewMode = 'tree';
+    _astCurrentNodes = data.nodes || [];
+    if (!options.preserveView) _astViewMode = 'overview';
     _renderAstModal(content);
+    _astPrimeAnalysis(projectName);
   } catch (e) {
     content.innerHTML = `<div style="padding:40px;text-align:center;color:#ef4444;">Error: ${e.message}</div>`;
+  }
+}
+
+function _astCurrentAnalysis() {
+  return _astAnalysisByProject[_astSelectedProject] || null;
+}
+
+async function _astPrimeAnalysis(projectName) {
+  if (!projectName) return;
+  if (_astAnalysisByProject[projectName] || _astAnalysisInflight[projectName]) return;
+  if (typeof window._anAnalyzeProjectSource !== 'function') return;
+  _astAnalysisInflight[projectName] = true;
+  try {
+    const targetPaths = Array.from(new Set((_astCurrentNodes || []).map(n => n.path).filter(Boolean))).slice(0, 350);
+    const docs = [];
+    await Promise.all(targetPaths.map(async relPath => {
+      try {
+        const uri = `${projectName}:${relPath}`;
+        const res = await fetch('/api/context/code/read?uri=' + encodeURIComponent(uri));
+        if (!res.ok) return;
+        const doc = await res.json();
+        docs.push({ path: relPath, language: doc.language || '', content: doc.content || '' });
+      } catch (e) { /* ignore per-file errors */ }
+    }));
+    _astAnalysisByProject[projectName] = window._anAnalyzeProjectSource(_astCurrentNodes || [], docs);
+  } catch (e) {
+    _astAnalysisByProject[projectName] = {
+      summary: { filesAnalyzed: 0, totalFindings: 0, by_category: {}, by_severity: {} },
+      findings: [],
+      topFindings: [],
+      error: String(e && e.message ? e.message : e),
+    };
+  } finally {
+    delete _astAnalysisInflight[projectName];
+    const astPanel = document.getElementById('ctx-panel-ast');
+    if (_astSelectedProject === projectName && astPanel && astPanel.style.display !== 'none') {
+      _renderAstView();
+    }
   }
 }
 
@@ -141,26 +231,31 @@ function _renderAstModal(container) {
           <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🌳 ${_escHtml(_astSelectedProject || 'Project AST')}</div>
           <div style="font-family:var(--font-mono);font-size:0.48rem;color:var(--text-dim);margin-top:2px;">${(_astCurrentNodes || []).length} AST nodes</div>
         </div>
-        <span style="font-size:0.58rem;color:var(--text-dim);font-weight:600;letter-spacing:0.05em;margin-right:4px;">VIEW</span>
-        <button id="ast-toggle-tree"
-          onclick="_setAstView('tree')"
-          style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--cyan);background:var(--cyan);color:#000;transition:all 0.15s;">
-          🌳 Tree
+        <button id="ast-toggle-overview"
+          onclick="_setAstView('overview')"
+          style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-dim);transition:all 0.15s;"
+          title="Project overview">
+          📁
         </button>
         <button id="ast-toggle-complexity"
           onclick="_setAstView('complexity')"
           style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-dim);transition:all 0.15s;">
-          🔥 Complexity
+          🔥
+        </button>
+        <button id="ast-toggle-tree"
+          onclick="_setAstView('tree')"
+          style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--cyan);background:var(--cyan);color:#000;transition:all 0.15s;">
+          🌳
         </button>
         <button id="ast-toggle-radial"
           onclick="_setAstView('radial')"
           style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-dim);transition:all 0.15s;">
-          ◎ Radial
+          ◎
         </button>
         <button id="ast-toggle-cluster"
           onclick="_setAstView('cluster')"
           style="padding:4px 14px;border-radius:6px;font-size:0.65rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text-dim);transition:all 0.15s;">
-          ✦ Cluster
+          ✦
         </button>
         <span style="width:1px;height:14px;background:var(--border);margin:0 4px;flex-shrink:0;"></span>
         <div id="ast-limit-bar" style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0;"></div>
@@ -171,11 +266,12 @@ function _renderAstModal(container) {
       <div id="ast-modal-view-area" style="flex:1;min-height:0;overflow:hidden;"></div>
     </div>
   `;
-  _renderAstView();
+  _setAstView(_astViewMode);
 }
 
 function _setAstView(mode) {
   _astViewMode = mode;
+  const overviewBtn = document.getElementById('ast-toggle-overview');
   const treeBtn    = document.getElementById('ast-toggle-tree');
   const compBtn    = document.getElementById('ast-toggle-complexity');
   const radialBtn  = document.getElementById('ast-toggle-radial');
@@ -186,6 +282,7 @@ function _setAstView(mode) {
     btn.style.color       = active ? '#000'       : 'var(--text-dim)';
     btn.style.borderColor = active ? activeColor  : 'var(--border)';
   };
+  _style(overviewBtn, mode === 'overview', '#facc15');
   _style(treeBtn,    mode === 'tree',       'var(--cyan)');
   _style(compBtn,    mode === 'complexity', '#f97316');
   _style(radialBtn,  mode === 'radial',     '#a78bfa');
@@ -196,7 +293,41 @@ function _setAstView(mode) {
 function _renderAstView() {
   const area = document.getElementById('ast-modal-view-area');
   if (!area || !_astCurrentNodes) return;
+  const analysis = _astCurrentAnalysis();
+  if (_astViewMode === 'overview') {
+    area.style.overflowY = 'auto';
+    area.style.overflowX = 'hidden';
+    _clearAstLimitBar();
+    const project = _astProjects.find(p => p.name === _astSelectedProject);
+    if (!project) {
+      area.innerHTML = `<div class="ctx-welcome" style="padding:60px 20px;">
+        <div style="font-size:2rem;margin-bottom:12px;">📁</div>
+        <div>No project selected</div>
+      </div>`;
+      return;
+    }
+    ctxRenderProjectOverview(area, project, _ctxLastIndexStatus || {}, {
+      actionsOnlyHeader: true,
+      hideStatusText: true,
+      hideProgressText: true,
+      hideAstStatusText: true,
+      complexityNodes: _astCurrentNodes || [],
+      analysis,
+    });
+    return;
+  }
+  area.style.overflow = 'hidden';
+  const hasAstNodes = (_astCurrentNodes || []).length > 0;
   const nodes = _filterAstNodesForSearch(_astCurrentNodes);
+  if (!hasAstNodes) {
+    _clearAstLimitBar();
+    area.innerHTML = `<div class="ctx-welcome" style="padding:60px 20px;">
+      <div style="font-size:2rem;margin-bottom:12px;">🌳</div>
+      <div>No AST data for ${_escHtml(_astSelectedProject || 'this project')}</div>
+      <div style="color:var(--text-dim);font-size:0.55rem;margin-top:6px;">Use Overview actions to run AST generation, then switch back to a visualization</div>
+    </div>`;
+    return;
+  }
   _syncAstSearchRecovery(nodes.length);
   if (_astSearchQuery && !nodes.length) {
     _renderAstNoSearchResults(area);
@@ -247,6 +378,7 @@ function _renderAstView() {
     area.innerHTML = '<div id="ast-view-render-host" style="height:100%;overflow:hidden;"></div>';
     const host = document.getElementById('ast-view-render-host');
     if (!host) return;
+    window._ctxCurrentAstAnalysis = analysis;
     _renderComplexityHeatmap(nodes, host);
   }
 }
@@ -303,8 +435,8 @@ function astClearSearchQuery() {
 
 function _renderAstSearchRecovery() {
   return `
-    <div id="ast-search-recovery" style="display:none;align-items:center;gap:8px;margin-left:4px;padding:3px 6px;border:1px solid rgba(34,211,238,0.35);border-radius:6px;background:rgba(34,211,238,0.08);font-family:var(--font-mono);">
-      <span id="ast-search-recovery-text" style="font-size:0.52rem;color:var(--text-dim);max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
+    <div id="ast-search-recovery" style="display:none;align-items:center;gap:8px;margin-left:4px;padding:0;font-family:var(--font-mono);">
+      <span id="ast-search-recovery-text" style="font-size:0.52rem;color:var(--text-dim);white-space:nowrap;"></span>
       <button class="ctx-btn-sm" onclick="astClearSearchQuery()" style="font-size:0.5rem;background:var(--cyan);color:#001018;border-color:var(--cyan);">Clear search</button>
     </div>`;
 }
@@ -317,7 +449,7 @@ function _syncAstSearchRecovery(matchCount) {
   el.style.display = hasQuery ? 'flex' : 'none';
   if (text && hasQuery) {
     const countText = matchCount === 0 ? 'no matches' : `${matchCount} match${matchCount === 1 ? '' : 'es'}`;
-    text.textContent = `Search: "${_astSearchQuery}" (${countText})`;
+    text.textContent = countText;
   }
 }
 
