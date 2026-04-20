@@ -1,6 +1,6 @@
 {
   "name": "savant",
-  "version": "7.2.0",
+  "version": "7.3.0",
   "description": "Savant — AI Session Dashboard",
   "main": "main.js",
   "scripts": {
@@ -18,7 +18,7 @@
     "appId": "com.icapital.savant",
     "productName": "Savant",
     "releaseInfo": {
-      "releaseNotes": "v7.2.0 HERO RELEASE: AST Visualization — full interactive AST explorer with Tree, Cluster, and Radial Sunburst views. Partial rendering (500/1000/1500/all files) prevents browser lock on massive repos. Legend filters expand to target node type at any depth. Click = info panel only; collapse/expand via drawer controls. Node labels toggle on demand. Compact top-bar layout with FILES + view toggles in a single row. Search with live-filtering across all AST views."
+      "releaseNotes": "v7.3.0 HERO RELEASE: Unified Project Analysis — Project Overview is now the default AST landing flow with add/index/generate actions in one place, live status-aware overview cards, grouped high-severity analysis findings, and richer per-file complexity drilldowns. Includes a full in-app Savant Analysis Guide for end-to-end indexing, AST, triage, and remediation workflows."
     },
     "mac": {
       "category": "public.app-category.developer-tools",

@@ -41,6 +41,30 @@ function _peekNavState() {
 // Release notes
 const RELEASES = [
   {
+    version: 'v7.3.0',
+    date: '2026-04-20',
+    tag: 'major',
+    tagline: 'Unified Project Analysis hero release. Project overview, indexing, AST, and complexity now flow from one place.',
+    description: 'SAVANT v7.3.0 unifies project indexing, AST generation, structural analysis, and complexity triage into a single analysis-first workflow. The AST view now starts with Project Overview as the default landing tab, action controls are consolidated, and live status is surfaced where decisions happen. Analysis findings are elevated with high-signal summaries in Overview and grouped, drillable detail in Complexity for faster risk triage.',
+    abilities: [
+      { icon: '📁', name: 'Unified Overview', desc: 'Project onboarding, indexing, AST generation, and health status now begin in AST > Overview as the default tab.' },
+      { icon: '🧭', name: 'Action-First Controls', desc: 'Add (+) and refresh are aligned for rapid project operations, with explorer state preserved on refresh.' },
+      { icon: '🧪', name: 'Deeper Analysis', desc: 'Code-smell and security-pattern checks are surfaced as summaries in Overview and grouped by type in Complexity.' },
+      { icon: '📊', name: 'Focused Complexity', desc: 'Top complexity files and per-file analysis details are streamlined for direct inspection and faster refactor decisions.' },
+      { icon: '📖', name: 'Full Analysis Guide', desc: 'Expanded in-app guide now documents the complete analysis workflow, interpretation model, and remediation loop.' },
+    ],
+    items: [
+      { type: 'feat', text: 'AST view defaults to Project Overview and consolidates project actions, indexing, and AST generation into one landing flow' },
+      { type: 'feat', text: 'Project explorer refresh preserves selected project, active AST view, and filter/search state while reloading data' },
+      { type: 'feat', text: 'Overview shows compact high-signal analysis summaries; detailed finding lists move to Complexity for focused triage' },
+      { type: 'feat', text: 'Complexity adds grouped high-severity findings, top complexity files, and richer per-file analysis sections' },
+      { type: 'feat', text: 'In-app Savant Guide expanded with a full analysis handbook covering workflow, scoring, and action playbooks' },
+      { type: 'fix', text: 'AST generation updates repository status correctly when indexing already completed, preventing stale "Not Generated" state' },
+      { type: 'fix', text: 'Project explorer search input no longer loses cursor during incremental filtering and list refreshes' },
+      { type: 'refactor', text: 'Context/AST UI controls and overview layout simplified for clearer status interpretation and lower interaction cost' },
+    ],
+  },
+  {
     version: 'v7.2.0',
     date: '2026-04-19',
     tag: 'major',

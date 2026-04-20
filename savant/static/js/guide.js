@@ -136,7 +136,7 @@ const _guideTree = [
       { id: 'use-tasks', title: 'Managing Tasks', children: [] },
       { id: 'use-terminal', title: 'Terminal', children: [] },
       { id: 'use-mcp', title: 'MCP Tab', children: [] },
-      { id: 'use-visualizations', title: 'Context & Visualizations', children: [] },
+      { id: 'use-visualizations', title: 'Analysis Guide', children: [] },
       { id: 'use-search', title: 'Search & Navigation', children: [] },
     ],
     content: `
@@ -495,43 +495,89 @@ list_workspaces(status="open")</code></pre>
     `
   },
   {
-    id: 'use-visualizations', title: 'Context & Visualizations', _sub: true, children: [],
+    id: 'use-visualizations', title: 'Analysis Guide', _sub: true, children: [],
     content: `
-      <h2>Context & Visualizations</h2>
-      <p>Savant uses <strong>Abstract Syntax Trees (AST)</strong> and advanced D3 visualizations to help you understand the structure and complexity of your codebase.</p>
+      <h2>Full Savant Analysis Guide</h2>
+      <p>Savant's analysis workflow combines indexing, AST generation, structural risk checks, and complexity triage into one continuous flow under <strong>MCP &gt; Context &gt; AST</strong>.</p>
 
-      <h3>AST Visualization Modes</h3>
-      ${_gFlow([
-        { icon: '🌳', title: 'Tree View', desc: 'Standard hierarchical structure of files and functions', color: 'var(--cyan)' },
-        { icon: '🔥', title: 'Heatmap', desc: 'McCabe-inspired complexity scores with risk levels', color: 'var(--red)' },
-        { icon: '◎', title: 'Radial Sunburst', desc: 'Circular map showing depth and complexity distribution', color: 'var(--magenta)' },
-        { icon: '✦', title: 'Cluster Tree', desc: 'Structural grouping of related code entities', color: 'var(--green)' },
+      <h3>Analysis Workflow (End-to-End)</h3>
+      ${_gSteps([
+        { title: 'Add project', desc: 'Use the <strong>+</strong> in the AST project explorer to register a repository.', color: 'var(--cyan)' },
+        { title: 'Run indexing', desc: 'Start indexing to build searchable chunks and metadata for the project.', color: 'var(--green)' },
+        { title: 'Generate AST', desc: 'Generate AST nodes after indexing to enable structure-aware analysis and visual drilldown.', color: 'var(--magenta)' },
+        { title: 'Review Overview first', desc: 'Use Project Overview for high-signal health stats, status cards, and action controls.', color: 'var(--orange)' },
+        { title: 'Triage in Complexity', desc: 'Open Complexity to inspect top files, grouped high findings, and per-file analysis details.', color: 'var(--yellow)' },
       ])}
 
-      <h3>Complexity: Why it Matters</h3>
-      <p>Savant computes a <strong>McCabe-inspired Cyclomatic Complexity score</strong> for every function and class. This measures the number of linearly independent paths through your code.</p>
-      
-      <div style="background:rgba(0,0,0,0.2);padding:12px;border-left:4px solid var(--orange);margin:15px 0;border-radius:0 6px 6px 0;">
-        <h4 style="margin-top:0;color:var(--orange);">The Cognitive Ceiling</h4>
-        <p style="font-size:0.5rem;margin-bottom:0;">Studies show that human working memory can handle approximately <strong>7 ± 2</strong> items. When a function's complexity exceeds <strong>10</strong>, it surpasses the average cognitive limit, making the code exponentially harder to maintain and test.</p>
-      </div>
-
-      <h3>Scoring & Thresholds</h3>
+      <h3>Where to Read What</h3>
       <table class="guide-table">
-        <tr><th>Score</th><th>Level</th><th>Action</th></tr>
-        <tr><td style="color:#4ade80;">1 - 5</td><td>Low</td><td>Healthy, readable code.</td></tr>
-        <tr><td style="color:#facc15;">6 - 10</td><td>Moderate</td><td>Keep an eye on this; consider refactoring.</td></tr>
-        <tr><td style="color:#fb923c;">11 - 20</td><td>Risky</td><td>Exceeds human cognitive capacity. Refactor strongly recommended.</td></tr>
-        <tr><td style="color:#f87171;">21+</td><td>High</td><td>Critical technical debt. High risk of bugs. Refactor immediately.</td></tr>
+        <tr><th>Location</th><th>Purpose</th><th>Best Use</th></tr>
+        <tr><td><strong>AST &gt; Overview</strong></td><td>Project-wide summary, index/AST readiness, high-level analysis counts</td><td>Fast health check and next action</td></tr>
+        <tr><td><strong>AST &gt; Complexity</strong></td><td>Top complexity files, high-only findings grouped by type, per-file details</td><td>Refactor planning and risk triage</td></tr>
+        <tr><td><strong>AST Visual Views</strong></td><td>Tree, Cluster, and Radial structural exploration</td><td>Understand shape and ownership of large code regions</td></tr>
       </table>
 
-      <h3>How to use these views</h3>
-      ${_gSteps([
-        { title: 'Generate AST', desc: 'Go to the Projects tab in the Context panel and click "Generate AST" for your repo.', color: 'var(--cyan)' },
-        { title: 'Switch Views', desc: 'Use the ◎ Radial or ✦ Cluster buttons to change visualization styles.', color: 'var(--magenta)' },
-        { title: 'Identify Hotspots', desc: 'Look for Red/Orange nodes in the Radial view — these are your most complex (and risky) functions.', color: 'var(--orange)' },
-        { title: 'Drill Down', desc: 'Click any node to see its specific complexity breakdown and file location.', color: 'var(--green)' },
+      <h3>Analysis Categories</h3>
+      <table class="guide-table">
+        <tr><th>Category</th><th>Examples</th><th>Why it matters</th></tr>
+        <tr><td style="color:var(--cyan);">Structural Smells</td><td>Deep nesting, large class/function bloat, parameter overload, empty blocks</td><td>Predicts maintenance burden and test fragility</td></tr>
+        <tr><td style="color:var(--red);">Security Patterns</td><td>Hardcoded secrets, insecure calls (<code>eval/exec/os.system</code>), SQL string formatting patterns</td><td>Surfaces high-impact vulnerabilities early</td></tr>
+        <tr><td style="color:var(--yellow);">Modernization</td><td>Deprecated API usage patterns and simplification opportunities</td><td>Reduces long-term upgrade and migration cost</td></tr>
+        <tr><td style="color:var(--green);">Style & Safety</td><td>Type hint gaps, interface contract checks, naming or shadowing risks</td><td>Improves readability and contract reliability</td></tr>
+        <tr><td style="color:var(--orange);">Dead Code Signals</td><td>Unreachable blocks, unused imports, unused variables</td><td>Cuts noise and lowers bug surface area</td></tr>
+      </table>
+
+      <h3>Detector Coverage (What Savant Checks)</h3>
+      <table class="guide-table">
+        <tr><th>Detector</th><th>Signal</th><th>Typical fix</th></tr>
+        <tr><td><code>deep_nesting</code></td><td>Control depth exceeds threshold</td><td>Early returns, split branches, extract helper functions</td></tr>
+        <tr><td><code>large_block_bloat</code></td><td>Very large class/function spans with heavy nested blocks</td><td>Decompose by responsibility and move side effects out</td></tr>
+        <tr><td><code>parameter_overload</code></td><td>Too many function parameters</td><td>Introduce config objects / value objects</td></tr>
+        <tr><td><code>empty_block</code></td><td>Empty catch/except/conditional body</td><td>Handle explicitly, log intent, or remove dead branch</td></tr>
+        <tr><td><code>hardcoded_secret</code></td><td>Secret-like assignment to string literals</td><td>Use env vars or secret manager integration</td></tr>
+        <tr><td><code>insecure_call</code></td><td>Dynamic execution APIs detected</td><td>Replace with safe parser/whitelisted command paths</td></tr>
+        <tr><td><code>sql_injection_pattern</code></td><td>String-built query passed to DB call</td><td>Parameterize SQL and bind values</td></tr>
+        <tr><td><code>deprecated_pattern</code></td><td>Known legacy API usage pattern</td><td>Migrate to supported modern equivalent</td></tr>
+        <tr><td><code>missing_type_hint</code></td><td>Function return annotation missing (language-dependent)</td><td>Add return types and validate with static type checker</td></tr>
+        <tr><td><code>unreachable_code</code></td><td>Statements after return/break/raise/throw</td><td>Remove dead code or move logic before terminal branch</td></tr>
+      </table>
+
+      <h3>Complexity Scale</h3>
+      <table class="guide-table">
+        <tr><th>Range</th><th>Level</th><th>Interpretation</th><th>Recommended action</th></tr>
+        <tr><td style="color:#4ade80;">1 - 5</td><td>Low</td><td>Simple control flow, easy to reason about</td><td>Keep as is; protect with tests</td></tr>
+        <tr><td style="color:#facc15;">6 - 10</td><td>Moderate</td><td>Growing branching and logic coupling</td><td>Monitor and extract helper paths</td></tr>
+        <tr><td style="color:#fb923c;">11 - 20</td><td>Risky</td><td>Hard to validate mentally and with unit tests</td><td>Plan refactor soon; split responsibilities</td></tr>
+        <tr><td style="color:#f87171;">21+</td><td>High</td><td>Critical complexity debt, strong regression risk</td><td>Prioritize decomposition immediately</td></tr>
+      </table>
+
+      <h3>Triage Playbook</h3>
+      ${_gFlow([
+        { icon: '1', title: 'Start with High', desc: 'Use high-only grouped findings to identify urgent risk classes.', color: 'var(--red)', bg: 'rgba(248,113,113,0.06)' },
+        { icon: '2', title: 'Open Top 5 Files', desc: 'Inspect top complexity files first for highest payoff.', color: 'var(--orange)', bg: 'rgba(251,146,60,0.06)' },
+        { icon: '3', title: 'Inspect File Details', desc: 'Review function breakdown and file-level finding details.', color: 'var(--yellow)', bg: 'rgba(250,204,21,0.06)' },
+        { icon: '4', title: 'Refactor by Pattern', desc: 'Flatten nesting, split large blocks, and replace risky call sites.', color: 'var(--green)', bg: 'rgba(74,222,128,0.06)' },
+        { icon: '5', title: 'Re-run Analysis', desc: 'Index/AST refresh and verify score + finding reductions.', color: 'var(--cyan)', bg: 'rgba(0,240,255,0.06)' },
       ])}
+
+      <h3>Operational Tips</h3>
+      <ul>
+        <li>Use refresh in project explorer to keep context, but preserve your selected project/view/filter state.</li>
+        <li>Treat <strong>Overview</strong> as signal and <strong>Complexity</strong> as evidence.</li>
+        <li>If indexing completes but AST is not generated, run AST generation explicitly and verify node status updates.</li>
+        <li>Refactor in small batches and re-run analysis after each batch for measurable deltas.</li>
+      </ul>
+
+      <h3>References</h3>
+      <ul>
+        <li><a href="https://en.wikipedia.org/wiki/Abstract_syntax_tree" target="_blank" style="color:var(--cyan);">Abstract Syntax Tree (AST)</a> — structural representation foundation for syntax-aware analysis.</li>
+        <li><a href="https://www.tree-sitter.org/" target="_blank" style="color:var(--cyan);">Tree-sitter</a> — incremental parser model used across many AST tooling systems.</li>
+        <li><a href="https://ieeexplore.ieee.org/document/1702388" target="_blank" style="color:var(--cyan);">McCabe (1976) Cyclomatic Complexity</a> — baseline complexity metric used for path complexity reasoning.</li>
+        <li><a href="https://cwe.mitre.org/" target="_blank" style="color:var(--cyan);">MITRE CWE</a> — vulnerability taxonomy for insecure patterns.</li>
+        <li><a href="https://owasp.org/www-project-top-ten/" target="_blank" style="color:var(--cyan);">OWASP Top 10</a> — web application security risk categories relevant to code-level checks.</li>
+        <li><a href="https://peps.python.org/pep-0484/" target="_blank" style="color:var(--cyan);">PEP 484</a> — Python type hinting reference for annotation compliance checks.</li>
+        <li><a href="https://12factor.net/config" target="_blank" style="color:var(--cyan);">The Twelve-Factor App: Config</a> — guidance for avoiding hardcoded secrets.</li>
+      </ul>
     `
   },
   {
