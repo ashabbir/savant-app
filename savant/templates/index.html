@@ -103,7 +103,6 @@
   .ctx-result-badge { background:rgba(255,255,255,0.06); border:1px solid var(--border); border-radius:4px; padding:1px 6px; font-size:0.45rem; }
   .ctx-result-score { color:#22c55e; }
   .ctx-result-preview { background:rgba(0,0,0,0.3); border-radius:4px; padding:8px; margin-top:6px; font-family:var(--font-mono); font-size:0.55rem; color:var(--text-dim); max-height:120px; overflow:hidden; white-space:pre-wrap; word-break:break-all; }
-  .ctx-projects-toolbar { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
 
   /* Master-detail split */
   .ctx-proj-split { display:flex; gap:0; height:calc(100vh - 340px); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
@@ -112,6 +111,8 @@
 
   .ctx-project-explorer { height:100%; display:flex; flex-direction:column; }
   .ctx-project-explorer-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 8px 6px; border-bottom:1px solid rgba(255,255,255,0.06); }
+  .ctx-project-explorer-head-left { display:flex; align-items:center; gap:6px; }
+  .ctx-project-explorer-head-right { display:flex; align-items:center; gap:6px; margin-left:auto; }
   .ctx-project-explorer-title { font-family:var(--font-mono); font-size:0.54rem; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-dim); font-weight:700; }
   .ctx-project-explorer-toggle { border:1px solid var(--border); background:rgba(34,211,238,0.08); color:var(--cyan); border-radius:5px; width:22px; height:22px; font-family:var(--font-mono); font-size:0.7rem; cursor:pointer; line-height:1; }
   .ctx-project-explorer-search { padding:8px; border-bottom:1px solid rgba(255,255,255,0.04); }
@@ -6546,11 +6547,10 @@ function showLoadingScreen(cb) { if (cb) cb(); }
       <button class="ctx-btn-sm" onclick="ctxMcpTestConnection()" style="margin-left:auto;">⚡ Test</button>
     </div>
 
-    <!-- Inner tabs: Search / AST / Projects / Code / Memory Bank -->
+    <!-- Inner tabs: Search / AST / Code / Memory Bank -->
     <div class="ctx-inner-tabs">
       <button class="savant-subtab active" data-panel="search" onclick="switchCtxPanel('search', this)">🔍 Search</button>
       <button class="savant-subtab" data-panel="ast" onclick="switchCtxPanel('ast', this)">🌳 AST</button>
-      <button class="savant-subtab" data-panel="projects" onclick="switchCtxPanel('projects', this)">📁 Projects</button>
       <button class="savant-subtab" data-panel="code" onclick="switchCtxPanel('code', this)">📄 Code</button>
       <button class="savant-subtab" data-panel="memory" onclick="switchCtxPanel('memory', this)">🧠 Memory Bank</button>
     </div>
@@ -6572,33 +6572,6 @@ function showLoadingScreen(cb) { if (cb) cb(); }
           <div style="font-size:2rem;margin-bottom:12px;">🔍</div>
           <div>Search across all indexed projects</div>
           <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Semantic vector search powered by sqlite-vec</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Projects Panel — master/detail split -->
-    <div class="ctx-panel" id="ctx-panel-projects" style="display:none;">
-      <div class="ctx-projects-toolbar">
-        <button class="ctx-btn ctx-btn-primary" onclick="ctxAddProject()">+ Add Project</button>
-        <button class="ctx-btn" onclick="ctxIndexAll()">Index All</button>
-        <button class="ctx-btn" onclick="ctxReindexAll()">Re-index All</button>
-        <button class="ctx-btn" onclick="ctxLoadProjects()" style="margin-left:auto;">↻ Refresh</button>
-      </div>
-      <div class="ctx-proj-split">
-        <!-- Left: project list -->
-        <div class="ctx-proj-sidebar" id="ctx-projects-list">
-          <div class="ctx-welcome" style="padding:30px 14px;">
-            <div style="font-size:1.4rem;margin-bottom:8px;">📁</div>
-            <div style="font-size:0.6rem;">No projects yet</div>
-          </div>
-        </div>
-        <!-- Right: detail pane -->
-        <div class="ctx-proj-detail" id="ctx-proj-detail">
-          <div class="ctx-welcome" style="padding:60px 20px;">
-            <div style="font-size:2rem;margin-bottom:12px;">👈</div>
-            <div>Select a project</div>
-            <div style="color:var(--text-dim);font-size:0.55rem;margin-top:6px;">Click a project on the left to see details</div>
-          </div>
         </div>
       </div>
     </div>

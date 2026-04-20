@@ -79,7 +79,15 @@ def browser(_pw):
 def page(browser, flask_server):
     """Fresh isolated context per test. Hero modal suppressed."""
     ctx = browser.new_context(base_url=flask_server)
-    ctx.add_init_script("localStorage.setItem('savant_seen_release','v6.5.0')")
+    pkg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "package.json"))
+    latest_seen = "v0.0.0"
+    try:
+        import json
+        with open(pkg_path, "r", encoding="utf-8") as f:
+            latest_seen = "v" + str((json.load(f) or {}).get("version") or "0.0.0")
+    except Exception:
+        pass
+    ctx.add_init_script(f"localStorage.setItem('savant_seen_release',{latest_seen!r})")
     pg = ctx.new_page()
     pg.goto(flask_server)
     pg.wait_for_load_state("networkidle", timeout=15_000)

@@ -120,6 +120,29 @@ def test_ast_list_returns_generated_nodes(client, tmp_path, monkeypatch):
     assert ("function", "helper") in names
 
 
+def test_generate_ast_marks_repo_ast_only_even_if_indexed(client, tmp_path, monkeypatch):
+    from context.db import ContextDB, init_context_schema
+    from context.indexer import Indexer
+
+    assert init_context_schema()
+
+    class _FakeEmbedder:
+        def embed_one(self, _text):
+            return [0.0] * 768
+
+    monkeypatch.setattr(Indexer, "_get_embedder", lambda self: _FakeEmbedder())
+
+    repo_dir = _seed_python_repo(tmp_path, "repo-status-ast")
+    ContextDB.add_repo("repo-status-ast", str(repo_dir))
+
+    idx = Indexer()
+    idx.index_repository(repo_dir, repo_name="repo-status-ast")
+    idx.generate_ast_for_repository(repo_dir, repo_name="repo-status-ast")
+
+    repo = ContextDB.get_repo("repo-status-ast")
+    assert repo["status"] == "ast_only"
+
+
 def test_extract_ast_retries_transient_lock(tmp_path, monkeypatch):
     from context.db import ContextDB, init_context_schema
     from context.indexer import Indexer

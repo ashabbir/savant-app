@@ -50,6 +50,264 @@ function _complexityColor(score) {
   return                   { fg: '#f87171', bg: 'rgba(248,113,113,0.12)', label: 'High' };
 }
 
+// ── Deep analysis (source + AST heuristics) ─────────────────────────────────
+
+function _anAnalyzeProjectSource(astNodes = [], codeDocs = []) {
+  const docs = Array.isArray(codeDocs) ? codeDocs : [];
+  const nodes = Array.isArray(astNodes) ? astNodes : [];
+  const nodesByPath = {};
+  nodes.forEach(n => {
+    if (!n || !n.path) return;
+    if (!nodesByPath[n.path]) nodesByPath[n.path] = [];
+    nodesByPath[n.path].push(n);
+  });
+
+  const findings = [];
+  const pushFinding = (f) => {
+    findings.push({
+      severity: f.severity || 'medium',
+      category: f.category || 'structural',
+      rule_id: f.rule_id || 'rule',
+      path: f.path || '',
+      line: f.line || 1,
+      title: f.title || f.rule_id || 'Finding',
+      detail: f.detail || '',
+    });
+  };
+
+  docs.forEach(doc => {
+    const path = doc.path || '';
+    const content = (doc.content || '').toString();
+    const lines = content.split(/\r?\n/);
+    const fileNodes = (nodesByPath[path] || []).slice().sort((a, b) => (a.start_line || 0) - (b.start_line || 0));
+
+    _anDetectStructural(lines, fileNodes, path, pushFinding);
+    _anDetectSecurity(lines, path, pushFinding);
+    _anDetectModernization(lines, path, pushFinding);
+    _anDetectStyle(lines, fileNodes, path, pushFinding);
+    _anDetectDeadCode(lines, path, pushFinding);
+  });
+
+  const sevRank = { high: 3, medium: 2, low: 1 };
+  findings.sort((a, b) => {
+    const ds = (sevRank[b.severity] || 0) - (sevRank[a.severity] || 0);
+    if (ds) return ds;
+    if (a.path !== b.path) return (a.path || '').localeCompare(b.path || '');
+    return (a.line || 0) - (b.line || 0);
+  });
+
+  const byCategory = { structural: 0, security: 0, modernization: 0, style: 0, dead_code: 0 };
+  const bySeverity = { high: 0, medium: 0, low: 0 };
+  findings.forEach(f => {
+    byCategory[f.category] = (byCategory[f.category] || 0) + 1;
+    bySeverity[f.severity] = (bySeverity[f.severity] || 0) + 1;
+  });
+
+  return {
+    summary: {
+      filesAnalyzed: docs.length,
+      totalFindings: findings.length,
+      by_category: byCategory,
+      by_severity: bySeverity,
+    },
+    findings,
+    topFindings: findings.slice(0, 12),
+  };
+}
+
+function _anDetectStructural(lines, fileNodes, path, pushFinding) {
+  // Deep nesting (control-flow depth > 4)
+  let braceDepth = 0;
+  let maxDepth = 0;
+  let maxDepthLine = 1;
+  const pyStack = [];
+  lines.forEach((raw, idx) => {
+    const line = raw || '';
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) return;
+    const lineNo = idx + 1;
+    const indent = line.match(/^\s*/)[0].length;
+    while (pyStack.length && indent <= pyStack[pyStack.length - 1]) pyStack.pop();
+    const isControl = /^(if|elif|for|while|try|except|catch|switch)\b/.test(trimmed);
+    if (isControl) {
+      if (trimmed.endsWith(':')) pyStack.push(indent);
+      const depth = pyStack.length + Math.max(0, braceDepth);
+      if (depth > maxDepth) { maxDepth = depth; maxDepthLine = lineNo; }
+    }
+    const opens = (line.match(/{/g) || []).length;
+    const closes = (line.match(/}/g) || []).length;
+    braceDepth = Math.max(0, braceDepth + opens - closes);
+  });
+  if (maxDepth > 4) {
+    pushFinding({
+      severity: 'high',
+      category: 'structural',
+      rule_id: 'deep_nesting',
+      path,
+      line: maxDepthLine,
+      title: 'Deep control nesting',
+      detail: `Detected nesting depth ${maxDepth} (threshold: 4).`,
+    });
+  }
+
+  // Large class/function bloat from AST spans + contained children
+  fileNodes.forEach(n => {
+    const span = Math.max(1, (n.end_line || 0) - (n.start_line || 0) + 1);
+    const childCount = fileNodes.filter(c => c !== n && c.start_line > n.start_line && c.end_line <= n.end_line).length;
+    const isClass = n.node_type === 'class';
+    const spanThreshold = isClass ? 220 : 120;
+    const childThreshold = isClass ? 12 : 8;
+    if (span >= spanThreshold || childCount >= childThreshold) {
+      pushFinding({
+        severity: span >= spanThreshold * 1.5 ? 'high' : 'medium',
+        category: 'structural',
+        rule_id: 'large_block_bloat',
+        path,
+        line: n.start_line || 1,
+        title: `${isClass ? 'Large class' : 'Large function'} bloat`,
+        detail: `${n.name || n.node_type} spans ${span} lines with ${childCount} nested typed blocks.`,
+      });
+    }
+  });
+
+  // Parameter overload (JS/Python style signatures)
+  lines.forEach((raw, idx) => {
+    const line = raw || '';
+    const py = line.match(/^\s*def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:/);
+    const jsFn = line.match(/^\s*function\s+([A-Za-z_$][\w$]*)?\s*\(([^)]*)\)/);
+    const jsArrow = line.match(/^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\(([^)]*)\)\s*=>/);
+    const hit = py || jsFn || jsArrow;
+    if (!hit) return;
+    const params = (hit[2] || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (params.length > 5) {
+      pushFinding({
+        severity: params.length > 8 ? 'high' : 'medium',
+        category: 'structural',
+        rule_id: 'parameter_overload',
+        path,
+        line: idx + 1,
+        title: 'Parameter overload',
+        detail: `${hit[1] || 'Function'} has ${params.length} parameters.`,
+      });
+    }
+  });
+
+  // Empty blocks
+  for (let i = 0; i < lines.length; i++) {
+    const line = (lines[i] || '').trim();
+    if (!line) continue;
+    if (/(if|for|while|try|catch)\s*\([^)]*\)\s*\{\s*\}/.test(line)) {
+      pushFinding({ severity: 'low', category: 'structural', rule_id: 'empty_block', path, line: i + 1, title: 'Empty block', detail: 'Control block has an empty body.' });
+    }
+    if (/^(if|for|while|try|except)\b.*:\s*$/.test(line)) {
+      const next = (lines[i + 1] || '').trim();
+      if (next === 'pass' || next === '') {
+        pushFinding({ severity: 'low', category: 'structural', rule_id: 'empty_block', path, line: i + 1, title: 'Empty block', detail: 'Python block appears empty/pass-only.' });
+      }
+    }
+  }
+}
+
+function _anDetectSecurity(lines, path, pushFinding) {
+  lines.forEach((raw, idx) => {
+    const line = (raw || '').trim();
+    if (!line || line.startsWith('#') || line.startsWith('//')) return;
+    const lineNo = idx + 1;
+
+    if (/\b(API[_-]?KEY|PASSWORD|SECRET|TOKEN)\b\s*[:=]\s*['"][^'"]{6,}['"]/i.test(line)) {
+      pushFinding({
+        severity: 'high',
+        category: 'security',
+        rule_id: 'hardcoded_secret',
+        path,
+        line: lineNo,
+        title: 'Hardcoded secret',
+        detail: 'Literal secret-like value assigned in source.',
+      });
+    }
+    if (/\b(eval|exec|os\.system)\s*\(/.test(line)) {
+      pushFinding({
+        severity: 'high',
+        category: 'security',
+        rule_id: 'insecure_call',
+        path,
+        line: lineNo,
+        title: 'Insecure function call',
+        detail: 'Use of eval/exec/os.system detected.',
+      });
+    }
+    if (/\b(execute|query)\s*\(/i.test(line) && /(f["']|%|\.format\(|\+.*["'])/.test(line)) {
+      pushFinding({
+        severity: 'high',
+        category: 'security',
+        rule_id: 'sql_injection_pattern',
+        path,
+        line: lineNo,
+        title: 'Potential SQL injection pattern',
+        detail: 'Query call appears to use string interpolation/concatenation.',
+      });
+    }
+  });
+}
+
+function _anDetectModernization(lines, path, pushFinding) {
+  lines.forEach((raw, idx) => {
+    const line = (raw || '').trim();
+    if (!line) return;
+    if (/\b\w+\.append\(/.test(line) && /\bpd\b|\bpandas\b|dataframe|df\./i.test(line)) {
+      pushFinding({
+        severity: 'low',
+        category: 'modernization',
+        rule_id: 'deprecated_append_api',
+        path,
+        line: idx + 1,
+        title: 'Deprecated append-style API usage',
+        detail: 'Consider replacing append-style flows with concat-style batching.',
+      });
+    }
+  });
+}
+
+function _anDetectStyle(lines, fileNodes, path, pushFinding) {
+  // Type-hinting compliance (python defs without return annotations)
+  lines.forEach((raw, idx) => {
+    const line = raw || '';
+    const m = line.match(/^\s*def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:/);
+    if (m && !/->\s*[^:]+:/.test(line)) {
+      pushFinding({
+        severity: 'low',
+        category: 'style',
+        rule_id: 'missing_return_type_hint',
+        path,
+        line: idx + 1,
+        title: 'Missing return type hint',
+        detail: `${m[1]} has no return type annotation.`,
+      });
+    }
+  });
+}
+
+function _anDetectDeadCode(lines, path, pushFinding) {
+  for (let i = 0; i < lines.length - 1; i++) {
+    const curr = (lines[i] || '').trim();
+    if (!/^(return|break|raise|throw)\b/.test(curr)) continue;
+    for (let j = i + 1; j < Math.min(lines.length, i + 5); j++) {
+      const next = (lines[j] || '').trim();
+      if (!next || next.startsWith('#') || next.startsWith('//') || next === '}') continue;
+      pushFinding({
+        severity: 'medium',
+        category: 'dead_code',
+        rule_id: 'unreachable_code',
+        path,
+        line: j + 1,
+        title: 'Potential unreachable code',
+        detail: 'Code appears after an early exit statement in the same block.',
+      });
+      break;
+    }
+  }
+}
+
 // ── Complexity explorer (left tree + right detail) ────────────────────────────
 
 function _renderComplexityHeatmap(nodes, container) {
@@ -60,42 +318,15 @@ function _renderComplexityHeatmap(nodes, container) {
     return;
   }
 
-  const totalFns   = files.reduce((s, f) => s + f.functions.length, 0);
-  const totalScore = files.reduce((s, f) => s + f.total_complexity, 0);
-  const avgFile    = files.length ? Math.round(totalScore / files.length) : 0;
-  const highRisk   = files.filter(f => f.total_complexity > 20).length;
-  const avgC       = _complexityColor(avgFile);
-
   const uid    = 'cx-' + Math.random().toString(36).substr(2, 6);
   const leftId = uid + '-left';
   const rightId= uid + '-right';
-
-  const statsBar = `
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);background:rgba(0,0,0,0.15);">
-      <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid var(--border);">
-        <div style="font-size:1.6rem;font-weight:700;color:var(--cyan);line-height:1;">${files.length}</div>
-        <div style="font-size:0.55rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;line-height:1.2;">Files<br>Analyzed</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid var(--border);">
-        <div style="font-size:1.6rem;font-weight:700;color:var(--cyan);line-height:1;">${totalFns}</div>
-        <div style="font-size:0.55rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;line-height:1.2;">Functions<br>Classes</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid var(--border);">
-        <div style="font-size:1.6rem;font-weight:700;color:${avgC.fg};line-height:1;">${avgFile}</div>
-        <div style="font-size:0.55rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;line-height:1.2;">Avg File<br>Score</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid var(--border);">
-        <div style="font-size:1.6rem;font-weight:700;color:${highRisk > 0 ? '#f87171' : '#4ade80'};line-height:1;">${highRisk}</div>
-        <div style="font-size:0.55rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;line-height:1.2;">High-Risk<br>Files</div>
-      </div>
-    </div>`;
-
-  container.innerHTML = statsBar + `
-    <div style="display:grid;grid-template-columns:260px 1fr;height:calc(80vh - 44px - 62px);overflow:hidden;">
-      <div id="${leftId}" style="border-right:1px solid var(--border);overflow-y:auto;background:rgba(0,0,0,0.18);">
+  container.innerHTML = `
+    <div style="display:grid;grid-template-columns:260px 1fr;height:100%;min-height:0;overflow:hidden;">
+      <div id="${leftId}" style="border-right:1px solid var(--border);overflow-y:auto;min-height:0;background:rgba(0,0,0,0.18);">
         <div id="${uid}-tree" style="padding:10px 0;"></div>
       </div>
-      <div id="${rightId}" style="overflow-y:auto;"></div>
+      <div id="${rightId}" style="overflow-y:auto;min-height:0;"></div>
     </div>`;
 
   const treeEl  = document.getElementById(uid + '-tree');
@@ -187,6 +418,8 @@ function _cxRenderTreeChildren(childMap, parentEl, rightEl, depth) {
         collapsed = !collapsed;
         childrenEl.style.display = collapsed ? 'none' : '';
         arrowEl.textContent      = collapsed ? '▸' : '▾';
+        const scopedFiles = _cxCollectFiles(node);
+        _cxRenderOverview(scopedFiles, rightEl, { highOnly: true, title: `${node.name} Overview` });
       });
       parentEl.appendChild(row);
       parentEl.appendChild(childrenEl);
@@ -194,10 +427,29 @@ function _cxRenderTreeChildren(childMap, parentEl, rightEl, depth) {
   });
 }
 
+function _cxCollectFiles(node) {
+  if (!node) return [];
+  if (node.type === 'file' && node.file) return [node.file];
+  const out = [];
+  const walk = n => {
+    if (!n) return;
+    if (n.type === 'file' && n.file) {
+      out.push(n.file);
+      return;
+    }
+    const kids = n.children ? Object.values(n.children) : [];
+    kids.forEach(walk);
+  };
+  walk(node);
+  return out;
+}
+
 // ── Right panel: overview ─────────────────────────────────────────────────────
 
-function _cxRenderOverview(files, container) {
-  const topRows = files.slice(0, 15).map(f => {
+function _cxRenderOverview(files, container, options = {}) {
+  const highOnly = !!options.highOnly;
+  const title = options.title || 'TOP COMPLEXITY FILES — click a file in the tree to inspect';
+  const topRows = files.slice(0, 5).map(f => {
     const c   = _complexityColor(f.total_complexity);
     return `
       <div style="display:flex;align-items:center;gap:12px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
@@ -207,11 +459,68 @@ function _cxRenderOverview(files, container) {
       </div>`;
   }).join('');
 
+  const analysis = (typeof window !== 'undefined' && window._ctxCurrentAstAnalysis) ? window._ctxCurrentAstAnalysis : null;
+  const highFindings = analysis && Array.isArray(analysis.findings)
+    ? analysis.findings.filter(f => (f.severity || '').toLowerCase() === 'high')
+    : [];
+  const highCategoryCounts = highFindings.reduce((acc, f) => {
+    const c = f.category || 'other';
+    acc[c] = (acc[c] || 0) + 1;
+    return acc;
+  }, {});
+  const highGroupedByType = highFindings.reduce((acc, f) => {
+    const key = (f.category || 'other').toString();
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(f);
+    return acc;
+  }, {});
+  const findingsHtml = analysis && analysis.topFindings && analysis.topFindings.length
+    ? `
+      <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+        <div style="font-size:0.55rem;font-weight:700;color:var(--text-dim);letter-spacing:0.08em;margin-bottom:8px;">ANALYSIS FINDINGS${highOnly ? ' (HIGH ONLY)' : ''}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:0.5rem;color:var(--text-dim);">
+          ${highOnly
+            ? `<span>High Severity: <strong style="color:#f87171;">${highFindings.length}</strong></span>
+               <span>Structural: <strong style="color:var(--text);">${highCategoryCounts.structural || 0}</strong></span>
+               <span>Security: <strong style="color:var(--text);">${highCategoryCounts.security || 0}</strong></span>
+               <span>Dead Code: <strong style="color:var(--text);">${highCategoryCounts.dead_code || 0}</strong></span>`
+            : `<span>Total: <strong style="color:var(--text);">${analysis.summary.totalFindings}</strong></span>
+               <span>Structural: <strong style="color:var(--text);">${analysis.summary.by_category.structural || 0}</strong></span>
+               <span>Security: <strong style="color:var(--text);">${analysis.summary.by_category.security || 0}</strong></span>
+               <span>Dead Code: <strong style="color:var(--text);">${analysis.summary.by_category.dead_code || 0}</strong></span>`
+          }
+        </div>
+        ${highOnly
+          ? Object.keys(highGroupedByType).sort((a, b) => a.localeCompare(b)).map(type => `
+              <details open style="margin-bottom:6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.02);">
+                <summary style="cursor:pointer;list-style:none;padding:7px 10px;font-size:0.52rem;color:var(--text);font-weight:700;text-transform:capitalize;">
+                  ${_escHtml(type.replace('_', ' '))} · ${highGroupedByType[type].length}
+                </summary>
+                <div style="padding:0 8px 8px;">
+                  ${highGroupedByType[type].slice(0, 12).map(f => `
+                    <div style="padding:6px 8px;border:1px solid rgba(255,255,255,0.08);border-radius:6px;background:rgba(255,255,255,0.01);margin-top:6px;">
+                      <div style="font-size:0.52rem;color:var(--text);font-weight:600;">${_escHtml(f.title)} <span style="color:var(--text-dim);font-weight:400;">(${_escHtml(f.rule_id)})</span></div>
+                      <div style="font-size:0.5rem;color:var(--text-dim);margin-top:2px;">${_escHtml(f.path)}:${f.line} · ${_escHtml(f.detail || '')}</div>
+                    </div>
+                  `).join('')}
+                </div>
+              </details>
+            `).join('')
+          : analysis.topFindings.slice(0, 8).map(f => `
+              <div style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.02);margin-bottom:6px;">
+                <div style="font-size:0.52rem;color:var(--text);font-weight:600;">${_escHtml(f.title)} <span style="color:var(--text-dim);font-weight:400;">(${_escHtml(f.rule_id)})</span></div>
+                <div style="font-size:0.5rem;color:var(--text-dim);margin-top:2px;">${_escHtml(f.path)}:${f.line} · ${_escHtml(f.detail || '')}</div>
+              </div>
+            `).join('')
+        }
+      </div>`
+    : '';
+
   container.innerHTML = `
     <div style="padding:20px 24px;">
 
       <div style="font-size:0.55rem;font-weight:700;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:12px;">
-        TOP COMPLEXITY FILES — click a file in the tree to inspect
+        ${_escHtml(title)}
       </div>
       <div>${topRows}</div>
 
@@ -223,6 +532,7 @@ function _cxRenderOverview(files, container) {
         <span><span style="color:#f87171;">●</span> 21+ High</span>
         <span style="margin-left:auto;font-style:italic;">score = 1 + nested children + line-density bonus</span>
       </div>
+      ${findingsHtml}
     </div>`;
 }
 
@@ -232,6 +542,20 @@ function _cxRenderFileDetail(file, container) {
   if (!file) return;
   const c    = _complexityColor(file.total_complexity);
   const maxC = file.functions.length ? file.functions[0].complexity : 1;
+  const analysis = (typeof window !== 'undefined' && window._ctxCurrentAstAnalysis) ? window._ctxCurrentAstAnalysis : null;
+  const fileFindings = analysis && Array.isArray(analysis.findings)
+    ? analysis.findings.filter(f => (f.path || '') === file.path || (f.path || '').endsWith('/' + file.path))
+    : [];
+  const bySev = fileFindings.reduce((acc, f) => {
+    const s = (f.severity || 'low').toLowerCase();
+    acc[s] = (acc[s] || 0) + 1;
+    return acc;
+  }, { high: 0, medium: 0, low: 0 });
+  const byCat = fileFindings.reduce((acc, f) => {
+    const c = f.category || 'other';
+    acc[c] = (acc[c] || 0) + 1;
+    return acc;
+  }, {});
 
   const rows = file.functions.map(fn => {
     const fc   = _complexityColor(fn.complexity);
@@ -267,41 +591,85 @@ function _cxRenderFileDetail(file, container) {
       </div>
 
       <div class="kb-detail-section">
-        <h5>Metadata</h5>
         <div style="font-size:0.55rem;color:var(--text-dim);">📦 ${_escHtml(file.repo)}</div>
         <div style="font-size:0.55rem;color:var(--text-dim);font-family:var(--font-mono);word-break:break-all;margin-top:2px;">📁 ${_escHtml(file.path)}</div>
       </div>
 
       <div class="kb-detail-section">
-        <h5>Complexity Score</h5>
-        <div style="display:flex;gap:8px;margin-top:4px;">
-          <div style="text-align:center;padding:8px 12px;background:${c.bg};border-radius:6px;border:1px solid ${c.fg}35;">
-            <div style="color:${c.fg};font-size:1.2rem;font-weight:700;">${file.total_complexity}</div>
-            <div style="color:var(--text-dim);font-size:0.45rem;margin-top:2px;">${c.label}</div>
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(70px,1fr));gap:6px;margin-top:8px;">
+          <div style="text-align:center;padding:6px 8px;background:${c.bg};border-radius:6px;border:1px solid ${c.fg}35;">
+            <div style="color:${c.fg};font-size:0.95rem;font-weight:700;">${file.total_complexity}</div>
+            <div style="color:var(--text-dim);font-size:0.42rem;">${c.label}</div>
           </div>
-          <div style="text-align:center;padding:8px 12px;background:rgba(34,211,238,0.08);border-radius:6px;border:1px solid rgba(34,211,238,0.2);">
-            <div style="color:var(--cyan);font-size:1.2rem;font-weight:700;">${file.functions.length}</div>
-            <div style="color:var(--text-dim);font-size:0.45rem;margin-top:2px;">Functions</div>
+          <div style="text-align:center;padding:6px 8px;background:rgba(34,211,238,0.08);border-radius:6px;border:1px solid rgba(34,211,238,0.2);">
+            <div style="color:var(--cyan);font-size:0.95rem;font-weight:700;">${file.functions.length}</div>
+            <div style="color:var(--text-dim);font-size:0.42rem;">Functions</div>
+          </div>
+          <div style="text-align:center;padding:6px 8px;background:rgba(248,113,113,0.08);border-radius:6px;border:1px solid rgba(248,113,113,0.25);">
+            <div style="color:#f87171;font-size:0.95rem;font-weight:700;">${bySev.high || 0}</div>
+            <div style="color:var(--text-dim);font-size:0.42rem;">High</div>
+          </div>
+          <div style="text-align:center;padding:6px 8px;background:rgba(251,146,60,0.08);border-radius:6px;border:1px solid rgba(251,146,60,0.25);">
+            <div style="color:#fb923c;font-size:0.95rem;font-weight:700;">${bySev.medium || 0}</div>
+            <div style="color:var(--text-dim);font-size:0.42rem;">Medium</div>
+          </div>
+          <div style="text-align:center;padding:6px 8px;background:rgba(74,222,128,0.08);border-radius:6px;border:1px solid rgba(74,222,128,0.25);">
+            <div style="color:#4ade80;font-size:0.95rem;font-weight:700;">${bySev.low || 0}</div>
+            <div style="color:var(--text-dim);font-size:0.42rem;">Low</div>
           </div>
         </div>
       </div>
 
       <div class="kb-detail-section" style="margin-top:16px;">
-        <h5>Function Breakdown</h5>
-        <div style="overflow-x:auto;background:var(--bg-main);border-radius:4px;">
-        <table style="width:100%;border-collapse:collapse;">
-          <thead>
-            <tr style="border-bottom:1px solid var(--border);">
-              <th style="padding:5px 10px;font-size:0.5rem;color:var(--text-dim);font-weight:600;text-align:left;"></th>
-              <th style="padding:5px 6px;font-size:0.5rem;color:var(--text-dim);font-weight:600;text-align:left;">Name</th>
-              <th style="padding:5px 6px;font-size:0.5rem;color:var(--text-dim);font-weight:600;text-align:left;">Lines</th>
-              <th style="padding:5px 8px;font-size:0.5rem;color:var(--text-dim);font-weight:600;text-align:center;">Span</th>
-              <th style="padding:5px 8px;font-size:0.5rem;color:var(--text-dim);font-weight:600;text-align:center;">Nested</th>
-              <th style="padding:5px 10px;font-size:0.5rem;color:var(--text-dim);font-weight:600;text-align:left;">Score</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
+        <details open style="border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.02);padding:0 8px 8px;">
+          <summary style="cursor:pointer;list-style:none;padding:8px 0;font-size:0.62rem;color:var(--text);font-weight:700;">Function Breakdown</summary>
+          <div style="overflow-x:auto;background:var(--bg-main);border-radius:4px;">
+            <table style="width:100%;border-collapse:collapse;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <th style="padding:5px 10px;font-size:0.5rem;color:var(--text-dim);font-weight:600;text-align:left;"></th>
+                  <th style="padding:5px 6px;font-size:0.5rem;color:var(--text-dim);font-weight:600;text-align:left;">Name</th>
+                  <th style="padding:5px 6px;font-size:0.5rem;color:var(--text-dim);font-weight:600;text-align:left;">Lines</th>
+                  <th style="padding:5px 8px;font-size:0.5rem;color:var(--text-dim);font-weight:600;text-align:center;">Span</th>
+                  <th style="padding:5px 8px;font-size:0.5rem;color:var(--text-dim);font-weight:600;text-align:center;">Nested</th>
+                  <th style="padding:5px 10px;font-size:0.5rem;color:var(--text-dim);font-weight:600;text-align:left;">Score</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+      <div class="kb-detail-section" style="margin-top:16px;">
+        <details open style="border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.02);padding:0 8px 8px;">
+          <summary style="cursor:pointer;list-style:none;padding:8px 0;font-size:0.62rem;color:var(--text);font-weight:700;">Analysis Findings</summary>
+          ${fileFindings.length
+            ? `
+              <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.52rem;color:var(--text-dim);margin-bottom:8px;">
+                <span>Total: <strong style="color:var(--text);">${fileFindings.length}</strong></span>
+                <span>High: <strong style="color:#f87171;">${bySev.high || 0}</strong></span>
+                <span>Medium: <strong style="color:#fb923c;">${bySev.medium || 0}</strong></span>
+                <span>Low: <strong style="color:#4ade80;">${bySev.low || 0}</strong></span>
+                ${Object.keys(byCat).slice(0, 4).map(cat => `<span>${_escHtml(cat)}: <strong style="color:var(--text);">${byCat[cat]}</strong></span>`).join('')}
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto;padding-right:2px;">
+                ${fileFindings.map(f => {
+                  const sev = (f.severity || 'low').toLowerCase();
+                  const sevColor = sev === 'high' ? '#f87171' : sev === 'medium' ? '#fb923c' : '#4ade80';
+                  return `
+                    <div style="padding:7px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.02);">
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:0.48rem;padding:1px 6px;border-radius:8px;border:1px solid ${sevColor};color:${sevColor};text-transform:uppercase;">${_escHtml(sev)}</span>
+                        <span style="font-size:0.55rem;color:var(--text);font-weight:600;">${_escHtml(f.title || f.rule_id || 'Finding')}</span>
+                        <span style="font-size:0.5rem;color:var(--text-dim);margin-left:auto;">L${f.line || 1}</span>
+                      </div>
+                      <div style="font-size:0.5rem;color:var(--text-dim);margin-top:3px;">${_escHtml(f.detail || '')}</div>
+                    </div>`;
+                }).join('')}
+              </div>`
+            : `<div style="font-size:0.55rem;color:var(--text-dim);">No analysis findings for this file.</div>`
+          }
+        </details>
       </div>
     </div>`;
 }
