@@ -1,638 +1,132 @@
-# 🚀 AI Workflows Dashboard
+# Savant Monorepo
 
-A unified real-time monitoring dashboard for **three AI coding assistants** — GitHub Copilot CLI, Cline (VS Code), and Claude Code. Track sessions, analyze model usage, manage lifecycle, and never lose context across all your AI-assisted workflows.
+## v8.0.0 Hero Release
 
-Dark cyberpunk spaceship-console theme. Dockerized. Port `8090`.
+Savant v8.0.0 is the client-server rewrite baseline.
 
----
+What is happening in this refactor:
+- The product is now split into `savant-app` (client) and `savant-server` (backend).
+- Shared data moves to centralized server storage (API + DB + MCP-side orchestration).
+- Client keeps local-only concerns (UI runtime, terminal/xterm, D3 views, local cache, offline queue).
+- Client/server integration is standardized through HTTP/SSE contracts for enterprise deployment.
 
-## What Is This?
+Savant is now split into two independent applications:
 
-Every time you use an AI coding assistant, it generates session data — conversations, tool calls, model usage, file changes, checkpoints. This data lives scattered across your filesystem in different formats:
+- `client/` — Electron desktop app (`savant-app`)
+- `server/` — Python API + MCP backend (`savant-server`)
 
-- **Copilot CLI** → `~/.copilot/session-state/` (YAML + JSONL)
-- **Cline** → `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks/` (JSON)
-- **Claude Code** → `~/.claude/projects/` (JSONL + JSON)
+There is no shared runtime code import between `client` and `server`.  
+The client integrates with the server only through HTTP/SSE APIs.
 
-This dashboard unifies all three into a single interface with consistent cards, filters, analytics, and management tools.
+## Canonical Agent Guidance
 
----
+For architecture, engineering methodology, and complete install/run/test/build/deploy instructions, use:
 
-## Why You Need This
+- [AGENTIC.md](./AGENTIC.md)
 
-| Without Dashboard | With Dashboard |
-|---|---|
-| Sessions disappear into filesystem noise | Every session is visible with status, project, model, timestamps |
-| No idea which sessions are still active | Live status detection: RUNNING, ACTIVE, WAITING, IDLE, DORMANT |
-| Can't search across conversations | Deep text search across all messages and tool calls |
-| Manual cleanup of stale sessions | Bulk purge dormant sessions with disk space reclaim |
-| No usage analytics | Model usage, tool frequency, daily activity charts |
-| Context-switching loses track of work | Star important sessions, rename with nicknames, command palette |
+## Repository Layout
 
----
-
-## Getting Started
-
-### Prerequisites
-
-- Docker & Docker Compose
-- At least one of: Copilot CLI, Cline (VS Code), or Claude Code installed
-
-### Start the Dashboard
-
-```bash
-# From the repository root
-docker compose up -d --build
-
-# Open in browser
-open http://localhost:8090
+```text
+savant-app/
+  client/   # Electron app, local cache, offline queue, local agent runtime
+  server/   # Flask backend, MCP servers, web UI assets, persistence
 ```
 
-That's it. The dashboard auto-discovers all three AI tools from their default data directories.
+## Team Ownership
 
-### Running Without Docker
+- **Client team**
+  - owns `client/`
+  - desktop UX, offline queue, local preferences, terminal/agent runtime
+- **Server team**
+  - owns `server/`
+  - API contracts, MCP orchestration, indexing, knowledge graph, notifications
+
+## Run Independently
+
+### 1) Server
 
 ```bash
-cd app
-pip install -r requirements.txt
-pip install -r mcp/requirements.txt
+cd server
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
 python app.py
-# Production mode:
-gunicorn --bind 0.0.0.0:8090 --workers 2 --timeout 30 app:app
 ```
 
----
+Server defaults to `http://127.0.0.1:8090`.
 
-## Your First 5 Minutes
-
-Here's what to do the first time you open the dashboard:
-
-### 1. Pick Your Mode
-
-The top-right of the dashboard has three mode buttons: **COPILOT**, **CLINE**, **CLAUDE**. Click the one matching the tool you use most. Each mode reads from that tool's data directory and shows all its sessions.
-
-### 2. Browse Your Sessions
-
-Sessions appear as cards in a grid (default view). Each card shows:
-- **Summary** — first prompt or task description
-- **Project & branch** — where you were working
-- **Model badges** — which AI models were used (color-coded)
-- **Stats** — message count, turn count, tool count
-- **Activity timeline** — 24-segment heatmap of session activity
-- **Status badge** — ACTIVE, IDLE, DORMANT, etc.
-
-### 3. Open a Session Detail
-
-Click any card to see the full session: overview stats, complete conversation (with Mermaid diagrams and syntax highlighting), checkpoints, and git changes — all in a tabbed interface.
-
-### 4. Star Your Important Sessions
-
-Click the ⭐ icon on any card to pin it. Starred sessions sort to the top and appear in the pinned rail on the left sidebar.
-
-### 5. Try the Command Palette
-
-Press `⌘K` (Mac) or `Ctrl+K` — fuzzy-search any session by name, project, branch, or intent. Press Enter to copy a resume command, or Shift+Enter to jump to the card.
-
----
-
-## Typical Developer Workflow
-
-> *You're working on a feature across multiple AI assistants throughout the day. Here's how the dashboard fits in.*
-
-**Morning** — Open the dashboard. Switch to Copilot mode. Your yesterday sessions are there, sorted by last activity. The one you were working on shows `IDLE`. Click it to review the conversation and remember where you left off. Copy the resume command and pick up in terminal.
-
-**Midday** — You switch to Cline in VS Code for a refactoring task. Later, open the dashboard in Cline mode. Your new Cline task appears at the top with `ACTIVE` status. You can watch the tool calls happen in near-real-time as the background cache refreshes every 30 seconds.
-
-**Afternoon** — You use Claude Code for a complex architecture discussion. Switch to Claude mode. All your Claude sessions appear with the same card format — project, model, conversation, tools.
-
-**End of day** — Check the Usage Intelligence panel (click "Usage Intelligence" header to expand). See your model usage breakdown, daily activity chart, and top tools. Notice you have 30 dormant sessions — click "PURGE DORMANT", select the ones you don't need, and reclaim disk space.
-
----
-
-## Three Modes
-
-### 🤖 Copilot Mode
-
-Reads from `~/.copilot/session-state/`. Each session is a UUID directory containing:
-- `workspace.yaml` — project, branch, working directory
-- `events.jsonl` — every event: messages, tool calls, model responses
-- `plan.md`, `checkpoints/`, `files/`, `research/`, `rewind-snapshots/`
-
-**Unique features**: MCP server cards, resume command copy, open-session detection (green dot), checkpoint/rewind viewer, research files.
-
-### 🔧 Cline Mode
-
-Reads from VS Code's Cline extension storage. Each task is a timestamp directory containing:
-- `ui_messages.json` — full conversation with tool calls
-- `task_metadata.json` — API usage stats
-- Task history from `task_history.json`
-
-**Unique features**: Cost tracking (total cost per task), token counts (in/out/cache), MCP server usage, checkpoint count from `checkpoint_created` events.
-
-### 🧠 Claude Mode
-
-Reads from `~/.claude/`. Sessions are JSONL files under `projects/` directories:
-- `{session_id}.jsonl` — conversation messages
-- `{session_id}/` — artifact directory (tool results, subagents)
-- `history.jsonl` — session history with metadata
-
-**Unique features**: Subagent detection, multi-project scoping, git branch from directory context, cost tracking from token usage.
-
----
-
-## Features
-
-### 🧠 Usage Intelligence
-
-Collapsible top panel with deep analytics mined from session data:
-
-| Metric | Description |
-|--------|-------------|
-| **Summary Stats** | Total sessions, messages, turns, tool calls, total hours, avg duration |
-| **Model Usage** | Calls per model with visual bars (Opus=purple, Sonnet=cyan, Haiku=green) |
-| **Daily Activity** | 14-day stacked bar chart — tool calls (cyan) + messages (magenta) |
-| **Efficiency** | Tools/turn ratio, turns/message ratio, total events |
-| **Top Tools** | Ranked list of most-used tools with gradient bars |
-
-Works across all three modes — each mode mines its own data format.
-
-### ⬡ MCP Server Cards (Copilot Mode)
-
-Collapsible panel showing all connected MCP servers:
-- Each server rendered as a card with name, type, command
-- Discovered tools (mined from actual session usage) with scrollable grid
-- Secrets automatically masked in display
-
-### 📊 Session Analytics
-
-Collapsible panel with:
-- Sessions per day (7-day bar chart)
-- Most active projects (ranked list)
-- Most used tools (bar visualization)
-- Weekly session time totals
-
-### 📡 Background Cache & Real-Time Refresh
-
-The backend runs a **background daemon thread** that continuously refreshes data:
-
-| Data | Refresh Interval |
-|------|-----------------|
-| Session lists (all modes) | Every 30 seconds |
-| Usage analytics | Every 120 seconds |
-
-**Why this matters**: The frontend never waits for slow filesystem scans. All API reads come from an in-memory cache, delivering **2–8ms response times** for session lists. The UI auto-refreshes every 10 seconds (main page) and 5 seconds (detail page).
-
-If data isn't ready yet, the API returns `{"loading": true}` and the frontend retries in 3 seconds.
-
-### 📋 Session Cards
-
-Each card displays:
-- Session name/summary (editable via rename)
-- Project, branch, current intent
-- Start/update timestamps with relative time
-- **Model badges** with call counts (color-coded)
-- **Stats line**: messages · turns · tools count
-- **Activity timeline** — 24-segment heatmap showing when work happened
-- **Asset tags**: 📍 checkpoints, 📄 files, 🔬 research, 📋 plan
-- Tool tags (truncated with overflow indicator)
-
-**Card actions** (top-right icons):
-- `?` — Info tooltip with full session details
-- 📋 — Copy resume command (Copilot) / session info (Cline/Claude)
-- ⭐ — Star/unstar session
-- Status badge with color-coded indicator
-- 🗑 — Delete session (with confirmation)
-
-### 📄 Pagination
-
-Sessions load **30 at a time** for fast initial render. The count label shows `X of Y` (loaded vs total). Click the **▸▸** button next to the count to load the next 30. Button disables when all sessions are loaded.
-
-### 🗂 View Modes
-
-| Mode | Description |
-|------|-------------|
-| **Grid** (default) | Flat card grid of all sessions |
-| **Grouped** | Sessions grouped by project with collapsible sections |
-
-Toggle with buttons in the filter bar.
-
-### 🔍 Filtering & Search
-
-| Filter | Description |
-|--------|-------------|
-| **Status** | Dynamic buttons generated from actual statuses |
-| **Project** | Dropdown of all projects |
-| **Date Range** | Filter by session start date |
-| **Text Search** | Live card filtering; press `Enter` for deep context search |
-| **Starred** | Show only starred sessions |
-| **Open Only** | Show only active sessions |
-
-### 📄 Session Detail Page
-
-Tabbed interface with 4 tabs (navigate with `{` and `}` keys):
-
-#### Tab 1: Overview
-- **Session Info** — ID, project, branch, working dir, timestamps, duration, disk usage, intent
-- **Session Stats** — Message counts, tool calls, success rate, thinking usage, events, turns
-- **Models Used** — Per-model call counts with visual bars
-- **Conversation Flow** — Visual segment bar (user/assistant/tool) with hover tooltips
-- **Activity Timeline** — Time-based heatmap with tooltips
-- **Tool Usage** — Ranked bar chart
-- **Session Files** — Grouped file listing with timestamps
-
-#### Tab 2: Conversation
-- **Reverse chronological order** (latest messages first)
-- **Full local timestamps** on every message
-- Markdown rendering with **Mermaid diagram** support
-- **Syntax-highlighted** code blocks (highlight.js)
-- Collapsible tool calls with success/failure indicators
-- Expandable thinking/reasoning blocks
-- **Search** (`/` shortcut): type to find, `Enter` cycles matches, `Esc` clears
-
-#### Tab 3: Checkpoints & Rewind
-- Checkpoint files sorted by timestamp
-- Rewind snapshots, plan files
-- Click any file to open in the file viewer modal
-
-#### Tab 4: Git Changes
-- **Commits** — SHA, branch, message, file stats
-- **File Summary** — All files touched with change counts
-- **Git Command Log** — Full history of git commands from the session
-
-### 📂 Multi-language AST Exploration
-
-The dashboard now includes deep structural analysis of your codebase:
-- **Automatic AST Generation** — Classes, functions, and methods are indexed during repository scan.
-- **Language Support** — Python, JavaScript, TypeScript, Ruby, Go, Java, C++, Rust, PHP, and more.
-- **Structural Search** — AI agents can query the AST directly to find definitions and implementations.
-- **Interactive Map** — Explore the code structure globally across all indexed projects.
-
-### 📂 File Viewer Modal
-
-Full-viewport modal (92vw × 90vh) with smart rendering:
-
-| File Type | Rendering |
-|-----------|-----------|
-| **Markdown** (`.md`) | Rendered HTML with Mermaid diagrams |
-| **HTML** (`.html`) | Rendered in sandboxed iframe |
-| **Code files** | Syntax-highlighted (highlight.js, github-dark) |
-| **Plain text** | Raw text display |
-
-Supports 30+ languages. Copy button works for all file types.
-
-### ⌨️ Command Palette (`⌘K` / `Ctrl+K`)
-
-Quick-find any session:
-- Fuzzy search by name, project, branch, intent, or status
-- `↑↓` navigate · `Enter` copy resume command · `⇧Enter` jump to card
-
-### 📌 Pinned Sessions Rail
-
-Left sidebar showing starred + active sessions as colored status dots. Click to jump.
-
-### 🔔 Browser Notifications
-
-Desktop alerts when a session transitions to WAITING or STUCK.
-
-### 🧹 Bulk Cleanup
-
-- **PURGE DORMANT** button toggles bulk mode with checkboxes
-- "Select All Dormant" for quick selection
-- Shows selected count + reclaimable disk space
-- Mass delete with confirmation (won't delete open sessions)
-
-### 🗑 Session Management
-
-| Action | Description |
-|--------|-------------|
-| **Star** | Pin sessions for quick access |
-| **Rename** | Custom nicknames (stored in sidecar metadata) |
-| **Delete** | Remove session data with confirmation |
-| **Resume** | Copy resume command (Copilot mode) |
-
----
-
-## Sort Order
-
-Sessions are sorted by:
-1. ⭐ Starred sessions first
-2. Status priority: RUNNING → PROCESSING → ACTIVE → WAITING → STUCK → IDLE → ABORTED → DORMANT
-3. Most recent last activity first
-
----
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    Browser (port 8090)                        │
-│  index.html — Dashboard with mode switcher (Copilot/Cline/Claude)  │
-│  detail.html — Session detail (4 tabs)                       │
-│  Dark cyberpunk theme · Orbitron + JetBrains Mono fonts      │
-└───────────────────────┬──────────────────────────────────────┘
-                        │ fetch() · auto-refresh 10s/5s
-┌───────────────────────▼──────────────────────────────────────┐
-│              Flask + Gunicorn (Python 3.12)                   │
-│                                                              │
-│  Background Cache Thread (daemon)                            │
-│  ├── Refreshes session lists every 30s                       │
-│  ├── Refreshes usage analytics every 120s                    │
-│  └── All API reads from in-memory cache (2-8ms)              │
-│                                                              │
-│  /api/sessions · /api/session/<id> · /api/usage              │
-│  /api/cline/tasks · /api/cline/task/<id>                     │
-│  /api/claude/sessions · /api/claude/session/<id>             │
-│  /api/search · /api/mcp · /api/analytics                     │
-└───────────┬─────────────┬──────────────┬─────────────────────┘
-            │             │              │
-  ┌─────────▼───────┐ ┌──▼──────────┐ ┌─▼──────────────┐
-  │ ~/.copilot/     │ │ VS Code     │ │ ~/.claude/      │
-  │ session-state/  │ │ Cline ext/  │ │ projects/       │
-  │ mcp-config.json │ │ tasks/      │ │ history.jsonl   │
-  │                 │ │ state/      │ │ stats-cache.json│
-  │ YAML + JSONL    │ │ JSON        │ │ JSONL + JSON    │
-  └─────────────────┘ └─────────────┘ └─────────────────┘
-```
-
-### Status Detection Logic
-
-| Status | Condition |
-|--------|-----------|
-| **RUNNING** | Active tools executing, last event < 10 min ago |
-| **PROCESSING** | Assistant turn in progress, < 10 min ago |
-| **ACTIVE** | Last event < 2 min ago |
-| **WAITING** | Assistant finished turn, < 5 min ago |
-| **IDLE** | Assistant finished turn, < 30 min ago |
-| **STUCK** | Active tools/processing but > 10 min stale |
-| **ABORTED** | Session has an abort event |
-| **DORMANT** | No activity for 30+ minutes |
-
----
-
-## API Reference
-
-### Copilot Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/sessions?limit=N&offset=N` | GET | Sessions with pagination |
-| `/api/session/<id>` | GET | Full session detail |
-| `/api/session/<id>` | DELETE | Delete session (blocked if open) |
-| `/api/session/<id>/conversation` | GET | Conversation with stats |
-| `/api/session/<id>/git-changes` | GET | Git commits and file changes |
-| `/api/session/<id>/file?path=<p>` | GET | Raw file contents |
-| `/api/session/<id>/rename` | POST | `{"nickname": "..."}` |
-| `/api/session/<id>/star` | POST | Toggle star |
-| `/api/sessions/bulk-delete` | POST | `{"ids": ["uuid1", ...]}` |
-| `/api/search?q=<query>` | GET | Deep search across conversations |
-| `/api/mcp` | GET | MCP servers with discovered tools |
-| `/api/usage` | GET | Aggregated usage analytics |
-| `/api/analytics` | GET | Daily counts, top projects |
-
-### Cline Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/cline/tasks?limit=N&offset=N` | GET | Tasks with pagination |
-| `/api/cline/task/<id>` | GET | Full task detail |
-| `/api/cline/task/<id>` | DELETE | Delete task |
-| `/api/cline/task/<id>/conversation` | GET | Conversation with stats |
-| `/api/cline/task/<id>/rename` | POST | `{"nickname": "..."}` |
-| `/api/cline/task/<id>/star` | POST | Toggle star |
-| `/api/cline/tasks/bulk-delete` | POST | `{"ids": ["id1", ...]}` |
-| `/api/cline/search?q=<query>` | GET | Search across task messages |
-| `/api/cline/usage` | GET | Cline usage analytics |
-| `/api/cline/task/<id>/project-files` | GET | Project file listing |
-| `/api/cline/task/<id>/git-changes` | GET | Git changes from task |
-
-### Claude Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/claude/sessions?limit=N&offset=N` | GET | Sessions with pagination |
-| `/api/claude/session/<id>` | GET | Full session detail |
-| `/api/claude/session/<id>` | DELETE | Delete session |
-| `/api/claude/session/<id>/conversation` | GET | Conversation with stats |
-| `/api/claude/session/<id>/rename` | POST | `{"nickname": "..."}` |
-| `/api/claude/session/<id>/star` | POST | Toggle star |
-| `/api/claude/sessions/bulk-delete` | POST | `{"ids": ["id1", ...]}` |
-| `/api/claude/search?q=<query>` | GET | Search across sessions |
-| `/api/claude/usage` | GET | Claude usage analytics |
-
-All list endpoints support `?limit=N&offset=N` and return `{sessions, total, has_more}`.
-
----
-
-## Configuration
-
-### Docker Compose
-
-```yaml
-services:
-  app:
-    build: ./app
-    container_name: workflows-app
-    ports:
-      - "8090:8090"
-    volumes:
-      - ~/.copilot/session-state:/data/session-state
-      - ~/.copilot/mcp-config.json:/data/mcp-config.json:ro
-      - ~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks:/data/cline-tasks
-      - ~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/state:/data/cline-state:ro
-      - ~/.claude:/data/claude
-      - claude-meta:/data/meta
-    environment:
-      - SESSION_DIR=/data/session-state
-      - MCP_CONFIG=/data/mcp-config.json
-      - CLINE_TASKS_DIR=/data/cline-tasks
-      - CLINE_STATE_DIR=/data/cline-state
-      - CLAUDE_DIR=/data/claude
-      - META_DIR=/data/meta
-    restart: unless-stopped
-
-volumes:
-  claude-meta:
-```
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SESSION_DIR` | `~/.copilot/session-state` | Copilot session state directory |
-| `MCP_CONFIG` | `~/.copilot/mcp-config.json` | MCP server configuration file |
-| `CLINE_TASKS_DIR` | `~/Library/.../saoudrizwan.claude-dev/tasks` | Cline tasks directory |
-| `CLINE_STATE_DIR` | `~/Library/.../saoudrizwan.claude-dev/state` | Cline state directory (read-only) |
-| `CLAUDE_DIR` | `~/.claude` | Claude Code data directory |
-| `META_DIR` | `/data/meta` | Persistent metadata store (star/nickname for Claude) |
-
-### Changing the Port
-
-```yaml
-ports:
-  - "3000:8090"  # Access on port 3000 instead
-```
-
----
-
-## Keyboard Shortcuts
-
-### Main Page
-
-| Shortcut | Action |
-|----------|--------|
-| `⌘K` / `Ctrl+K` | Open command palette |
-| `/` | Focus search (live card filtering) |
-| `Enter` (in search) | Deep context search popup |
-| `Escape` | Close palette / modals / clear search |
-| `↑` / `↓` | Navigate command palette results |
-| `Enter` (palette) | Copy resume command |
-| `⇧Enter` (palette) | Jump to session card |
-| `j` / `k` | Navigate cards |
-| `s` | Star/unstar focused card |
-
-### Session Detail Page
-
-| Shortcut | Action |
-|----------|--------|
-| `}` | Next tab |
-| `{` | Previous tab |
-| `/` | Open conversation search |
-| `Enter` (search) | Cycle to next match |
-| `Escape` | Close modal / clear search |
-
----
-
-## Project Structure
-
-```
-app/
-├── app.py              # Flask backend — all 3 mode backends + background cache (~3800 lines)
-├── requirements.txt    # Flask 3.1, PyYAML 6.0, Gunicorn 23.0
-├── Dockerfile          # Python 3.12-slim, gunicorn with 2 workers
-├── templates/
-│   ├── index.html      # Main dashboard — mode switcher, cards, filters, analytics (~3800 lines)
-│   └── detail.html     # Session detail — 4 tabs, visualizations (~2300 lines)
-├── static/             # Static assets
-└── README.md           # This file
-```
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python 3.12, Flask 3.1, Gunicorn |
-| Frontend | Vanilla HTML/CSS/JS (zero frameworks, zero build step) |
-| Fonts | Orbitron (headers), JetBrains Mono (code/data) |
-| Markdown | marked.js via CDN |
-| Diagrams | Mermaid.js 11 (sequence, flowchart, mindmap, etc.) |
-| Syntax Highlighting | highlight.js with github-dark theme |
-| Container | Docker, Python 3.12-slim base |
-| Data | Direct filesystem reads — YAML, JSONL, JSON, Markdown |
-| Caching | In-memory background thread with reader-writer lock |
-
-No database. No build tools. No npm. No frameworks.
-
----
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| No sessions shown | Verify the data directory exists for your mode |
-| Copilot: no sessions | Check `~/.copilot/session-state/` has session UUID dirs |
-| Cline: no tasks | Check Cline extension is installed in VS Code |
-| Claude: no sessions | Check `~/.claude/projects/` has JSONL files |
-| Delete not working | Ensure volumes are mounted read-write (not `:ro`) |
-| MCP shows "not configured" | Check `~/.copilot/mcp-config.json` exists |
-| Slow initial load | Wait ~30s for background cache to build on first start |
-| Stale data after rebuild | HTML has no-cache headers; hard refresh if needed |
-| Container won't start | Run `docker compose logs app` |
-
-### Rebuild After Changes
+### 2) Client
 
 ```bash
-docker compose up -d --build
+cd client
+npm install
+SAVANT_SERVER_URL=http://127.0.0.1:8090 npm run dev
 ```
 
----
+The client stores one server URL per install in local SQLite preferences.
 
-## AI Agent MCP Setup
+## Environment Variables
 
-Savant acts as a central hub for your AI coding agents. When you enable a provider in Savant's preferences, it automatically configures that agent's MCP (Model Context Protocol) connections so the agent can talk to Savant's servers and any installed stdio-based MCP tools.
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| **Connectivity** | | |
+| `SAVANT_SERVER_URL` | URL of the Flask server (used by Electron client). | `http://127.0.0.1:8090` |
+| `SAVANT_FLASK_PORT` / `FLASK_PORT` | Port for the Flask server. | `8090` |
+| `FLASK_HOST` | Host to bind the Flask server to. | `0.0.0.0` |
+| `SAVANT_API_BASE` | Base URL used by MCP servers to reach the Flask API. | `http://localhost:8090` |
+| **MCP Ports** | | |
+| `SAVANT_MCP_PORT` | Port for the **Workspace** MCP server. | `8091` |
+| `SAVANT_ABILITIES_MCP_PORT` | Port for the **Abilities** MCP server. | `8092` |
+| `SAVANT_CONTEXT_MCP_PORT` | Port for the **Context** MCP server. | `8093` |
+| `SAVANT_KNOWLEDGE_MCP_PORT` | Port for the **Knowledge** MCP server. | `8094` |
+| **Data Directories** | | |
+| `SAVANT_SERVER_DATA_DIR` | Server-owned persistent data root (mount this in Docker). | `/data/savant` (Docker) or `server/data` (local) |
+| `SAVANT_DB` | Explicit SQLite DB path override. | `<SAVANT_SERVER_DATA_DIR>/savant.db` |
+| `SAVANT_ABILITIES_DIR` | Explicit abilities base dir override (`<base>/abilities/...`). | `<SAVANT_SERVER_DATA_DIR>` |
+| `SAVANT_ABILITIES_SEED_DIR` | Seed source for abilities bootstrap. | `./savant/abilities` (repo) |
+| `SESSION_DIR` | Path to GitHub Copilot CLI session state. | `~/.copilot/session-state` |
+| `CLAUDE_DIR` | Path to Claude Code session data. | `~/.claude` |
+| `GEMINI_DIR` | Path to Gemini CLI configuration. | `~/.gemini` |
+| `CODEX_DIR` | Path to Codex CLI data. | `~/.codex` |
+| `HERMES_DIR` | Path to Hermes Agent data. | `~/.hermes` |
+| `META_DIR` | Path to Savant metadata (workspaces, MRs). | `~/.savant/meta` |
+| **Context & Models** | | |
+| `EMBEDDING_MODEL_DIR` | Custom path for the embedding model files. | (Bundled/User home) |
+| `EMBEDDING_MODEL_NAME` | Model name for sentence-transformers. | `stsb-distilbert-base` |
+| `EMBEDDING_VERSION` | Version tag for the model. | `v1` |
+| **App Behavior** | | |
+| `RUNNING_IN_DOCKER` | Set to `1` or `true` if running in a container. | (Auto-detected) |
+| `SAVANT_DISABLE_BG_CACHE` | Set to `1` to disable the server's background cache worker. | `0` |
+| `SHELL` | Default shell for the persistent terminal. | `$SHELL` or `/bin/zsh` |
 
-### What Happens on Setup
+## Testing
 
-When you enable a provider (via the preferences UI or `POST /api/setup-mcp`), Savant:
+### Server backend coverage
 
-1. **Locates the agent's config file** — each provider stores MCP config in a different place and format:
-
-   | Provider | Config File | Format |
-   |----------|------------|--------|
-   | Copilot CLI | `~/.copilot/mcp-config.json` | JSON |
-   | Claude Code | `.mcp.json` (project-level) | JSON |
-   | Codex | `~/.codex/config.toml` | TOML |
-   | Hermes | `~/.hermes/config.yaml` | YAML |
-
-2. **Adds Savant's 4 SSE servers** — these are the MCP servers Savant runs locally:
-
-   | Server | Port | Purpose |
-   |--------|------|---------|
-   | `savant-workspace` | 8091 | Workspaces, tasks, Jira tickets, merge requests, sessions |
-   | `savant-abilities` | 8092 | Personas, rules, policies, prompt resolution |
-   | `savant-context` | 8093 | Semantic code search, memory bank, repo info |
-   | `savant-knowledge` | 8094 | Knowledge graph — store, search, traverse, connect |
-
-3. **Adds stdio MCP servers** (if the binary is installed on the machine):
-
-   | Server | Binary | Purpose |
-   |--------|--------|---------|
-   | `gitlab` | `gitlab-mcp` | GitLab issues, MRs, pipelines, repos |
-   | `atlassian` | `mcp-atlassian` | Jira and Confluence via Atlassian API |
-
-   These are only added if `which <binary>` finds the tool. If you haven't installed `gitlab-mcp` or `mcp-atlassian`, those entries are silently skipped.
-
-4. **For Hermes specifically**, two extra things happen:
-   - **SSE transport patches** — Hermes's MCP client is patched to support SSE connections (it defaults to stdio)
-   - **Savant skills are installed** — 4 skill files are copied to `~/.hermes/skills/savant/`:
-     - `platform` — comprehensive guide to all 4 MCP servers (abilities, workspaces, knowledge, context)
-     - `gitlab-mr-review` — GitLab MR review workflow with Savant workspace integration
-     - `session-provider` — adding new AI session providers to Savant
-     - `test-runner` — running Savant's pytest suite safely
-
-### Idempotent and Safe
-
-- **MCP entries** use "skip if already present" logic — running setup multiple times is safe
-- **Skills** use content-based dedup — files are only overwritten if the source has changed
-- **No credentials are stored** in config files — agents inherit tokens from shell environment variables (`GITLAB_TOKEN`, `JIRA_API_TOKEN`, etc.)
-
-### Required Environment Variables
-
-For the stdio MCP servers to authenticate, these must be set in your shell:
-
-```
-# GitLab
-GITLAB_TOKEN=glpat-xxxxx
-
-# Atlassian (Jira + Confluence)
-JIRA_URL=https://your-org.atlassian.net
-JIRA_USERNAME=you@company.com
-JIRA_API_TOKEN=xxxxx
-CONFLUENCE_URL=https://your-org.atlassian.net/wiki
-CONFLUENCE_USERNAME=you@company.com
-CONFLUENCE_API_TOKEN=xxxxx
+```bash
+cd server
+pytest
 ```
 
-### What Each Agent Gets
+Configured via `server/pytest.ini` with `pytest-cov`.
 
-After setup, every agent can use MCP tools to:
+### Server frontend contract tests
 
-- **Search code** semantically across all indexed repos
-- **Manage workspaces** — create tasks, track Jira tickets and MRs
-- **Store and query knowledge** — build a persistent knowledge graph across sessions
-- **Resolve abilities** — load personas, rules, and policies for consistent agent behavior
-- **Query GitLab** — read issues, review MRs, check pipelines (if gitlab-mcp installed)
-- **Query Jira/Confluence** — search tickets and docs (if mcp-atlassian installed)
+```bash
+cd server
+npm run test:frontend
+```
 
-The agent doesn't need to know about config formats or server ports — Savant handles all of that on setup.
+### Client tests
+
+```bash
+cd client
+npm test
+npm run test:coverage
+```
+
+## Production Notes
+
+- Server should run in enterprise infrastructure (VM/Docker/K8s).
+- Client remains fully usable for local agent workflows when server is offline.
+- Server-bound mutations are queued locally and replayed in strict FIFO order when connectivity returns.

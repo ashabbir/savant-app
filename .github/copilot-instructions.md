@@ -1,5 +1,10 @@
 # Copilot Instructions — Savant App
 
+## Canonical Guidance
+
+`AGENTIC.md` at repo root is the canonical source for architecture, boundaries, and install/run/test/build/deploy workflows.
+When this file and `AGENTIC.md` differ, follow `AGENTIC.md`.
+
 ## Architecture
 
 Savant is an **Electron + Flask + MCP** desktop app for monitoring AI coding sessions (Copilot CLI, Cline, Claude Code).
