@@ -44,6 +44,14 @@ function formatDuration(start, end) {
 }
 
 function showLoadingThenNavigate(url) {
+  if (window.electronAPI && typeof window.electronAPI.navigate === 'function') {
+    window.electronAPI.navigate(url).then((result) => {
+      if (!result || !result.ok) window.location.href = url;
+    }).catch(() => {
+      window.location.href = url;
+    });
+    return;
+  }
   window.location.href = url;
 }
 

@@ -14,8 +14,14 @@ app.commandLine.appendSwitch("disable-gpu-sandbox");
 process.stdout.on("error", () => {});
 process.stderr.on("error", () => {});
 process.on("uncaughtException", (err) => {
-  if (err.code === "EPIPE" || err.code === "EIO") return;
-  // swallow pipe errors completely during shutdown
+  if (err && (err.code === "EPIPE" || err.code === "EIO")) return;
+  _err("Uncaught exception:", err && (err.stack || err.message) ? (err.stack || err.message) : err);
+});
+process.on("unhandledRejection", (reason) => {
+  _err("Unhandled rejection:", reason && (reason.stack || reason.message) ? (reason.stack || reason.message) : reason);
+});
+process.on("warning", (warning) => {
+  _err("Process warning:", warning && (warning.stack || warning.message) ? (warning.stack || warning.message) : warning);
 });
 
 // Safe console wrapper — never throws on broken pipes
@@ -413,6 +419,30 @@ function _injectOfflineFetchQueuePatch(targetWindow) {
       };
     })();
   `).catch(() => {});
+}
+
+function _attachWebContentsDiagnostics(webContents, label) {
+  if (!webContents || webContents.isDestroyed()) return;
+  if (webContents.__savantDiagnosticsAttached) return;
+  webContents.__savantDiagnosticsAttached = true;
+  webContents.setMaxListeners(50);
+
+  webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    _err(`[${label}] did-fail-load code=${errorCode} mainFrame=${!!isMainFrame} url=${validatedURL} err=${errorDescription}`);
+  });
+  webContents.on("render-process-gone", (_event, details) => {
+    _err(`[${label}] render-process-gone reason=${details && details.reason ? details.reason : "unknown"} exitCode=${details && details.exitCode != null ? details.exitCode : "?"}`);
+  });
+  webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    const lvl = Number(level) >= 2 ? "ERROR" : "INFO";
+    _appendLog(lvl, [`[${label}] renderer console`, message, `(${sourceId || "unknown"}:${line || 0})`]);
+  });
+  webContents.on("did-navigate", (_event, url) => {
+    _log(`[${label}] did-navigate ${url}`);
+  });
+  webContents.on("did-navigate-in-page", (_event, url) => {
+    _log(`[${label}] did-navigate-in-page ${url}`);
+  });
 }
 
 // ── Terminal PTY Manager ────────────────────────────────────────────────────
@@ -975,6 +1005,7 @@ function createWindow() {
     },
     show: false,
   });
+  _attachWebContentsDiagnostics(mainWindow.webContents, "main");
 
   // Open external links (window.open, target="_blank") in default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -1010,6 +1041,20 @@ function createWindow() {
       document.querySelectorAll('.container, .detail-container').forEach(el => {
         el.style.marginRight = '';
       });
+      if (!window.__savantErrorHooksInstalled) {
+        window.__savantErrorHooksInstalled = true;
+        window.addEventListener('error', (ev) => {
+          const src = ev && ev.filename ? ev.filename : 'unknown';
+          const ln = ev && ev.lineno ? ev.lineno : 0;
+          const col = ev && ev.colno ? ev.colno : 0;
+          const msg = ev && ev.message ? ev.message : 'window error';
+          console.error('[window-error]', msg, src + ':' + ln + ':' + col);
+        });
+        window.addEventListener('unhandledrejection', (ev) => {
+          const reason = ev && ev.reason ? ev.reason : 'unknown rejection';
+          console.error('[window-unhandledrejection]', reason);
+        });
+      }
     `).catch(() => {});
     mainWindow.webContents.insertCSS(`
       /* All interactive elements must not be draggable */
@@ -1079,6 +1124,7 @@ function createTermView() {
       preload: path.join(__dirname, "preload.js"),
     },
   });
+  _attachWebContentsDiagnostics(termView.webContents, "terminal-view");
 
   termView.webContents.loadFile(path.join(__dirname, "terminal.html"));
 
@@ -1350,6 +1396,7 @@ function openNewWindow() {
       preload: path.join(__dirname, "preload.js"),
     },
   });
+  _attachWebContentsDiagnostics(win.webContents, "extra-window");
 
   // Open external links in default browser
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -1378,6 +1425,20 @@ function openNewWindow() {
         bar.style.cssText = 'position:fixed;top:0;left:0;right:0;height:42px;z-index:1;-webkit-app-region:drag;-webkit-user-select:none;pointer-events:auto;';
         document.body.prepend(bar);
       }
+      if (!window.__savantErrorHooksInstalled) {
+        window.__savantErrorHooksInstalled = true;
+        window.addEventListener('error', (ev) => {
+          const src = ev && ev.filename ? ev.filename : 'unknown';
+          const ln = ev && ev.lineno ? ev.lineno : 0;
+          const col = ev && ev.colno ? ev.colno : 0;
+          const msg = ev && ev.message ? ev.message : 'window error';
+          console.error('[window-error]', msg, src + ':' + ln + ':' + col);
+        });
+        window.addEventListener('unhandledrejection', (ev) => {
+          const reason = ev && ev.reason ? ev.reason : 'unknown rejection';
+          console.error('[window-unhandledrejection]', reason);
+        });
+      }
     `).catch(() => {});
     win.webContents.insertCSS(`
       button, input, select, textarea, a, label,
@@ -1395,12 +1456,6 @@ function openNewWindow() {
   _extraWindows.add(win);
   win.on("closed", () => _extraWindows.delete(win));
   _log(`Opened new window (total: ${_extraWindows.size + 1})`);
-}
-
-function openInBrowser() {
-  if (!serverBaseUrl) return;
-  shell.openExternal(serverBaseUrl);
-  _log("Opened dashboard in default browser");
 }
 
 // ── System tray ─────────────────────────────────────────────────────────────
@@ -1439,10 +1494,6 @@ function createTray() {
       accelerator: "CmdOrCtrl+N",
       click: () => openNewWindow(),
     },
-    {
-      label: "Open in Browser",
-      click: () => openInBrowser(),
-    },
     { type: "separator" },
     {
       label: `Server: ${serverBaseUrl || "not configured"}`,
@@ -1478,6 +1529,8 @@ function createTray() {
 // ── App lifecycle ───────────────────────────────────────────────────────────
 app.on("ready", async () => {
   try {
+    _log(`Main log file: ${_getLogFile()}`);
+    _log(`User data dir: ${app.getPath("userData")}`);
     // 0. Set up terminal IPC handlers (before window creation)
     _setupTerminalIPC();
     _setupTermViewIPC();
@@ -1501,6 +1554,47 @@ app.on("ready", async () => {
     ipcMain.handle("mcp:restart", async (_event, name) => {
       return { ok: false, error: "MCP servers are managed by savant-server in client/server mode" };
     });
+    ipcMain.handle("app:navigate", async (event, rawUrl) => {
+      const targetWin = BrowserWindow.fromWebContents(event.sender);
+      const input = String(rawUrl || "").trim();
+      if (!targetWin || targetWin.isDestroyed()) return { ok: false, error: "window_unavailable" };
+      if (!input) return { ok: false, error: "url_required" };
+
+      try {
+        const baseDirUrl = `file://${path.dirname(DASHBOARD_FILE).replace(/\\/g, "/")}/`;
+        const resolved = new URL(input, baseDirUrl);
+        const pageName = path.basename(resolved.pathname || "").toLowerCase();
+
+        if (pageName === "detail.html") {
+          const mode = resolved.searchParams.get("mode") || "copilot";
+          const sessionId = resolved.searchParams.get("session_id") || "";
+          const query = { mode };
+          if (sessionId) query.session_id = sessionId;
+          _log(`[nav] load detail mode=${mode} session=${sessionId || "<none>"}`);
+          await targetWin.loadFile(DETAIL_FILE, { query });
+          return { ok: true, strategy: "loadFile:detail" };
+        }
+
+        if (resolved.pathname === "/" || pageName === "index.html") {
+          _log("[nav] load dashboard");
+          await targetWin.loadFile(DASHBOARD_FILE);
+          return { ok: true, strategy: "loadFile:dashboard" };
+        }
+
+        _log(`[nav] loadURL ${resolved.toString()}`);
+        await targetWin.loadURL(resolved.toString());
+        return { ok: true, strategy: "loadURL", url: resolved.toString() };
+      } catch (e) {
+        const msg = e && e.message ? e.message : String(e);
+        _err("app:navigate failed:", msg);
+        return { ok: false, error: msg };
+      }
+    });
+    ipcMain.handle("app:get-log-paths", async () => ({
+      ok: true,
+      mainLogFile: _getLogFile(),
+      userDataDir: app.getPath("userData"),
+    }));
 
     ipcMain.handle("savant:get-server-config", async () => {
       return { serverUrl: serverBaseUrl, online: _serverOnline };
@@ -1574,7 +1668,6 @@ app.on("ready", async () => {
         label: "File",
         submenu: [
           { label: "New Window", accelerator: "CmdOrCtrl+N", click: () => openNewWindow() },
-          { label: "Open in Browser", accelerator: "CmdOrCtrl+Shift+B", click: () => openInBrowser() },
           { type: "separator" },
           { label: "Close Window", accelerator: "CmdOrCtrl+W", role: "close" },
         ],

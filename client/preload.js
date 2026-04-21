@@ -60,6 +60,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   pickDirectory: () => ipcRenderer.invoke("pick-directory"),
   openPath: (filePath) => ipcRenderer.invoke("shell:openPath", filePath),
   restartMcp: (name) => ipcRenderer.invoke("mcp:restart", name),
+  navigate: (url) => ipcRenderer.invoke("app:navigate", url),
+  getLogPaths: () => ipcRenderer.invoke("app:get-log-paths"),
 });
 
 // Expose Savant client/server bridge (server config + offline outbox)
