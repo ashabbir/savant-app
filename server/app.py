@@ -26,6 +26,7 @@ from knowledge.routes import knowledge_bp
 from server_paths import get_server_data_dir, get_server_db_path, get_server_abilities_base_dir
 
 app = Flask(__name__)
+_API_ONLY_MODE = os.environ.get("SAVANT_API_ONLY", "").strip().lower() in {"1", "true", "yes", "on"}
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -56,6 +57,16 @@ def add_no_cache(response):
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
     return response
+
+
+@app.before_request
+def enforce_api_only_mode():
+    if not _API_ONLY_MODE:
+        return None
+    p = request.path or "/"
+    if p.startswith("/api/") or p in {"/health/live", "/health/ready"}:
+        return None
+    abort(404)
 
 
 SESSION_DIR = os.environ.get(
@@ -3326,6 +3337,19 @@ def api_system_info():
 
 # SQLITE ENDPOINTS — Workspace, Task, MR, and Jira management
 # ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/health/live", methods=["GET"])
+def health_live():
+    return jsonify({"status": "ok", "service": "savant-server"}), 200
+
+
+@app.route("/health/ready", methods=["GET"])
+def health_ready():
+    client = get_sqlite()
+    if client.health_check():
+        return jsonify({"status": "ready"}), 200
+    return jsonify({"status": "not_ready"}), 503
+
 
 @app.route("/api/db/health", methods=["GET"])
 def api_db_health():

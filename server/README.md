@@ -35,6 +35,28 @@ The server stores both in that path:
 
 On first startup, if abilities are missing, server auto-seeds them from repo seed assets.
 
+## Docker Isolation (API-only)
+
+For enterprise isolation, run server in containerized API-only mode:
+
+- API surface only (`SAVANT_API_ONLY=1`): non-API routes return 404.
+- Exposed port: `8090` only.
+- Read-only root filesystem.
+- Dropped Linux capabilities + `no-new-privileges`.
+- No host bind mounts by default (Docker named volume for `/data/savant`).
+
+Use repo helper scripts:
+
+```bash
+./build-server.sh
+./deploy-server.sh
+```
+
+Health probes:
+
+- `GET /health/live`
+- `GET /health/ready`
+
 ## Client Connection
 
 Set server URL before launching Electron:

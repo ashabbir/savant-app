@@ -11,9 +11,8 @@ case "$MODE" in
     IMAGE_TAG="${SERVER_IMAGE_TAG:-savant-server:latest}"
     CONTAINER_NAME="${SERVER_CONTAINER_NAME:-savant-server}"
     HOST_PORT="${SERVER_HOST_PORT:-8090}"
-    DATA_DIR="${SERVER_DATA_DIR:-$HOME/.savant-server-data}"
-
-    mkdir -p "$DATA_DIR"
+    DATA_VOLUME="${SERVER_DATA_VOLUME:-savant-server-data}"
+    docker volume create "$DATA_VOLUME" >/dev/null
 
     if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
       docker rm -f "$CONTAINER_NAME" >/dev/null
@@ -21,13 +20,26 @@ case "$MODE" in
 
     docker run -d \
       --name "$CONTAINER_NAME" \
+      --read-only \
+      --cap-drop ALL \
+      --security-opt no-new-privileges:true \
+      --pids-limit "${SERVER_PIDS_LIMIT:-512}" \
+      --tmpfs /tmp:rw,noexec,nosuid,size=256m \
+      --tmpfs /run:rw,noexec,nosuid,size=64m \
       -p "$HOST_PORT:8090" \
-      -v "$DATA_DIR:/data" \
-      -e SAVANT_DB=/data/savant.db \
-      -e META_DIR=/data/meta \
+      --mount "type=volume,source=$DATA_VOLUME,target=/data/savant" \
+      -e SAVANT_SERVER_DATA_DIR=/data/savant \
+      -e SAVANT_API_ONLY=1 \
+      -e SESSION_DIR=/nonexistent \
+      -e CLAUDE_DIR=/nonexistent \
+      -e GEMINI_DIR=/nonexistent \
+      -e CODEX_DIR=/nonexistent \
+      -e HERMES_DIR=/nonexistent \
+      -e META_DIR=/nonexistent \
       "$IMAGE_TAG"
 
     echo "Server deployed (docker): $CONTAINER_NAME on port $HOST_PORT"
+    echo "Data volume: $DATA_VOLUME"
     ;;
 
   local)
