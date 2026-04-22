@@ -57,6 +57,13 @@ Health probes:
 - `GET /health/live`
 - `GET /health/ready`
 
+When deployed via `./deploy-server.sh` (docker mode), MCP SSE ports are also exposed:
+
+- workspace: `8091`
+- abilities: `8092`
+- context: `8093`
+- knowledge: `8094`
+
 ## Client Connection
 
 Set server URL before launching Electron:

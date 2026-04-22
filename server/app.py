@@ -3997,7 +3997,14 @@ def api_mcp():
     mcp_prefixes = {name: name + "-" for name in raw.get("mcpServers", {})}
     discovered_tools = {name: set() for name in raw.get("mcpServers", {})}
 
-    for entry in os.listdir(SESSION_DIR):
+    session_entries = []
+    if os.path.isdir(SESSION_DIR):
+        try:
+            session_entries = os.listdir(SESSION_DIR)
+        except Exception:
+            session_entries = []
+
+    for entry in session_entries:
         events_file = os.path.join(SESSION_DIR, entry, "events.jsonl")
         if not os.path.isfile(events_file):
             continue

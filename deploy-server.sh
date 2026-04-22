@@ -11,6 +11,10 @@ case "$MODE" in
     IMAGE_TAG="${SERVER_IMAGE_TAG:-savant-server:latest}"
     CONTAINER_NAME="${SERVER_CONTAINER_NAME:-savant-server}"
     HOST_PORT="${SERVER_HOST_PORT:-8090}"
+    MCP_WORKSPACE_PORT="${SERVER_MCP_WORKSPACE_PORT:-8091}"
+    MCP_ABILITIES_PORT="${SERVER_MCP_ABILITIES_PORT:-8092}"
+    MCP_CONTEXT_PORT="${SERVER_MCP_CONTEXT_PORT:-8093}"
+    MCP_KNOWLEDGE_PORT="${SERVER_MCP_KNOWLEDGE_PORT:-8094}"
     DATA_VOLUME="${SERVER_DATA_VOLUME:-savant-server-data}"
     docker volume create "$DATA_VOLUME" >/dev/null
 
@@ -27,6 +31,10 @@ case "$MODE" in
       --tmpfs /tmp:rw,noexec,nosuid,size=256m \
       --tmpfs /run:rw,noexec,nosuid,size=64m \
       -p "$HOST_PORT:8090" \
+      -p "$MCP_WORKSPACE_PORT:8091" \
+      -p "$MCP_ABILITIES_PORT:8092" \
+      -p "$MCP_CONTEXT_PORT:8093" \
+      -p "$MCP_KNOWLEDGE_PORT:8094" \
       --mount "type=volume,source=$DATA_VOLUME,target=/data/savant" \
       -e SAVANT_SERVER_DATA_DIR=/data/savant \
       -e SAVANT_API_ONLY=1 \
@@ -39,6 +47,7 @@ case "$MODE" in
       "$IMAGE_TAG"
 
     echo "Server deployed (docker): $CONTAINER_NAME on port $HOST_PORT"
+    echo "MCP ports: workspace=$MCP_WORKSPACE_PORT abilities=$MCP_ABILITIES_PORT context=$MCP_CONTEXT_PORT knowledge=$MCP_KNOWLEDGE_PORT"
     echo "Data volume: $DATA_VOLUME"
     ;;
 
