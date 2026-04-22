@@ -719,19 +719,6 @@ async function ctxGenerateAstProject(name) {
   } catch (e) { showToast('error', e.message); }
 }
 
-async function ctxReindexProject(name) {
-  try {
-    const res = await fetch('/api/context/repos/reindex', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
-    });
-    if (!res.ok) { let _em = `HTTP ${res.status}`; try { const _ej = await res.json(); _em = _ej.error || _em; } catch {} throw new Error(_em); }
-    showToast('info', `Re-indexing "${name}" started...`);
-    ctxStartPolling();
-  } catch (e) { showToast('error', e.message); }
-}
-
 async function ctxStopIndexing(name) {
   try {
     const res = await fetch('/api/context/repos/stop', {
@@ -775,15 +762,6 @@ async function ctxIndexAll() {
     const res = await fetch('/api/context/repos/index-all', { method: 'POST' });
     if (!res.ok) throw new Error('Failed');
     showToast('info', 'Indexing all projects...');
-    ctxStartPolling();
-  } catch (e) { showToast('error', e.message); }
-}
-
-async function ctxReindexAll() {
-  try {
-    const res = await fetch('/api/context/repos/reindex-all', { method: 'POST' });
-    if (!res.ok) throw new Error('Failed');
-    showToast('info', 'Re-indexing all projects...');
     ctxStartPolling();
   } catch (e) { showToast('error', e.message); }
 }

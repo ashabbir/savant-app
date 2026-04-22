@@ -17,4 +17,8 @@ fi
 .venv/bin/pip install -q -r requirements-dev.txt
 .venv/bin/python -m pytest
 
+echo "==> Monorepo integration tests"
+cd "$ROOT"
+"$ROOT/server/.venv/bin/python" -m pytest tests -v
+
 echo "All test suites passed."

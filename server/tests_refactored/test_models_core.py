@@ -19,7 +19,7 @@ def test_model_defaults_and_examples():
     n = Notification(notification_id="n1", event_type="evt", message="hello")
     assert n.read is False
     assert isinstance(n.created_at, datetime)
-    assert "example" in Notification.Config.json_schema_extra
+    assert "example" in Notification.model_config["json_schema_extra"]
 
     w = Workspace(workspace_id="w1", name="ws")
     assert w.status == "open"

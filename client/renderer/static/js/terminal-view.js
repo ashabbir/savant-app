@@ -13,7 +13,6 @@ function switchView(view) {
   const closeBtn = document.getElementById('left-tab-close');
   const tipsBtn = document.getElementById('left-tab-tips');
   const logsBtn = document.getElementById('left-tab-logs');
-  const browserBtn = document.getElementById('left-tab-browser');
 
   if (view === 'terminal') {
     // Show the BrowserView terminal at full width
@@ -27,7 +26,6 @@ function switchView(view) {
     if (closeBtn) closeBtn.style.display = '';
     if (tipsBtn) tipsBtn.style.display = '';
     if (logsBtn) logsBtn.style.display = 'none';
-    if (browserBtn) browserBtn.style.display = 'none';
   } else {
     // Hide the BrowserView terminal and restore UI
     if (window.terminalAPI) {
@@ -40,7 +38,6 @@ function switchView(view) {
     if (closeBtn) closeBtn.style.display = 'none';
     if (tipsBtn) tipsBtn.style.display = 'none';
     if (logsBtn) logsBtn.style.display = '';
-    if (browserBtn) browserBtn.style.display = '';
     closeTerminalTips();
   }
 }
@@ -53,8 +50,4 @@ function toggleTerminalTips() {
 function closeTerminalTips() {
   const overlay = document.getElementById('terminal-tips-overlay');
   if (overlay) overlay.classList.remove('show');
-}
-
-function openInBrowser() {
-  window.open(window.location.href, '_blank');
 }

@@ -87,6 +87,13 @@ test("client package has no extraResources server embedding", () => {
   assert.ok(!pkg.build.extraResources, "extraResources must be removed for independent client/server");
 });
 
+test("client no longer exposes open-in-browser surface", () => {
+  const index = fs.readFileSync(path.join(CLIENT, "renderer", "index.html"), "utf-8");
+  const main = fs.readFileSync(path.join(CLIENT, "main.js"), "utf-8");
+  assert.ok(!index.includes("left-tab-browser"), "left action bar should not expose browser button");
+  assert.ok(!main.includes("Open in Browser"), "menu/tray should not expose browser action");
+});
+
 console.log("\n────────────────────────────────────────");
 console.log(`Results: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

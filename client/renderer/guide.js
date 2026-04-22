@@ -124,6 +124,25 @@ const _guideTree = [
       </table>
     `
   },
+  {
+    id: 'engineering-updates', title: 'Engineering Updates', children: [],
+    content: `
+      <h2>Engineering Updates</h2>
+      <table class="guide-table">
+        <tr><th>Date</th><th>Loop</th><th>Update</th></tr>
+        <tr><td>2026-04-21</td><td>1</td><td>Backend TDD coverage added for server storage path + abilities seed bootstrap branches. Enforced backend coverage restored to 100%.</td></tr>
+        <tr><td>2026-04-21</td><td>2</td><td>Removed browser-mode references from guide content and added a client contract test to keep the browser surface removed.</td></tr>
+        <tr><td>2026-04-21</td><td>3</td><td>Expanded client local-store tests to cover fallback paths and achieved 100% branch coverage for the offline queue store module.</td></tr>
+        <tr><td>2026-04-21</td><td>4</td><td>Added cross-app integration tests under <code>savant-app/tests</code> and integrated them into the main run-all test pipeline.</td></tr>
+        <tr><td>2026-04-21</td><td>5</td><td>Added regression test for empty project explorer state so the Add Project action remains accessible when no repos are present.</td></tr>
+        <tr><td>2026-04-21</td><td>6</td><td>Removed remaining reindex actions from context module surface. Context actions are now constrained to Index, AST, Purge, Delete, and conditional Stop.</td></tr>
+        <tr><td>2026-04-21</td><td>7</td><td>Migrated server-side Pydantic model configuration to v2-native <code>ConfigDict</code> for cleaner runtime and future-proofing.</td></tr>
+        <tr><td>2026-04-21</td><td>8</td><td>Added a CI contract test that enforces monorepo integration tests remain part of the standard <code>run-all-tests.sh</code> flow.</td></tr>
+        <tr><td>2026-04-21</td><td>9</td><td>Aligned server build metadata with release <code>8.0.0</code> and added integration validation for system-info version reporting.</td></tr>
+        <tr><td>2026-04-21</td><td>10</td><td>Added repo hygiene tests to enforce database artifact ignore patterns and keep deployment branches free of local state files.</td></tr>
+      </table>
+    `
+  },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // 2. HOW TO USE SAVANT
@@ -170,7 +189,7 @@ const _guideTree = [
       <div class="guide-layout-diagram">
         <div class="guide-layout-top">TOP BAR — Savant logo, centered</div>
         <div class="guide-layout-middle">
-          <div class="guide-layout-left">LEFT<br>BAR<br><br>📊<br>⌨<br>—<br>🌐<br>📋</div>
+          <div class="guide-layout-left">LEFT<br>BAR<br><br>📊<br>⌨<br>—<br>📋</div>
           <div class="guide-layout-content">
             <div style="color:var(--cyan);font-size:0.55rem;margin-bottom:4px;">TAB BAR: Workspaces | Tasks | MCP | Sessions</div>
             <div style="color:var(--text-dim);font-size:0.5rem;margin-bottom:8px;">SUBTITLE + (i) guide icon + (?) context help</div>
@@ -190,7 +209,6 @@ const _guideTree = [
         <tr><th>Icon</th><th>Action</th><th>When Visible</th></tr>
         <tr><td>📊</td><td>Switch to Dashboard (GUI)</td><td>Always</td></tr>
         <tr><td>⌨</td><td>Switch to Terminal</td><td>Always</td></tr>
-        <tr><td>🌐</td><td>Open current page in default browser</td><td>GUI mode</td></tr>
         <tr><td>📋</td><td>Toggle debug log panel</td><td>GUI mode</td></tr>
         <tr><td>?</td><td>Terminal keyboard shortcuts help</td><td>Terminal mode</td></tr>
         <tr><td>✕</td><td>Back to Dashboard</td><td>Terminal mode</td></tr>

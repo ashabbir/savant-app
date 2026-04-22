@@ -130,3 +130,16 @@ npm run test:coverage
 - Server should run in enterprise infrastructure (VM/Docker/K8s).
 - Client remains fully usable for local agent workflows when server is offline.
 - Server-bound mutations are queued locally and replayed in strict FIFO order when connectivity returns.
+
+## Continuous Hardening Log
+
+- Loop 1 (2026-04-21): Added backend TDD coverage for server storage/seed bootstrap branches and restored enforced backend coverage to 100%.
+- Loop 2 (2026-04-21): Added contract test preventing browser feature regressions and aligned guide docs with removed browser action.
+- Loop 3 (2026-04-21): Added client-store defensive branch tests and raised client store coverage to 100% lines/branches/functions.
+- Loop 4 (2026-04-21): Added monorepo integration tests in `tests/` and wired `run-all-tests.sh` to execute them after client/server suites.
+- Loop 5 (2026-04-21): Added regression coverage for empty project explorer rendering to guarantee Add Project remains available with zero repos.
+- Loop 6 (2026-04-21): Removed residual reindex action handlers from context UI code and added a regression test that reindex actions stay absent.
+- Loop 7 (2026-04-21): Migrated server Pydantic models to `ConfigDict` (v2-native) and removed class-config deprecation risk while preserving 100% backend coverage.
+- Loop 8 (2026-04-21): Added a pipeline contract test to prevent accidental removal of monorepo integration tests from `run-all-tests.sh`.
+- Loop 9 (2026-04-21): Corrected server build metadata to `8.0.0` and added integration validation for `/api/system/info` version output.
+- Loop 10 (2026-04-21): Added repository hygiene test coverage to enforce DB artifact ignore rules and prevent accidental state file commits.

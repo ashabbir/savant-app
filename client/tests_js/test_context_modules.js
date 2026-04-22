@@ -193,12 +193,10 @@ const CORE_FUNCTIONS = [
   'ctxConfirmAdd',
   'ctxIndexProject',
   'ctxGenerateAstProject',
-  'ctxReindexProject',
   'ctxStopIndexing',
   'ctxPurgeProject',
   'ctxDeleteProject',
   'ctxIndexAll',
-  'ctxReindexAll',
   'ctxStartPolling',
   'ctxDoSearch',
   'ctxLoadMemory',
@@ -248,6 +246,43 @@ test('ctxPopulateRepoFilter does not throw when element missing', () => {
 test('ctxRenderProjects does not throw with empty _ctxProjects', () => {
   coreSandbox._ctxProjects = [];
   coreSandbox.ctxRenderProjects();
+});
+
+test('ctxRenderProjects keeps project explorer visible when project list is empty', () => {
+  let html = '';
+  const sidebar = {
+    contains: () => false,
+    style: {},
+    set innerHTML(v) { html = v; },
+    get innerHTML() { return html; },
+    querySelector: () => null,
+  };
+  const sb = makeSandbox({
+    document: {
+      activeElement: null,
+      getElementById: (id) => {
+        if (id === 'ctx-projects-list') return sidebar;
+        if (id === 'ctx-proj-detail') return { innerHTML: '', style: {}, classList: { add: () => {}, remove: () => {} } };
+        return { innerHTML: '', style: {}, textContent: '', classList: { add: () => {}, remove: () => {} }, getAttribute: () => null };
+      },
+      querySelectorAll: () => [],
+      querySelector: () => null,
+    },
+  });
+  loadFile(sb, 'context-core.js');
+  sb._ctxProjects = [];
+  sb.ctxRenderProjects();
+  if (!html.includes('No projects yet')) throw new Error('Expected empty-state message to render');
+  if (!html.includes('ctxAddProject()')) throw new Error('Expected add project action to remain visible');
+});
+
+test('context action surface excludes reindex actions', () => {
+  if (typeof coreSandbox.ctxReindexProject !== 'undefined') {
+    throw new Error('ctxReindexProject should not be exposed');
+  }
+  if (typeof coreSandbox.ctxReindexAll !== 'undefined') {
+    throw new Error('ctxReindexAll should not be exposed');
+  }
 });
 
 test('ctxSelectProject marks project active via ctxRenderProjects', () => {

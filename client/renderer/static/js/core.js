@@ -938,11 +938,19 @@ async function fetchSystemStatus() {
     const branchLabel = wt ? `${branch} <span style="color:var(--magenta);">(worktree: ${wt})</span>` : branch;
     const versionLine = `<div class="sys-version-bar">v${ver} · <span style="color:var(--yellow);">${branchLabel}</span>${commit ? ` · <span style="color:var(--text-dim);">${commit}</span>` : ''}</div>`;
 
+    const serverBase = (window.__SAVANT_SERVER_URL__ || location.origin || '').replace(/\/$/, '');
     el.innerHTML = `
       ${versionLine}
       <div class="sys-status-grid">
+        <div class="sys-status-card full-width">
+          <h5>Architecture Mode</h5>
+          <div class="sys-row"><span class="sys-label">Topology</span><span class="sys-val ok">Client-Server</span></div>
+          <div class="sys-row"><span class="sys-label">Client</span><span class="sys-val">savant-app (Electron desktop)</span></div>
+          <div class="sys-row"><span class="sys-label">Server</span><span class="sys-val">savant-server API + MCP</span></div>
+          <div class="sys-row"><span class="sys-label">API Base</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${serverBase || '—'}</span></div>
+        </div>
         <div class="sys-status-card">
-          <h5>Flask Server</h5>
+          <h5>Server API</h5>
           <div class="sys-row"><span class="sys-label">Status</span><span class="sys-val ok">● Running</span></div>
           <div class="sys-row"><span class="sys-label">Port</span><span class="sys-val port">${d.flask.port}</span></div>
           <div class="sys-row"><span class="sys-label">PID</span><span class="sys-val">${d.flask.pid}</span></div>

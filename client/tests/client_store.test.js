@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { SavantClientStore } = require("../client_store");
+const { SavantClientStore, newIdempotencyKey } = require("../client_store");
 
 function makeStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "savant-client-store-"));
@@ -18,10 +18,23 @@ test("prefs roundtrip", () => {
   store.setPref("server_url", "https://example.internal");
   assert.equal(store.getPref("server_url"), "https://example.internal");
   assert.equal(store.getPref("missing", "fallback"), "fallback");
+
+  // force invalid JSON branch in getPref()
+  store.db.prepare(`
+    INSERT INTO client_prefs(key, value, updated_at)
+    VALUES('broken', '{bad-json}', datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+  `).run();
+  assert.equal(store.getPref("broken", "fallback-broken"), "fallback-broken");
 });
 
 test("enqueue mutation and expose stats", () => {
   const { store } = makeStore();
+  const baseline = store.getOutboxStats();
+  assert.equal(baseline.queued, 0);
+  assert.equal(baseline.failed, 0);
+  assert.equal(baseline.total, 0);
+
   const idem = store.enqueueMutation({
     opType: "preferences_save",
     method: "POST",
@@ -33,6 +46,19 @@ test("enqueue mutation and expose stats", () => {
   const stats = store.getOutboxStats();
   assert.equal(stats.queued, 1);
   assert.equal(stats.failed, 0);
+
+  // cover listOutbox + custom idempotency key path
+  const custom = "idem-custom-1";
+  const idem2 = store.enqueueMutation({
+    endpoint: "/api/second",
+    method: null, // cover default method branch
+    idempotencyKey: custom,
+    headers: null, // cover headers fallback
+  });
+  assert.equal(idem2, custom);
+  const list = store.listOutbox(10);
+  assert.equal(list.length, 2);
+  assert.equal(list[1].method, "POST");
 });
 
 test("fifo order from nextQueued", () => {
@@ -59,6 +85,23 @@ test("failed item can be requeued", () => {
   stats = store.getOutboxStats();
   assert.equal(stats.queued, 1);
   assert.equal(stats.failed, 0);
+
+  // cover markQueuedWithError fallback + explicit message
+  const queued = store.nextQueued();
+  store.markInflight(queued.id);
+  store.markQueuedWithError(queued.id);
+  let row = store.listOutbox(1)[0];
+  assert.equal(row.last_error, "retry");
+
+  store.markQueuedWithError(queued.id, "net-timeout");
+  row = store.listOutbox(1)[0];
+  assert.equal(row.last_error, "net-timeout");
+
+  // cover markFailed fallback message branch
+  store.markInflight(queued.id);
+  store.markFailed(queued.id);
+  row = store.listOutbox(1)[0];
+  assert.equal(row.last_error, "failed");
 });
 
 test("cleanupExpired removes old rows", () => {
@@ -66,4 +109,32 @@ test("cleanupExpired removes old rows", () => {
   store.enqueueMutation({ endpoint: "/api/short", method: "POST", retentionDays: -1 });
   const removed = store.cleanupExpired();
   assert.ok(removed >= 1);
+});
+
+test("newIdempotencyKey returns unique non-empty ids", () => {
+  const a = newIdempotencyKey();
+  const b = newIdempotencyKey();
+  assert.ok(typeof a === "string" && a.length > 0);
+  assert.ok(typeof b === "string" && b.length > 0);
+  assert.notEqual(a, b);
+});
+
+test("defensive numeric fallbacks when sqlite returns sparse values", () => {
+  const { store } = makeStore();
+  let mode = "stats";
+  store.db = {
+    prepare() {
+      if (mode === "stats") {
+        return { get: () => undefined };
+      }
+      return { run: () => ({}) };
+    },
+  };
+
+  const stats = store.getOutboxStats();
+  assert.deepEqual(stats, { queued: 0, failed: 0, total: 0 });
+
+  mode = "cleanup";
+  const removed = store.cleanupExpired();
+  assert.equal(removed, 0);
 });

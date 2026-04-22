@@ -3,7 +3,7 @@ Pydantic models for Savant MongoDB collections
 """
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Notification(BaseModel):
@@ -17,16 +17,17 @@ class Notification(BaseModel):
     read: bool = Field(default=False, description="Whether notification has been read")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "notification_id": "notif_001",
                 "event_type": "workspace_created",
                 "message": "Workspace created: Q1 Dev",
                 "detail": {"workspace_id": "ws_123", "name": "Q1 Dev"},
-                "read": False
+                "read": False,
             }
         }
+    )
 
 
 class Workspace(BaseModel):
@@ -44,16 +45,17 @@ class Workspace(BaseModel):
         description="Counts of tasks by status"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "workspace_id": "ws_123",
                 "name": "Q1 Development",
                 "description": "Development work for Q1",
                 "priority": "high",
-                "status": "open"
+                "status": "open",
             }
         }
+    )
 
 
 class Task(BaseModel):
@@ -70,16 +72,17 @@ class Task(BaseModel):
     created_session_id: Optional[str] = Field(default=None)
     dependencies: List[str] = Field(default_factory=list, description="List of task_ids this depends on")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "task_id": "task_auth_impl",
                 "workspace_id": "ws_123",
                 "title": "Implement OAuth",
                 "status": "in_progress",
-                "priority": "high"
+                "priority": "high",
             }
         }
+    )
 
 
 class Note(BaseModel):
@@ -91,15 +94,16 @@ class Note(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "note_id": "note_001",
                 "session_id": "sess_abc",
                 "text": "Remember to review the API contract",
-                "workspace_id": "ws_123"
+                "workspace_id": "ws_123",
             }
         }
+    )
 
 
 class MRNote(BaseModel):
@@ -124,8 +128,8 @@ class MergeRequest(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     notes: List[MRNote] = Field(default_factory=list, description="MR notes/comments")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "mr_id": "mr_001",
                 "workspace_id": "ws_123",
@@ -134,9 +138,10 @@ class MergeRequest(BaseModel):
                 "mr_iid": 42,
                 "title": "Add OAuth support",
                 "status": "review",
-                "author": "jdoe"
+                "author": "jdoe",
             }
         }
+    )
 
 
 class JiraNote(BaseModel):
@@ -159,17 +164,18 @@ class JiraTicket(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     notes: List[JiraNote] = Field(default_factory=list, description="Ticket notes/comments")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "ticket_id": "jira_001",
                 "workspace_id": "ws_123",
                 "ticket_key": "PROJ-1234",
                 "title": "Implement user authentication",
                 "status": "in_progress",
-                "assignee": "jdoe"
+                "assignee": "jdoe",
             }
         }
+    )
 
 
 class Experience(BaseModel):
@@ -183,17 +189,18 @@ class Experience(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "experience_id": "exp_001",
                 "content": "Implemented payment service in Scala",
                 "source": "session",
                 "workspace_id": "ws_123",
                 "repo": "payment-service",
-                "files": ["PaymentService.scala"]
+                "files": ["PaymentService.scala"],
             }
         }
+    )
 
 
 class KGNode(BaseModel):
