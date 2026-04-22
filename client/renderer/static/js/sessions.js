@@ -1025,16 +1025,29 @@ async function fetchSessions(append = false) {
   try {
     const gen = fetchGeneration;
     const offset = append ? allSessions.length : 0;
-    let url = getSessionsEndpoint();
-    // Claude/Gemini use pagination; Copilot returns all
-    if (currentMode === 'claude' || currentMode === 'gemini' || currentMode === 'hermes') {
-      url += `?limit=${PAGE_SIZE}&offset=${offset}&_=${Date.now()}`;
+    const provider = currentMode === 'claude' || currentMode === 'codex' || currentMode === 'gemini' || currentMode === 'hermes'
+      ? currentMode
+      : 'copilot';
+    let data;
+
+    // Sessions are local to the client machine in client/server architecture.
+    if (window.savantClient && typeof window.savantClient.listLocalSessions === 'function') {
+      const opts = (provider === 'claude' || provider === 'gemini' || provider === 'hermes')
+        ? { provider, limit: PAGE_SIZE, offset }
+        : { provider };
+      data = await window.savantClient.listLocalSessions(opts);
     } else {
-      url += `?_=${Date.now()}`;
+      let url = getSessionsEndpoint();
+      // Claude/Gemini use pagination; Copilot returns all
+      if (provider === 'claude' || provider === 'gemini' || provider === 'hermes') {
+        url += `?limit=${PAGE_SIZE}&offset=${offset}&_=${Date.now()}`;
+      } else {
+        url += `?_=${Date.now()}`;
+      }
+      const res = await fetch(url);
+      data = await res.json();
     }
-    const res = await fetch(url);
     if (gen !== fetchGeneration) return; // mode changed while fetching, discard
-    const data = await res.json();
     if (gen !== fetchGeneration) return;
 
     // If backend cache is still building, show loading and retry sooner
@@ -1390,6 +1403,11 @@ if (currentTab === 'sessions') {
   fetchSessions();
 }
 setInterval(() => { if (currentTab === 'sessions') fetchSessions(); }, 30000);
+if (window.savantClient && typeof window.savantClient.onSessionsUpdated === 'function') {
+  window.savantClient.onSessionsUpdated(() => {
+    if (currentTab === 'sessions') fetchSessions(false);
+  });
+}
 
 // --- MCP Servers ---
 async function fetchMcp() {
@@ -1516,8 +1534,17 @@ async function loadSessionFiles(sessionId) {
   container.dataset.loaded = '1';
 
   try {
-    const res = await fetch(getSessionDetailEndpoint(sessionId));
-    const data = await res.json();
+    const provider = currentMode === 'claude' || currentMode === 'codex' || currentMode === 'gemini' || currentMode === 'hermes'
+      ? currentMode
+      : 'copilot';
+    let data;
+    if (window.savantClient && typeof window.savantClient.getLocalSession === 'function') {
+      data = await window.savantClient.getLocalSession({ provider, sessionId });
+      if (!data) throw new Error('Session not found');
+    } else {
+      const res = await fetch(getSessionDetailEndpoint(sessionId));
+      data = await res.json();
+    }
     const tree = data.tree || {};
     let html = '';
 
@@ -1928,8 +1955,17 @@ function copySessionInfo(sessionId, btn) {
 async function toggleStar(sessionId, btn) {
   try {
     const prov = _resolveProvider(sessionId);
-    const res = await fetch(_endpointFor(prov, sessionId, 'star'), { method: 'POST' });
-    const data = await res.json();
+    let data;
+    if (window.savantClient && typeof window.savantClient.setLocalSessionStar === 'function') {
+      const s = allSessions.find(x => x.id === sessionId);
+      const nextStar = !(s && s.starred);
+      const resp = await window.savantClient.setLocalSessionStar({ provider: prov, sessionId, starred: nextStar });
+      if (!resp || !resp.ok || !resp.session) throw new Error(resp && resp.error ? resp.error : 'star_failed');
+      data = { starred: !!resp.session.starred };
+    } else {
+      const res = await fetch(_endpointFor(prov, sessionId, 'star'), { method: 'POST' });
+      data = await res.json();
+    }
     btn.textContent = data.starred ? '★' : '☆';
     btn.classList.toggle('starred', data.starred);
     // Update local data
@@ -1947,8 +1983,17 @@ async function toggleStar(sessionId, btn) {
 async function toggleArchive(sessionId, btn) {
   try {
     const prov = _resolveProvider(sessionId);
-    const res = await fetch(_endpointFor(prov, sessionId, 'archive'), { method: 'POST' });
-    const data = await res.json();
+    let data;
+    if (window.savantClient && typeof window.savantClient.setLocalSessionArchive === 'function') {
+      const s = allSessions.find(x => x.id === sessionId);
+      const nextArchived = !(s && s.archived);
+      const resp = await window.savantClient.setLocalSessionArchive({ provider: prov, sessionId, archived: nextArchived });
+      if (!resp || !resp.ok || !resp.session) throw new Error(resp && resp.error ? resp.error : 'archive_failed');
+      data = { archived: !!resp.session.archived };
+    } else {
+      const res = await fetch(_endpointFor(prov, sessionId, 'archive'), { method: 'POST' });
+      data = await res.json();
+    }
     // Update local data
     const s = allSessions.find(s => s.id === sessionId);
     if (s) s.archived = data.archived;
@@ -1989,11 +2034,15 @@ function renameSession(sessionId, btn) {
   async function save() {
     const nickname = input.value.trim();
     try {
-      await fetch(_endpointFor(prov, sessionId, 'rename'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nickname })
-      });
+      if (window.savantClient && typeof window.savantClient.renameLocalSession === 'function') {
+        await window.savantClient.renameLocalSession({ provider: prov, sessionId, nickname });
+      } else {
+        await fetch(_endpointFor(prov, sessionId, 'rename'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nickname })
+        });
+      }
     } catch (e) { console.error('Rename failed:', e); }
     const span = document.createElement('span');
     span.className = 'summary-text';
@@ -2039,8 +2088,13 @@ document.getElementById('confirm-delete-btn').addEventListener('click', async ()
   const prov = _resolveProvider(id);
   closeConfirm();
   try {
-    const res = await fetch(_deleteEndpointFor(prov, id), { method: 'DELETE' });
-    const data = await res.json();
+    let data;
+    if (window.savantClient && typeof window.savantClient.deleteLocalSession === 'function') {
+      data = await window.savantClient.deleteLocalSession({ provider: prov, sessionId: id });
+    } else {
+      const res = await fetch(_deleteEndpointFor(prov, id), { method: 'DELETE' });
+      data = await res.json();
+    }
     if (data.error) {
       alert(`Cannot delete: ${data.error}`);
     } else {

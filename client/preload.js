@@ -68,6 +68,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
 contextBridge.exposeInMainWorld("savantClient", {
   getServerConfig: () => ipcRenderer.invoke("savant:get-server-config"),
   setServerUrl: (url) => ipcRenderer.invoke("savant:set-server-url", url),
+  listLocalSessions: (opts) => ipcRenderer.invoke("savant:list-local-sessions", opts || {}),
+  getLocalSession: (opts) => ipcRenderer.invoke("savant:get-local-session", opts || {}),
+  renameLocalSession: (opts) => ipcRenderer.invoke("savant:rename-local-session", opts || {}),
+  setLocalSessionStar: (opts) => ipcRenderer.invoke("savant:set-local-session-star", opts || {}),
+  setLocalSessionArchive: (opts) => ipcRenderer.invoke("savant:set-local-session-archive", opts || {}),
+  deleteLocalSession: (opts) => ipcRenderer.invoke("savant:delete-local-session", opts || {}),
   enqueueMutation: (payload) => ipcRenderer.invoke("savant:enqueue-mutation", payload),
   getQueueStats: () => ipcRenderer.invoke("savant:get-queue-stats"),
   listQueue: (limit) => ipcRenderer.invoke("savant:list-queue", limit),
@@ -77,5 +83,10 @@ contextBridge.exposeInMainWorld("savantClient", {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on("savant:sync-status", handler);
     return () => ipcRenderer.removeListener("savant:sync-status", handler);
+  },
+  onSessionsUpdated: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on("savant:sessions-updated", handler);
+    return () => ipcRenderer.removeListener("savant:sessions-updated", handler);
   },
 });

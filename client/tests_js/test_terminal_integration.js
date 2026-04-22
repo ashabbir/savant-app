@@ -68,6 +68,13 @@ test("client preload exposes savantClient bridge", () => {
   const preload = fs.readFileSync(path.join(CLIENT, "preload.js"), "utf-8");
   assert.ok(preload.includes("contextBridge.exposeInMainWorld(\"savantClient\""));
   assert.ok(preload.includes("getServerConfig"));
+  assert.ok(preload.includes("listLocalSessions"));
+  assert.ok(preload.includes("getLocalSession"));
+  assert.ok(preload.includes("renameLocalSession"));
+  assert.ok(preload.includes("setLocalSessionStar"));
+  assert.ok(preload.includes("setLocalSessionArchive"));
+  assert.ok(preload.includes("deleteLocalSession"));
+  assert.ok(preload.includes("onSessionsUpdated"));
   assert.ok(preload.includes("enqueueMutation"));
   assert.ok(preload.includes("flushQueueNow"));
 });

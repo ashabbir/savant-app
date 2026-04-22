@@ -2227,6 +2227,10 @@ function homeUrl() {
   return '/';
 }
 
+function localProvider() {
+  return MODE === 'claude' || MODE === 'codex' || MODE === 'gemini' || MODE === 'hermes' ? MODE : 'copilot';
+}
+
 // Configure marked to output mermaid blocks as renderable divs
 const renderer = new marked.Renderer();
 const origCode = renderer.code.bind(renderer);
@@ -2381,11 +2385,16 @@ async function saveTitleEdit() {
   const name = (inp ? inp.value : '').trim();
   if (!name) { cancelTitleEdit(); return; }
   try {
-    const res = await fetch(`${apiBase()}/rename`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({nickname: name})
-    });
-    if (res.ok) sessionInfo.nickname = name;
+    if (window.savantClient && typeof window.savantClient.renameLocalSession === 'function') {
+      const resp = await window.savantClient.renameLocalSession({ provider: localProvider(), sessionId: SESSION_ID, nickname: name });
+      if (resp && resp.ok) sessionInfo.nickname = name;
+    } else {
+      const res = await fetch(`${apiBase()}/rename`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({nickname: name})
+      });
+      if (res.ok) sessionInfo.nickname = name;
+    }
   } catch(e) { console.error('Rename failed', e); }
   cancelTitleEdit();
 }
@@ -2403,8 +2412,13 @@ function cancelTitleEdit() {
 // === LOAD SESSION ===
 async function loadSession() {
   // Load session info
-  const infoRes = await fetch(apiBase());
-  sessionInfo = await infoRes.json();
+  if (window.savantClient && typeof window.savantClient.getLocalSession === 'function') {
+    sessionInfo = await window.savantClient.getLocalSession({ provider: localProvider(), sessionId: SESSION_ID });
+  }
+  if (!sessionInfo) {
+    const infoRes = await fetch(apiBase());
+    sessionInfo = await infoRes.json();
+  }
 
   document.getElementById('title-text').textContent = sessionInfo.nickname || sessionInfo.summary || SESSION_ID;
   document.title = `${sessionInfo.nickname || sessionInfo.summary || 'Session'} — Copilot Dashboard`;
@@ -2419,11 +2433,17 @@ async function loadSession() {
   `;
 
   // Load conversation
-  const convRes = await fetch(`${apiBase()}/conversation`);
-  const data = await convRes.json();
-  allConversation = data.conversation || [];
-  allTools = data.tools || {};
-  convStats = data.stats || {};
+  try {
+    const convRes = await fetch(`${apiBase()}/conversation`);
+    const data = await convRes.json();
+    allConversation = data.conversation || [];
+    allTools = data.tools || {};
+    convStats = data.stats || {};
+  } catch {
+    allConversation = [];
+    allTools = {};
+    convStats = {};
+  }
 
   // Update badges
   const tree = sessionInfo.tree || {};
@@ -3848,6 +3868,15 @@ function renderJiraList() {
 
 function deleteSession() {
   if (!confirm('Are you sure you want to DELETE this entire session? This cannot be undone.')) return;
+  if (window.savantClient && typeof window.savantClient.deleteLocalSession === 'function') {
+    window.savantClient.deleteLocalSession({ provider: localProvider(), sessionId: SESSION_ID })
+      .then((resp) => {
+        if (resp && resp.ok) showLoadingThenNavigate('/?t=' + Date.now());
+        else alert('Failed: ' + ((resp && resp.error) || 'Unknown error'));
+      })
+      .catch(e => alert('Failed to delete session: ' + e.message));
+    return;
+  }
   fetch(`${apiBase()}`, {method: 'DELETE'})
     .then(r => {
       if (r.ok) showLoadingThenNavigate('/?t=' + Date.now());
@@ -3857,9 +3886,7 @@ function deleteSession() {
 }
 
 function toggleArchiveDetail() {
-  fetch(`${apiBase()}/archive`, {method: 'POST'})
-    .then(r => r.json())
-    .then(data => {
+  const applyResult = (data) => {
       const btn = document.getElementById('archive-detail-btn');
       if (data.archived) {
         btn.textContent = '📦 ARCHIVED';
@@ -3873,7 +3900,21 @@ function toggleArchiveDetail() {
         btn.style.color = 'var(--text-dim)';
       }
       sessionInfo.archived = data.archived;
-    })
+    };
+
+  if (window.savantClient && typeof window.savantClient.setLocalSessionArchive === 'function') {
+    const nextArchived = !sessionInfo.archived;
+    window.savantClient.setLocalSessionArchive({ provider: localProvider(), sessionId: SESSION_ID, archived: nextArchived })
+      .then((resp) => {
+        if (resp && resp.ok && resp.session) applyResult({ archived: !!resp.session.archived });
+        else throw new Error((resp && resp.error) || 'archive_failed');
+      })
+      .catch(e => alert('Failed to toggle archive: ' + e.message));
+    return;
+  }
+  fetch(`${apiBase()}/archive`, {method: 'POST'})
+    .then(r => r.json())
+    .then(applyResult)
     .catch(e => alert('Failed to toggle archive: ' + e.message));
 }
 
