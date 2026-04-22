@@ -4,6 +4,10 @@
 # Node/Electron
 node_modules/
 dist/
+client/test-results/
+client/playwright-report/
+client/blob-report/
+*.tmp
 
 # Python
 __pycache__/
