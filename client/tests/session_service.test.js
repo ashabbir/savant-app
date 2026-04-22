@@ -77,3 +77,20 @@ test("LocalSessionService delete removes local session path", () => {
   const after = svc.listSessions("copilot");
   assert.equal(after.total, 0);
 });
+
+test("LocalSessionService keeps workspace hint in local metadata", () => {
+  const home = makeTempDir();
+  const sessionId = "44444444-4444-4444-8444-444444444444";
+  const sessionDir = path.join(home, ".copilot", "session-state", sessionId);
+  writeJson(path.join(sessionDir, "workspace.json"), { cwd: "/tmp/p4", summary: "S4" });
+
+  const svc = new LocalSessionService({ homeDir: home, cacheTtlMs: 1 });
+  const session = svc.getSession("copilot", sessionId);
+  assert.ok(session);
+
+  const wrote = svc.writeMeta("copilot", session, { workspace: "ws-local-hint" });
+  assert.equal(wrote, true);
+
+  const meta = svc.readMeta("copilot", session);
+  assert.equal(meta.workspace, "ws-local-hint");
+});

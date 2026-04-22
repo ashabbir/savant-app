@@ -252,16 +252,6 @@ function _bindWsNewSessionTagInput() {
   input.addEventListener('blur', commitInput);
 }
 
-function _providerSessionsEndpoint(provider) {
-  if (provider === 'copilot') return '/api/sessions';
-  return `/api/${provider}/sessions`;
-}
-
-function _providerWorkspaceEndpoint(provider, sessionId) {
-  if (provider === 'copilot') return `/api/session/${encodeURIComponent(sessionId)}/workspace`;
-  return `/api/${provider}/session/${encodeURIComponent(sessionId)}/workspace`;
-}
-
 function _extractSessionId(session) {
   return String(session?.id || session?.session_id || '');
 }
@@ -270,19 +260,63 @@ function _sleepMs(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function _listLocalProviderSessions(provider) {
+  if (!window.savantClient || typeof window.savantClient.listLocalSessions !== 'function') return [];
+  const data = await window.savantClient.listLocalSessions({ provider, limit: 0, offset: 0 });
+  return data.sessions || data || [];
+}
+
+async function _loadWorkspaceJoinedSessions(wsId) {
+  const linksRes = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/session-links?_=${Date.now()}`);
+  const linksData = await linksRes.json();
+  const links = linksData.links || [];
+  const providers = ['copilot', 'claude', 'codex', 'gemini', 'hermes'];
+  const localLists = await Promise.all(providers.map(p => _listLocalProviderSessions(p).catch(() => [])));
+  const localMap = new Map();
+  for (let i = 0; i < providers.length; i += 1) {
+    const provider = providers[i];
+    for (const s of (localLists[i] || [])) {
+      localMap.set(`${provider}:${_extractSessionId(s)}`, { ...s, provider });
+    }
+  }
+  const sessions = links.map(link => {
+    const provider = String(link.provider || '');
+    const sessionId = String(link.session_id || '');
+    const key = `${provider}:${sessionId}`;
+    const local = localMap.get(key);
+    if (local) {
+      return { ...local, workspace: wsId, workspace_id: wsId, attached_at: link.attached_at };
+    }
+    return {
+      id: sessionId,
+      provider,
+      workspace: wsId,
+      workspace_id: wsId,
+      summary: 'Session not available on this client',
+      nickname: '',
+      status: 'UNAVAILABLE',
+      missing_local: true,
+      attached_at: link.attached_at,
+    };
+  });
+  sessions.sort((a, b) => {
+    const at = String(a.updated_at || a.created_at || a.attached_at || '');
+    const bt = String(b.updated_at || b.created_at || b.attached_at || '');
+    return bt.localeCompare(at);
+  });
+  return sessions;
+}
+
 async function _fetchProviderSessionIds(provider) {
-  const res = await fetch(`${_providerSessionsEndpoint(provider)}?_=${Date.now()}`);
-  const data = await res.json();
-  const sessions = data.sessions || data || [];
+  const sessions = await _listLocalProviderSessions(provider);
   return new Set(sessions.map(_extractSessionId).filter(Boolean));
 }
 
 async function _assignSessionToWorkspace(provider, sessionId, wsId) {
-  const endpoint = _providerWorkspaceEndpoint(provider, sessionId);
-  await fetch(endpoint, {
+  await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/session-links`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workspace_id: wsId }),
+    body: JSON.stringify({ provider, session_id: sessionId }),
   });
 }
 
@@ -294,9 +328,7 @@ async function _refreshWorkspaceSessionsAfterLaunch(wsId, provider, previousProv
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await _sleepMs(delayMs);
     try {
-      const res = await fetch(`${_providerSessionsEndpoint(provider)}?_=${Date.now()}`);
-      const data = await res.json();
-      const sessions = data.sessions || data || [];
+      const sessions = await _listLocalProviderSessions(provider);
       const fresh = sessions.filter(s => {
         const sid = _extractSessionId(s);
         return sid && !before.has(sid);
@@ -753,12 +785,11 @@ async function _openWsDetailInner(wsId) {
 
   try {
     // Fetch sessions and tasks in parallel
-    const [sessRes, taskRes] = await Promise.all([
-      fetch(`/api/workspaces/${wsId}/sessions?_=${Date.now()}`),
+    const [joinedSessions, taskRes] = await Promise.all([
+      _loadWorkspaceJoinedSessions(wsId),
       fetch(`/api/tasks?workspace_id=${wsId}&_=${Date.now()}`)
     ]);
-    const sessData = await sessRes.json();
-    _wsDetailSessions = sessData.sessions || sessData || [];
+    _wsDetailSessions = joinedSessions || [];
     // Sort archived sessions to end
     _wsDetailSessions.sort((a, b) => (a.archived ? 1 : 0) - (b.archived ? 1 : 0));
     const wsTasks = (await taskRes.json()).map(_normalizeTask);

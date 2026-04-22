@@ -3,40 +3,57 @@ Session detection for AI coding sessions → workspace mapping.
 
 Supports:
   - Copilot CLI: walks process tree to match PID lock files under
-    ~/.copilot/session-state/ and reads workspace from .copilot-meta.json.
+    ~/.copilot/session-state/.
   - Claude Code: reads ~/.claude/sessions/<pid>.json written by the
-    Claude Code CLI, then looks up workspace from savant meta files.
-  - Codex CLI: uses env vars (CODEX_SESSION_ID / CODEX_SESSION_PATH) and
-    workspace metadata stored under ~/.codex/.savant-meta/.
-  - Hermes Agent: uses env vars (HERMES_SESSION_ID) and workspace metadata
-    stored under ~/.hermes/.savant-meta/.
+    Claude Code CLI.
+  - Codex CLI: uses env vars (CODEX_SESSION_ID / CODEX_SESSION_PATH).
+  - Hermes Agent: uses env vars (HERMES_SESSION_ID).
+
+Workspace mapping is resolved via Savant server API:
+  GET /api/session-links/resolve?provider=<p>&session_id=<id>
 """
 
 import glob
 import json
 import os
+from urllib.parse import quote
+
+import requests
 
 
 COPILOT_SESSION_DIR = os.path.expanduser("~/.copilot/session-state")
 CLAUDE_SESSIONS_DIR = os.path.expanduser("~/.claude/sessions")
-CLAUDE_DIR = os.path.expanduser("~/.claude")
 CODEX_DIR = os.path.expanduser("~/.codex")
 GEMINI_DIR = os.path.expanduser("~/.gemini")
 HERMES_DIR = os.path.expanduser("~/.hermes")
+SAVANT_API_BASE = os.environ.get("SAVANT_API_BASE", "http://localhost:8090")
 
 
 def _codex_dir() -> str:
     return os.environ.get("CODEX_DIR", CODEX_DIR)
 
 
-def _codex_meta_dir() -> str:
-    return os.path.join(_codex_dir(), ".savant-meta")
+def _resolve_workspace_via_api(provider: str, session_id: str) -> str | None:
+    """Resolve workspace mapping through Savant API link registry."""
+    try:
+        url = (
+            f"{SAVANT_API_BASE}/api/session-links/resolve"
+            f"?provider={quote(str(provider or ''))}&session_id={quote(str(session_id or ''))}"
+        )
+        resp = requests.get(url, timeout=2)
+        if resp.status_code != 200:
+            return None
+        data = resp.json() if resp.content else {}
+        ws = data.get("workspace_id")
+        return ws or None
+    except Exception:
+        return None
 
 
 # ── Copilot detection ────────────────────────────────────────────────────────
 
 def _find_session_by_pid(pid: int) -> dict | None:
-    """Find session ID and workspace by matching a PID to a lock file."""
+    """Find Copilot session ID by matching a PID to a lock file."""
     pattern = os.path.join(COPILOT_SESSION_DIR, "*", f"inuse.{pid}.lock")
     matches = glob.glob(pattern)
     if not matches:
@@ -45,16 +62,7 @@ def _find_session_by_pid(pid: int) -> dict | None:
     session_dir = os.path.dirname(matches[0])
     session_id = os.path.basename(session_dir)
 
-    # Read workspace from .copilot-meta.json
-    meta_path = os.path.join(session_dir, ".copilot-meta.json")
-    workspace_id = None
-    if os.path.isfile(meta_path):
-        try:
-            with open(meta_path) as f:
-                meta = json.load(f)
-            workspace_id = meta.get("workspace")
-        except (json.JSONDecodeError, OSError):
-            pass
+    workspace_id = _resolve_workspace_via_api("copilot", session_id)
 
     return {"session_id": session_id, "workspace_id": workspace_id}
 
@@ -77,8 +85,7 @@ def _find_claude_session_by_pid(pid: int) -> dict | None:
     if not session_id:
         return None
 
-    # Look up workspace from savant meta (stored per-session in ~/.claude)
-    workspace_id = _claude_read_workspace(session_id)
+    workspace_id = _resolve_workspace_via_api("claude", session_id)
 
     return {
         "session_id": session_id,
@@ -86,32 +93,7 @@ def _find_claude_session_by_pid(pid: int) -> dict | None:
         "provider": "claude",
     }
 
-
-def _claude_read_workspace(session_id: str) -> str | None:
-    """Read workspace assignment from savant meta for a Claude session."""
-    meta_dir = os.path.join(CLAUDE_DIR, ".savant-meta")
-    meta_path = os.path.join(meta_dir, f"{session_id}.json")
-    if not os.path.isfile(meta_path):
-        return None
-    try:
-        with open(meta_path) as f:
-            return json.load(f).get("workspace")
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
 # ── Codex detection ─────────────────────────────────────────────────────────
-
-def _codex_read_workspace(session_id: str) -> str | None:
-    """Read workspace assignment from Savant meta for a Codex session."""
-    meta_path = os.path.join(_codex_meta_dir(), f"{session_id}.json")
-    if not os.path.isfile(meta_path):
-        return None
-    try:
-        with open(meta_path) as f:
-            return json.load(f).get("workspace")
-    except (json.JSONDecodeError, OSError):
-        return None
 
 
 def _find_codex_session_by_env() -> dict | None:
@@ -130,26 +112,12 @@ def _find_codex_session_by_env() -> dict | None:
         return None
     return {
         "session_id": session_id,
-        "workspace_id": _codex_read_workspace(session_id),
+        "workspace_id": _resolve_workspace_via_api("codex", session_id),
         "provider": "codex",
     }
 
 
 # ── Gemini detection ─────────────────────────────────────────────────────────
-
-def _gemini_read_workspace(session_id: str) -> str | None:
-    """Read workspace assignment from Savant meta for a Gemini session."""
-    meta_dir = os.path.join(GEMINI_DIR, ".savant-meta")
-    meta_path = os.path.join(meta_dir, f"{session_id}.json")
-    if not os.path.isfile(meta_path):
-        return None
-    try:
-        with open(meta_path) as f:
-            return json.load(f).get("workspace")
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
 def _find_gemini_session_by_pid(pid: int) -> dict | None:
     """Detect if the PID is a gemini process and get the current session."""
     try:
@@ -174,7 +142,7 @@ def _find_gemini_session_by_pid(pid: int) -> dict | None:
     if not session_id:
         return None
 
-    workspace_id = _gemini_read_workspace(session_id)
+    workspace_id = _resolve_workspace_via_api("gemini", session_id)
     return {
         "session_id": session_id,
         "workspace_id": workspace_id,
@@ -184,26 +152,6 @@ def _find_gemini_session_by_pid(pid: int) -> dict | None:
 
 # ── Hermes detection ─────────────────────────────────────────────────────────
 
-def _hermes_dir() -> str:
-    return os.environ.get("HERMES_DIR", HERMES_DIR)
-
-
-def _hermes_meta_dir() -> str:
-    return os.path.join(_hermes_dir(), ".savant-meta")
-
-
-def _hermes_read_workspace(session_id: str) -> str | None:
-    """Read workspace assignment from Savant meta for a Hermes session."""
-    meta_path = os.path.join(_hermes_meta_dir(), f"{session_id}.json")
-    if not os.path.isfile(meta_path):
-        return None
-    try:
-        with open(meta_path) as f:
-            return json.load(f).get("workspace")
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
 def _find_hermes_session_by_env() -> dict | None:
     """Match a Hermes session using env vars (HERMES_SESSION_ID)."""
     session_id = os.environ.get("HERMES_SESSION_ID")
@@ -211,7 +159,7 @@ def _find_hermes_session_by_env() -> dict | None:
         return None
     return {
         "session_id": session_id,
-        "workspace_id": _hermes_read_workspace(session_id),
+        "workspace_id": _resolve_workspace_via_api("hermes", session_id),
         "provider": "hermes",
     }
 

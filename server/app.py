@@ -14,6 +14,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, abort, send_file
 from sqlite_client import get_sqlite, get_connection, init_sqlite, close_sqlite
 from db.workspaces import WorkspaceDB
+from db.workspace_session_links import WorkspaceSessionLinkDB
 from db.tasks import TaskDB
 from db.notes import NoteDB
 from db.merge_requests import MergeRequestDB
@@ -1273,6 +1274,90 @@ def _workspaces_path():
     return os.path.join(META_DIR, "workspaces.json")
 
 _workspaces_lock = threading.RLock()
+_PROVIDER_CACHE_KEYS = {
+    "copilot": "copilot_sessions",
+    "claude": "claude_sessions",
+    "codex": "codex_sessions",
+    "gemini": "gemini_sessions",
+    "hermes": "hermes_sessions",
+}
+
+
+def _normalize_provider_name(provider: str) -> str:
+    p = str(provider or "").strip().lower()
+    if p == "cline":
+        return "copilot"
+    if p in _PROVIDER_CACHE_KEYS:
+        return p
+    raise ValueError("Invalid provider")
+
+
+def _set_cached_session_workspace(provider: str, session_id: str, workspace_id):
+    p = _normalize_provider_name(provider)
+    cache_key = _PROVIDER_CACHE_KEYS[p]
+    sid = str(session_id or "")
+    with _bg_lock:
+        sessions = _bg_cache.get(cache_key) or []
+        for s in sessions:
+            if s.get("id") == sid:
+                s["workspace"] = workspace_id
+                s["workspace_id"] = workspace_id
+                break
+
+
+def _get_cached_session(provider: str, session_id: str) -> dict | None:
+    p = _normalize_provider_name(provider)
+    cache_key = _PROVIDER_CACHE_KEYS[p]
+    sid = str(session_id or "")
+    with _bg_lock:
+        for s in (_bg_cache.get(cache_key) or []):
+            if s.get("id") == sid:
+                item = dict(s)
+                item["provider"] = p
+                return item
+    return None
+
+
+def _workspace_linked_sessions(ws_id: str) -> tuple[list[dict], dict]:
+    links = WorkspaceSessionLinkDB.list_by_workspace(ws_id)
+    sessions = []
+    by_provider = {p: set() for p in _PROVIDER_CACHE_KEYS}
+    for link in links:
+        provider = _normalize_provider_name(link.get("provider"))
+        session_id = str(link.get("session_id") or "")
+        by_provider[provider].add(session_id)
+        cached = _get_cached_session(provider, session_id)
+        if cached:
+            cached.setdefault("workspace", ws_id)
+            cached.setdefault("workspace_id", ws_id)
+            sessions.append(cached)
+        else:
+            sessions.append({
+                "id": session_id,
+                "provider": provider,
+                "workspace": ws_id,
+                "workspace_id": ws_id,
+                "summary": "Session not available on this client",
+                "nickname": "",
+                "status": "UNAVAILABLE",
+                "archived": False,
+                "missing_local": True,
+                "attached_at": link.get("attached_at"),
+            })
+    sessions.sort(key=lambda s: str(s.get("updated_at") or s.get("created_at") or s.get("attached_at") or ""), reverse=True)
+    return sessions, by_provider
+
+
+def _set_workspace_link(provider: str, session_id: str, workspace_id):
+    provider = _normalize_provider_name(provider)
+    sid = str(session_id or "")
+    if workspace_id:
+        WorkspaceSessionLinkDB.upsert(workspace_id, provider, sid)
+    else:
+        existing = WorkspaceSessionLinkDB.resolve(provider, sid)
+        if existing:
+            WorkspaceSessionLinkDB.delete_from_workspace(existing["workspace_id"], provider, sid)
+    _set_cached_session_workspace(provider, sid, workspace_id)
 
 def _read_workspaces():
     """Read workspaces from SQLite."""
@@ -1354,39 +1439,36 @@ def api_workspaces_list():
         git_commit_count = 0
         archived_count = 0
         session_file_count = 0
-        with _bg_lock:
-            for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
-                sessions = _bg_cache.get(provider) or []
-                for s in sessions:
-                    if s.get("workspace") == ws_id:
-                        pkey = provider.replace("_sessions", "")
-                        counts[pkey] += 1
-                        counts["total"] += 1
-                        st = (s.get("status") or "IDLE").upper()
-                        session_status_counts[st] = session_status_counts.get(st, 0) + 1
-                        p = s.get("project")
-                        if p:
-                            projects.add(p)
-                        note_count += len(s.get("notes") or [])
-                        file_count += s.get("file_count") or 0
-                        git_commit_count += s.get("git_commit_count") or 0
-                        session_file_count += (s.get("file_count") or 0) + (s.get("checkpoint_count") or 0) + (s.get("research_count") or 0)
-                        if s.get("archived"):
-                            archived_count += 1
-                        for mr in (s.get("mrs") or []):
-                            # Support both old format (url) and new format (mr_id)
-                            url = (mr.get("url") or "").strip().lower().rstrip("/")
-                            if url:
-                                mr_urls.add(url)
-                                mr_by_url[url] = mr.get("status") or "open"
-                            elif mr.get("mr_id"):
-                                # Resolve mr_id → registry entry
-                                reg = registry_by_id.get(mr["mr_id"])
-                                if reg:
-                                    rurl = (reg.get("url") or "").strip().lower().rstrip("/")
-                                    if rurl:
-                                        mr_urls.add(rurl)
-                                        mr_by_url[rurl] = reg.get("status") or "open"
+        ws_sessions, link_ids = _workspace_linked_sessions(ws_id)
+        for provider, ids in link_ids.items():
+            counts[provider] = len(ids)
+            counts["total"] += len(ids)
+        for s in ws_sessions:
+            st = (s.get("status") or "IDLE").upper()
+            session_status_counts[st] = session_status_counts.get(st, 0) + 1
+            p = s.get("project")
+            if p:
+                projects.add(p)
+            note_count += len(s.get("notes") or [])
+            file_count += s.get("file_count") or 0
+            git_commit_count += s.get("git_commit_count") or 0
+            session_file_count += (s.get("file_count") or 0) + (s.get("checkpoint_count") or 0) + (s.get("research_count") or 0)
+            if s.get("archived"):
+                archived_count += 1
+            for mr in (s.get("mrs") or []):
+                # Support both old format (url) and new format (mr_id)
+                url = (mr.get("url") or "").strip().lower().rstrip("/")
+                if url:
+                    mr_urls.add(url)
+                    mr_by_url[url] = mr.get("status") or "open"
+                elif mr.get("mr_id"):
+                    # Resolve mr_id → registry entry
+                    reg = registry_by_id.get(mr["mr_id"])
+                    if reg:
+                        rurl = (reg.get("url") or "").strip().lower().rstrip("/")
+                        if rurl:
+                            mr_urls.add(rurl)
+                            mr_by_url[rurl] = reg.get("status") or "open"
         # Also include registry MRs for this workspace that weren't in any session
         registry_mrs = [m for m in all_registry_mrs if m.get("workspace_id") == ws_id]
         for m in registry_mrs:
@@ -1528,200 +1610,246 @@ def api_workspaces_update(ws_id):
 
 @app.route("/api/workspaces/<ws_id>", methods=["DELETE"])
 def api_workspaces_delete(ws_id):
+    existing_links = WorkspaceSessionLinkDB.list_by_workspace(ws_id)
+
+    # Remove session links first so FK on workspace_session_links never blocks delete.
+    WorkspaceSessionLinkDB.delete_by_workspace(ws_id)
+    for link in existing_links:
+        try:
+            _set_cached_session_workspace(link.get("provider"), link.get("session_id"), None)
+        except Exception:
+            pass
+
     # Delete from SQLite
     success = WorkspaceDB.delete(ws_id)
     if not success:
         return jsonify({"error": "Workspace not found"}), 404
-    
-    # Remove workspace assignment from all sessions
-    with _bg_lock:
-        for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
-            sessions = _bg_cache.get(provider) or []
-            for s in sessions:
-                if s.get("workspace") == ws_id:
-                    s["workspace"] = None
     
     _emit_event("workspace_deleted", f"Workspace {ws_id} deleted", {"workspace_id": ws_id})
     return jsonify({"deleted": ws_id})
 
 @app.route("/api/workspaces/<ws_id>/sessions", methods=["GET"])
 def api_workspaces_sessions(ws_id):
-    """Get all sessions across all providers for a workspace."""
-    results = []
-    with _bg_lock:
-        for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
-            pkey = provider.replace("_sessions", "")
-            sessions = _bg_cache.get(provider) or []
-            for s in sessions:
-                if s.get("workspace") == ws_id:
-                    session = dict(s)
-                    # pkey is 'gemini' here for gemini_sessions
-                    session["provider"] = pkey
-                    # Ensure cwd and resume_command are present for terminal resume
-                    if not session.get("cwd") and session.get("project_path"):
-                        session["cwd"] = session["project_path"]
-                    if not session.get("resume_command"):
-                        if pkey == "gemini":
-                            c = session.get("cwd") or "~"
-                            session["resume_command"] = f"cd {c} && gemini --resume {session['id']}"
-                        elif pkey == "codex":
-                            c = session.get("cwd") or "~"
-                            session["resume_command"] = f"cd {c} && codex resume {session['id']}"
-                    results.append(session)
-    results.sort(key=lambda s: str(s.get("updated_at") or s.get("created_at") or ""), reverse=True)
+    """Get workspace-linked sessions joined with locally available sessions."""
+    results, _ = _workspace_linked_sessions(ws_id)
+    for session in results:
+        pkey = session.get("provider") or "copilot"
+        if not session.get("cwd") and session.get("project_path"):
+            session["cwd"] = session["project_path"]
+        if not session.get("resume_command") and not session.get("missing_local"):
+            if pkey == "gemini":
+                c = session.get("cwd") or "~"
+                session["resume_command"] = f"cd {c} && gemini --resume {session['id']}"
+            elif pkey == "codex":
+                c = session.get("cwd") or "~"
+                session["resume_command"] = f"cd {c} && codex resume {session['id']}"
     return jsonify({"sessions": results})
+
+
+@app.route("/api/workspaces/<ws_id>/session-links", methods=["GET"])
+def api_workspace_session_links_list(ws_id):
+    if not WorkspaceDB.get_by_id(ws_id):
+        return jsonify({"error": "Workspace not found"}), 404
+    links = WorkspaceSessionLinkDB.list_by_workspace(ws_id)
+    return jsonify({"workspace_id": ws_id, "links": links})
+
+
+@app.route("/api/workspaces/<ws_id>/session-links", methods=["POST"])
+def api_workspace_session_links_upsert(ws_id):
+    if not WorkspaceDB.get_by_id(ws_id):
+        return jsonify({"error": "Workspace not found"}), 404
+    data = request.get_json(force=True) or {}
+    provider = data.get("provider")
+    session_id = str(data.get("session_id") or "").strip()
+    if not provider or not session_id:
+        return jsonify({"error": "provider and session_id are required"}), 400
+    try:
+        link = WorkspaceSessionLinkDB.upsert(ws_id, provider, session_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    _set_cached_session_workspace(link["provider"], session_id, ws_id)
+    _emit_event("session_assigned", "Session assigned to workspace", {"session_id": session_id, "workspace_id": ws_id})
+    return jsonify(link)
+
+
+@app.route("/api/workspaces/<ws_id>/session-links/<provider>/<session_id>", methods=["DELETE"])
+def api_workspace_session_links_delete(ws_id, provider, session_id):
+    try:
+        deleted = WorkspaceSessionLinkDB.delete_from_workspace(ws_id, provider, session_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    if not deleted:
+        return jsonify({"error": "Session link not found"}), 404
+    _set_cached_session_workspace(provider, session_id, None)
+    return jsonify({"deleted": True, "workspace_id": ws_id, "provider": _normalize_provider_name(provider), "session_id": session_id})
+
+
+@app.route("/api/session-links/resolve", methods=["GET"])
+def api_session_links_resolve():
+    provider = request.args.get("provider", "")
+    session_id = request.args.get("session_id", "")
+    if not provider or not session_id:
+        return jsonify({"error": "provider and session_id are required"}), 400
+    try:
+        provider = _normalize_provider_name(provider)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    row = WorkspaceSessionLinkDB.resolve(provider, session_id)
+    return jsonify({
+        "provider": provider,
+        "session_id": session_id,
+        "workspace_id": row.get("workspace_id") if row else None,
+    })
 
 @app.route("/api/workspaces/<ws_id>/files", methods=["GET"])
 def api_workspaces_files(ws_id):
     """Get all session files grouped by session for a workspace."""
     grouped = []  # [{session_id, provider, summary, project, files: [...]}]
 
-    with _bg_lock:
-        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
-            pname = provider_key.replace("_sessions", "")
-            for s in (_bg_cache.get(provider_key) or []):
-                if s.get("workspace") != ws_id:
+    ws_sessions, _ = _workspace_linked_sessions(ws_id)
+    for s in ws_sessions:
+        if s.get("missing_local"):
+            continue
+        pname = s.get("provider")
+        sid = s.get("id", "")
+        summary = s.get("nickname") or s.get("summary") or sid
+        project = s.get("project") or ""
+        cwd = s.get("cwd") or s.get("git_root") or ""
+
+        files_seen = {}
+
+        if pname == "copilot":
+            full = os.path.realpath(os.path.join(SESSION_DIR, sid))
+            if not os.path.isdir(full):
+                continue
+            events_file = os.path.join(full, "events.jsonl")
+            if os.path.exists(events_file):
+                try:
+                    with open(events_file, "r") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                ev = json.loads(line)
+                            except Exception:
+                                continue
+                            etype = ev.get("type", "")
+                            data = ev.get("data", {})
+                            ts = ev.get("timestamp", "")
+                            if etype == "tool.execution_start":
+                                tool_name = data.get("toolName", "")
+                                args = data.get("arguments", {})
+                                if tool_name in ("create", "edit", "view", "write"):
+                                    fpath = args.get("path", "")
+                                    if fpath and "/.copilot/" not in fpath:
+                                        action = tool_name
+                                        if fpath not in files_seen:
+                                            files_seen[fpath] = {"path": fpath, "action": action, "count": 0, "first_seen": ts, "last_seen": ts}
+                                        files_seen[fpath]["count"] += 1
+                                        files_seen[fpath]["last_seen"] = ts
+                                        if action in ("create", "edit", "write"):
+                                            files_seen[fpath]["action"] = action
+                except Exception:
+                    pass
+
+        elif pname == "claude":
+            raw = claude_load_session_jsonl(sid)
+            for msg in (raw or []):
+                if not cwd and msg.get("cwd"):
+                    cwd = msg["cwd"]
+                if msg.get("type") != "assistant":
                     continue
-                sid = s.get("id", "")
-                summary = s.get("nickname") or s.get("summary") or sid
-                project = s.get("project") or ""
-                cwd = s.get("cwd") or s.get("git_root") or ""
-
-                files_seen = {}
-
-                if pname == "copilot":
-                    full = os.path.realpath(os.path.join(SESSION_DIR, sid))
-                    if not os.path.isdir(full):
+                content = msg.get("message", {}).get("content", "")
+                ts = msg.get("timestamp", "")
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if not isinstance(block, dict) or block.get("type") != "tool_use":
                         continue
-                    events_file = os.path.join(full, "events.jsonl")
-                    if os.path.exists(events_file):
-                        try:
-                            with open(events_file, "r") as f:
-                                for line in f:
-                                    line = line.strip()
-                                    if not line:
-                                        continue
-                                    try:
-                                        ev = json.loads(line)
-                                    except Exception:
-                                        continue
-                                    etype = ev.get("type", "")
-                                    data = ev.get("data", {})
-                                    ts = ev.get("timestamp", "")
-                                    if etype == "tool.execution_start":
-                                        tool_name = data.get("toolName", "")
-                                        args = data.get("arguments", {})
-                                        if tool_name in ("create", "edit", "view", "write"):
-                                            fpath = args.get("path", "")
-                                            if fpath and "/.copilot/" not in fpath:
-                                                action = tool_name
-                                                if fpath not in files_seen:
-                                                    files_seen[fpath] = {"path": fpath, "action": action, "count": 0, "first_seen": ts, "last_seen": ts}
-                                                files_seen[fpath]["count"] += 1
-                                                files_seen[fpath]["last_seen"] = ts
-                                                if action in ("create", "edit", "write"):
-                                                    files_seen[fpath]["action"] = action
-                        except Exception:
-                            pass
+                    tool_name = block.get("name", "")
+                    inp = block.get("input", {})
+                    if not isinstance(inp, dict):
+                        continue
+                    fpath = inp.get("path", inp.get("file_path", ""))
+                    if not fpath or "/.claude/" in fpath or "/.copilot/" in fpath:
+                        continue
+                    action = "view"
+                    if tool_name in ("Write", "create"):
+                        action = "create"
+                    elif tool_name in ("Edit", "edit"):
+                        action = "edit"
+                    elif tool_name in ("Read", "view"):
+                        action = "view"
+                    if fpath not in files_seen:
+                        files_seen[fpath] = {"path": fpath, "action": action, "count": 0, "first_seen": ts, "last_seen": ts}
+                    files_seen[fpath]["count"] += 1
+                    files_seen[fpath]["last_seen"] = ts
+                    if action in ("create", "edit"):
+                        files_seen[fpath]["action"] = action
 
-                elif pname == "claude":
-                    raw = claude_load_session_jsonl(sid)
-                    for msg in (raw or []):
-                        if not cwd and msg.get("cwd"):
-                            cwd = msg["cwd"]
-                        if msg.get("type") != "assistant":
-                            continue
-                        content = msg.get("message", {}).get("content", "")
-                        ts = msg.get("timestamp", "")
-                        if not isinstance(content, list):
-                            continue
-                        for block in content:
-                            if not isinstance(block, dict) or block.get("type") != "tool_use":
-                                continue
-                            tool_name = block.get("name", "")
-                            inp = block.get("input", {})
-                            if not isinstance(inp, dict):
-                                continue
-                            fpath = inp.get("path", inp.get("file_path", ""))
-                            if not fpath or "/.claude/" in fpath or "/.copilot/" in fpath:
-                                continue
-                            action = "view"
-                            if tool_name in ("Write", "create"):
-                                action = "create"
-                            elif tool_name in ("Edit", "edit"):
-                                action = "edit"
-                            elif tool_name in ("Read", "view"):
-                                action = "view"
-                            if fpath not in files_seen:
-                                files_seen[fpath] = {"path": fpath, "action": action, "count": 0, "first_seen": ts, "last_seen": ts}
-                            files_seen[fpath]["count"] += 1
-                            files_seen[fpath]["last_seen"] = ts
-                            if action in ("create", "edit"):
-                                files_seen[fpath]["action"] = action
+        elif pname == "codex":
+            # Extract files from Codex JSONL via api_codex_session_project_files logic
+            res = api_codex_session_project_files(sid)
+            data = res.get_json() if hasattr(res, "get_json") else {}
+            for fi in data.get("files", []):
+                fpath = fi.get("path")
+                if fpath not in files_seen:
+                    files_seen[fpath] = fi
+                else:
+                    files_seen[fpath]["count"] += fi.get("count", 0)
 
-                elif pname == "codex":
-                    # Extract files from Codex JSONL via api_codex_session_project_files logic
-                    from flask import request
-                    res = api_codex_session_project_files(sid)
-                    data = res.get_json() if hasattr(res, 'get_json') else {}
-                    for fi in data.get("files", []):
-                        fpath = fi.get("path")
-                        if fpath not in files_seen:
-                            files_seen[fpath] = fi
-                        else:
-                            files_seen[fpath]["count"] += fi.get("count", 0)
+        elif pname == "gemini":
+            # Parse tool calls from Gemini chat JSON
+            messages = s.get("messages", [])
+            for msg in messages:
+                ts = msg.get("timestamp", "")
+                tool_calls = msg.get("toolCalls", [])
+                for tc in tool_calls:
+                    tool_name = tc.get("function", {}).get("name", "")
+                    inp = tc.get("function", {}).get("arguments", {})
+                    if not isinstance(inp, dict):
+                        continue
+                    fpath = inp.get("path", inp.get("file_path", ""))
+                    if not fpath or "/.gemini/" in fpath:
+                        continue
+                    action = "view"
+                    if tool_name in ("create", "write_file", "edit"):
+                        action = "edit"
+                    if fpath not in files_seen:
+                        files_seen[fpath] = {"path": fpath, "action": action, "count": 0, "first_seen": ts, "last_seen": ts}
+                    files_seen[fpath]["count"] += 1
+                    files_seen[fpath]["last_seen"] = ts
 
-                elif pname == "gemini":
-                    # Parse tool calls from Gemini chat JSON
-                    messages = s.get("messages", [])
-                    for msg in messages:
-                        ts = msg.get("timestamp", "")
-                        tool_calls = msg.get("toolCalls", [])
-                        for tc in tool_calls:
-                            tool_name = tc.get("function", {}).get("name", "")
-                            inp = tc.get("function", {}).get("arguments", {})
-                            if not isinstance(inp, dict):
-                                continue
-                            fpath = inp.get("path", inp.get("file_path", ""))
-                            if not fpath or "/.gemini/" in fpath:
-                                continue
-                            action = "view"
-                            if tool_name in ("create", "write_file", "edit"):
-                                action = "edit"
-                            if fpath not in files_seen:
-                                files_seen[fpath] = {"path": fpath, "action": action, "count": 0, "first_seen": ts, "last_seen": ts}
-                            files_seen[fpath]["count"] += 1
-                            files_seen[fpath]["last_seen"] = ts
+        elif pname == "hermes":
+            # Extract files from Hermes session via project-files endpoint
+            res = api_hermes_session_project_files(sid)
+            fdata = res.get_json() if hasattr(res, "get_json") else {}
+            for fi in fdata.get("files", []):
+                fpath = fi.get("path")
+                if fpath not in files_seen:
+                    files_seen[fpath] = fi
+                else:
+                    files_seen[fpath]["count"] += fi.get("count", 0)
 
-                elif pname == "hermes":
-                    # Extract files from Hermes session via project-files endpoint
-                    res = api_hermes_session_project_files(sid)
-                    fdata = res.get_json() if hasattr(res, 'get_json') else {}
-                    for fi in fdata.get("files", []):
-                        fpath = fi.get("path")
-                        if fpath not in files_seen:
-                            files_seen[fpath] = fi
-                        else:
-                            files_seen[fpath]["count"] += fi.get("count", 0)
+        # Build file list for this session
+        file_list = []
+        for fpath, info in files_seen.items():
+            info["name"] = os.path.basename(fpath)
+            info["relative"] = os.path.relpath(fpath, cwd) if cwd and fpath.startswith(cwd) else fpath
+            file_list.append(info)
+        file_list.sort(key=lambda x: x.get("last_seen", "") or "", reverse=True)
 
-                # Build file list for this session
-                file_list = []
-                for fpath, info in files_seen.items():
-                    info["name"] = os.path.basename(fpath)
-                    info["relative"] = os.path.relpath(fpath, cwd) if cwd and fpath.startswith(cwd) else fpath
-                    file_list.append(info)
-                file_list.sort(key=lambda x: x.get("last_seen", "") or "", reverse=True)
-
-                if file_list:
-                    grouped.append({
-                        "session_id": sid,
-                        "provider": pname,
-                        "summary": summary,
-                        "project": project,
-                        "cwd": cwd,
-                        "file_count": len(file_list),
-                        "files": file_list,
-                    })
+        if file_list:
+            grouped.append({
+                "session_id": sid,
+                "provider": pname,
+                "summary": summary,
+                "project": project,
+                "cwd": cwd,
+                "file_count": len(file_list),
+                "files": file_list,
+            })
 
     grouped.sort(key=lambda g: g.get("summary", "").lower())
     return jsonify({"groups": grouped})
@@ -1730,52 +1858,51 @@ def api_workspaces_files(ws_id):
 def api_workspaces_session_files(ws_id):
     """Get session artifact files (plan, checkpoints, files/, research/) grouped by session."""
     grouped = []
-    with _bg_lock:
-        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
-            pname = provider_key.replace("_sessions", "")
-            for s in (_bg_cache.get(provider_key) or []):
-                if s.get("workspace") != ws_id:
-                    continue
-                sid = s.get("id", "")
-                summary = s.get("nickname") or s.get("summary") or sid
+    ws_sessions, _ = _workspace_linked_sessions(ws_id)
+    for s in ws_sessions:
+        if s.get("missing_local"):
+            continue
+        pname = s.get("provider")
+        sid = s.get("id", "")
+        summary = s.get("nickname") or s.get("summary") or sid
 
-                if pname == "copilot":
-                    session_path = os.path.join(SESSION_DIR, sid)
-                elif pname == "claude":
-                    session_path = os.path.join(CLAUDE_DIR, sid) if os.path.isdir(os.path.join(CLAUDE_DIR, sid)) else ""
-                elif pname == "codex":
-                    session_dir = codex_find_session_dir(sid)
-                    session_path = session_dir if session_dir else ""
-                elif pname == "gemini":
-                    # Gemini sessions in chats/ are single files, but they might have artifact dirs
-                    session_path = os.path.join(GEMINI_DIR, "tmp", "savant-app", "chats", sid)
-                    if not os.path.isdir(session_path):
-                        session_path = ""
-                elif pname == "hermes":
-                    # Hermes sessions are single JSON files, no artifact directory
-                    session_path = ""
-                else:
-                    continue
-                if not session_path or not os.path.isdir(session_path):
-                    continue
+        if pname == "copilot":
+            session_path = os.path.join(SESSION_DIR, sid)
+        elif pname == "claude":
+            session_path = os.path.join(CLAUDE_DIR, sid) if os.path.isdir(os.path.join(CLAUDE_DIR, sid)) else ""
+        elif pname == "codex":
+            session_dir = codex_find_session_dir(sid)
+            session_path = session_dir if session_dir else ""
+        elif pname == "gemini":
+            # Gemini sessions in chats/ are single files, but they might have artifact dirs
+            session_path = os.path.join(GEMINI_DIR, "tmp", "savant-app", "chats", sid)
+            if not os.path.isdir(session_path):
+                session_path = ""
+        elif pname == "hermes":
+            # Hermes sessions are single JSON files, no artifact directory
+            session_path = ""
+        else:
+            continue
+        if not session_path or not os.path.isdir(session_path):
+            continue
 
-                artifacts = list_session_tree(session_path)
-                all_files = []
-                if artifacts.get("plan"):
-                    all_files.append({**artifacts["plan"], "category": "plan"})
-                for fi in artifacts.get("files", []):
-                    all_files.append({**fi, "category": "file"})
-                for r in artifacts.get("research", []):
-                    all_files.append({**r, "category": "research"})
+        artifacts = list_session_tree(session_path)
+        all_files = []
+        if artifacts.get("plan"):
+            all_files.append({**artifacts["plan"], "category": "plan"})
+        for fi in artifacts.get("files", []):
+            all_files.append({**fi, "category": "file"})
+        for r in artifacts.get("research", []):
+            all_files.append({**r, "category": "research"})
 
-                if all_files:
-                    grouped.append({
-                        "session_id": sid,
-                        "provider": pname,
-                        "summary": summary,
-                        "file_count": len(all_files),
-                        "files": all_files,
-                    })
+        if all_files:
+            grouped.append({
+                "session_id": sid,
+                "provider": pname,
+                "summary": summary,
+                "file_count": len(all_files),
+                "files": all_files,
+            })
 
     grouped.sort(key=lambda g: g.get("summary", "").lower())
     return jsonify({"groups": grouped})
@@ -1786,25 +1913,23 @@ def api_workspaces_notes(ws_id):
     groups = []
     seen_session_ids = set()
 
-    # 1. Notes from bg_cache (embedded in session file data)
-    with _bg_lock:
-        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
-            pname = provider_key.replace("_sessions", "")
-            for s in (_bg_cache.get(provider_key) or []):
-                if s.get("workspace") != ws_id:
-                    continue
-                notes = s.get("notes") or []
-                if not notes:
-                    continue
-                seen_session_ids.add(s.get("id", ""))
-                sorted_notes = sorted(notes, key=lambda n: n.get("timestamp") or "", reverse=True)
-                groups.append({
-                    "session_id": s.get("id", ""),
-                    "provider": pname,
-                    "summary": s.get("nickname") or s.get("summary") or s.get("id", ""),
-                    "note_count": len(sorted_notes),
-                    "notes": sorted_notes,
-                })
+    # 1. Notes from local session cache for workspace-linked sessions
+    ws_sessions, _ = _workspace_linked_sessions(ws_id)
+    for s in ws_sessions:
+        if s.get("missing_local"):
+            continue
+        notes = s.get("notes") or []
+        if not notes:
+            continue
+        seen_session_ids.add(s.get("id", ""))
+        sorted_notes = sorted(notes, key=lambda n: n.get("timestamp") or "", reverse=True)
+        groups.append({
+            "session_id": s.get("id", ""),
+            "provider": s.get("provider", "copilot"),
+            "summary": s.get("nickname") or s.get("summary") or s.get("id", ""),
+            "note_count": len(sorted_notes),
+            "notes": sorted_notes,
+        })
 
     # 2. Notes from SQLite (created via MCP tools)
     try:
@@ -1855,34 +1980,31 @@ def api_workspaces_search():
         if query in haystack:
             ws_matches.append(ws)
 
-    # Search sessions and notes within workspaces
+    # Search sessions and notes within workspaces (joined by server-owned links)
     ws_by_id = {w["id"]: w for w in workspaces}
-    with _bg_lock:
-        for provider_key in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
-            pname = provider_key.replace("_sessions", "")
-            for s in (_bg_cache.get(provider_key) or []):
-                ws_id = s.get("workspace")
-                if not ws_id or ws_id not in ws_by_id:
-                    continue
-                ws_name = ws_by_id[ws_id].get("name", "")
-                sid = s.get("id", "")
-                summary = s.get("nickname") or s.get("summary") or sid
-                # Session summary match
-                if query in summary.lower() or query in (s.get("project") or "").lower():
-                    session_matches.append({
+    for ws_id, ws_obj in ws_by_id.items():
+        ws_name = ws_obj.get("name", "")
+        ws_sessions, _ = _workspace_linked_sessions(ws_id)
+        for s in ws_sessions:
+            sid = s.get("id", "")
+            summary = s.get("nickname") or s.get("summary") or sid
+            pname = s.get("provider", "copilot")
+            # Session summary match
+            if query in summary.lower() or query in (s.get("project") or "").lower():
+                session_matches.append({
+                    "session_id": sid, "provider": pname, "summary": summary,
+                    "project": s.get("project") or "",
+                    "workspace_id": ws_id, "workspace_name": ws_name,
+                })
+            # Note matches
+            for note in (s.get("notes") or []):
+                text = (note.get("text") or "").lower()
+                if query in text:
+                    note_matches.append({
                         "session_id": sid, "provider": pname, "summary": summary,
-                        "project": s.get("project") or "",
                         "workspace_id": ws_id, "workspace_name": ws_name,
+                        "text": note.get("text", ""), "timestamp": note.get("timestamp", ""),
                     })
-                # Note matches
-                for note in (s.get("notes") or []):
-                    text = (note.get("text") or "").lower()
-                    if query in text:
-                        note_matches.append({
-                            "session_id": sid, "provider": pname, "summary": summary,
-                            "workspace_id": ws_id, "workspace_name": ws_name,
-                            "text": note.get("text", ""), "timestamp": note.get("timestamp", ""),
-                        })
 
     # Search tasks
     for t in all_tasks:
@@ -2089,15 +2211,8 @@ def api_workspaces_context(ws_id):
 
 def _collect_workspace_sessions(ws_id):
     """Gather all active (non-archived) sessions assigned to a workspace."""
-    sessions = []
-    with _bg_lock:
-        for provider in ("copilot_sessions", "claude_sessions", "codex_sessions", "gemini_sessions", "hermes_sessions"):
-            pkey = provider.replace("_sessions", "")
-            for s in (_bg_cache.get(provider) or []):
-                if s.get("workspace") == ws_id and not s.get("archived"):
-                    session = dict(s)
-                    session["provider"] = pkey
-                    sessions.append(session)
+    sessions, _ = _workspace_linked_sessions(ws_id)
+    sessions = [s for s in sessions if not s.get("archived") and not s.get("missing_local")]
     sessions.sort(key=lambda s: str(s.get("updated_at") or s.get("created_at") or ""), reverse=True)
     return sessions
 
@@ -3476,7 +3591,7 @@ def api_notifications_delete(notification_id):
 
 @app.route("/api/session/<session_id>/workspace", methods=["POST"])
 def api_session_workspace_set(session_id):
-    """Assign a session to a workspace. Works for copilot sessions."""
+    """Deprecated compatibility endpoint: maps Copilot session workspace to link table."""
     data = request.get_json(force=True)
     ws_id = data.get("workspace_id")  # None to unassign
 
@@ -3484,16 +3599,10 @@ def api_session_workspace_set(session_id):
     if not full.startswith(os.path.realpath(SESSION_DIR)) or not os.path.isdir(full):
         return jsonify({"error": "Session not found"}), 404
 
-    meta = read_session_meta(full)
-    meta["workspace"] = ws_id
-    write_session_meta(full, meta)
+    if ws_id and not WorkspaceDB.get_by_id(ws_id):
+        return jsonify({"error": "Workspace not found"}), 404
 
-    with _bg_lock:
-        if _bg_cache.get('copilot_sessions') is not None:
-            for s in _bg_cache['copilot_sessions']:
-                if s['id'] == session_id:
-                    s['workspace'] = ws_id
-                    break
+    _set_workspace_link("copilot", session_id, ws_id)
     if ws_id:
         _emit_event("session_assigned", f"Session assigned to workspace", {"session_id": session_id, "workspace_id": ws_id})
     return jsonify({"id": session_id, "workspace": ws_id})
@@ -6151,16 +6260,9 @@ def api_gemini_session_workspace(session_id):
         return jsonify({"error": "Not a Gemini session"}), 404
     data = request.get_json(force=True)
     ws_id = data.get("workspace_id")
-    meta = _gemini_read_session_meta(session_id)
-    meta["workspace"] = ws_id
-    _gemini_write_session_meta(session_id, meta)
-    # Update cache
-    with _bg_lock:
-        if _bg_cache.get('gemini_sessions') is not None:
-            for s in _bg_cache['gemini_sessions']:
-                if s['id'] == session_id:
-                    s['workspace'] = ws_id
-                    break
+    if ws_id and not WorkspaceDB.get_by_id(ws_id):
+        return jsonify({"error": "Workspace not found"}), 404
+    _set_workspace_link("gemini", session_id, ws_id)
     if ws_id:
         _emit_event("session_assigned", f"Gemini session assigned to workspace", {"session_id": session_id, "workspace_id": ws_id})
     return jsonify({"id": session_id, "workspace": ws_id, "workspace_id": ws_id})
@@ -6955,15 +7057,9 @@ def api_claude_session_workspace(session_id):
         return jsonify({"error": "Not a Claude session"}), 404
     data = request.get_json(force=True)
     ws_id = data.get("workspace_id")
-    meta = claude_read_session_meta(session_id)
-    meta["workspace"] = ws_id
-    claude_write_session_meta(session_id, meta)
-    with _bg_lock:
-        if _bg_cache.get('claude_sessions') is not None:
-            for s in _bg_cache['claude_sessions']:
-                if s['id'] == session_id:
-                    s['workspace'] = ws_id
-                    break
+    if ws_id and not WorkspaceDB.get_by_id(ws_id):
+        return jsonify({"error": "Workspace not found"}), 404
+    _set_workspace_link("claude", session_id, ws_id)
     if ws_id:
         _emit_event("session_assigned", f"Claude session assigned to workspace", {"session_id": session_id, "workspace_id": ws_id})
     return jsonify({"id": session_id, "workspace": ws_id})
@@ -8765,15 +8861,9 @@ def api_hermes_session_workspace(session_id):
         return jsonify({"error": "Not a Hermes session"}), 404
     data = request.get_json(force=True)
     ws_id = data.get("workspace_id")
-    meta = _hermes_read_session_meta(root_id)
-    meta["workspace"] = ws_id
-    _hermes_write_session_meta(root_id, meta)
-    with _bg_lock:
-        if _bg_cache.get('hermes_sessions') is not None:
-            for s in _bg_cache['hermes_sessions']:
-                if s['id'] == root_id:
-                    s['workspace'] = ws_id
-                    break
+    if ws_id and not WorkspaceDB.get_by_id(ws_id):
+        return jsonify({"error": "Workspace not found"}), 404
+    _set_workspace_link("hermes", root_id, ws_id)
     if ws_id:
         _emit_event("session_assigned", f"Hermes session assigned to workspace", {"session_id": root_id, "workspace_id": ws_id})
     return jsonify({"id": root_id, "workspace": ws_id, "workspace_id": ws_id})
@@ -11140,16 +11230,9 @@ def api_codex_session_workspace_set(session_id):
         return jsonify({"error": "Not a Codex session"}), 404
     data = request.get_json(force=True)
     ws_id = data.get("workspace_id")
-    meta = codex_read_session_meta(session_id)
-    meta["workspace"] = ws_id
-    codex_write_session_meta(session_id, meta)
-    codex_write_workspace_meta(session_id, ws_id)
-    with _bg_lock:
-        if _bg_cache.get('codex_sessions') is not None:
-            for s in _bg_cache['codex_sessions']:
-                if s['id'] == session_id:
-                    s['workspace'] = ws_id
-                    break
+    if ws_id and not WorkspaceDB.get_by_id(ws_id):
+        return jsonify({"error": "Workspace not found"}), 404
+    _set_workspace_link("codex", session_id, ws_id)
     if ws_id:
         _emit_event("session_assigned", "Session assigned to workspace", {"session_id": session_id, "workspace_id": ws_id})
     return jsonify({"id": session_id, "workspace": ws_id})

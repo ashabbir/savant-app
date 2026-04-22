@@ -4003,18 +4003,21 @@ async function createAndAssignWs(name) {
 
 async function assignWorkspace(wsId) {
   try {
-    let url;
-    if (MODE === 'cline') url = `/api/cline/task/${SESSION_ID}/workspace`;
-    else if (MODE === 'claude') url = `/api/claude/session/${SESSION_ID}/workspace`;
-    else if (MODE === 'codex') url = `/api/codex/session/${SESSION_ID}/workspace`;
-    else if (MODE === 'gemini') url = `/api/gemini/session/${SESSION_ID}/workspace`;
-    else if (MODE === 'hermes') url = `/api/hermes/session/${SESSION_ID}/workspace`;
-    else url = `/api/session/${SESSION_ID}/workspace`;
-    await fetch(url, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ workspace_id: wsId || null })
-    });
+    const provider = (MODE === 'cline' || MODE === 'copilot') ? 'copilot' : MODE;
+    if (wsId) {
+      await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/session-links`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ provider, session_id: SESSION_ID })
+      });
+    } else {
+      const current = sessionInfo.workspace || null;
+      if (current) {
+        await fetch(`/api/workspaces/${encodeURIComponent(current)}/session-links/${encodeURIComponent(provider)}/${encodeURIComponent(SESSION_ID)}`, {
+          method: 'DELETE'
+        });
+      }
+    }
     sessionInfo.workspace = wsId || null;
     renderWsSelector();
   } catch(e) { alert('Failed to assign workspace: ' + e.message); }

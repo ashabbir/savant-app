@@ -29,6 +29,7 @@ test.describe("Electron UI Modes", () => {
       const results = await h.page.evaluate(() => {
         const providers = ["hermes", "copilot", "claude", "codex", "gemini"];
         const activeIds = [];
+        _prefs = { ...(typeof _prefs === "object" && _prefs ? _prefs : {}), enabled_providers: providers.slice() };
         currentTab = "sessions";
         for (const p of providers) {
           currentMode = p;

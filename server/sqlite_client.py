@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Schema version — bump when tables change
 # ---------------------------------------------------------------------------
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # ---------------------------------------------------------------------------
 # SQL: Table creation
@@ -37,6 +37,18 @@ CREATE TABLE IF NOT EXISTS workspaces (
 );
 CREATE INDEX IF NOT EXISTS idx_ws_status ON workspaces(status);
 CREATE INDEX IF NOT EXISTS idx_ws_created ON workspaces(created_at);
+
+-- Workspace ↔ Session links (server-owned mapping)
+CREATE TABLE IF NOT EXISTS workspace_session_links (
+    workspace_id        TEXT NOT NULL,
+    provider            TEXT NOT NULL,
+    session_id          TEXT NOT NULL,
+    attached_at         TEXT NOT NULL,
+    PRIMARY KEY (provider, session_id),
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
+);
+CREATE INDEX IF NOT EXISTS idx_wsl_workspace ON workspace_session_links(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_wsl_attached ON workspace_session_links(attached_at DESC);
 
 -- Tasks
 CREATE TABLE IF NOT EXISTS tasks (
@@ -496,6 +508,26 @@ class SQLiteClient:
                 except Exception:
                     pass
                 logger.info(f"Migration v5: status column already exists or skipped: {e}")
+
+        if current < 6:
+            # v6: Workspace-session links become server-owned source of truth
+            try:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS workspace_session_links (
+                        workspace_id        TEXT NOT NULL,
+                        provider            TEXT NOT NULL,
+                        session_id          TEXT NOT NULL,
+                        attached_at         TEXT NOT NULL,
+                        PRIMARY KEY (provider, session_id),
+                        FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_wsl_workspace ON workspace_session_links(workspace_id);
+                    CREATE INDEX IF NOT EXISTS idx_wsl_attached ON workspace_session_links(attached_at DESC);
+                """)
+                self._stamp_version(conn, 6)
+                logger.info("Migration v6: workspace_session_links table created")
+            except Exception as e:
+                logger.warning(f"Migration v6 skipped: {e}")
 
     def get_connection(self) -> sqlite3.Connection:
         """Return this thread's private connection, creating one if needed."""

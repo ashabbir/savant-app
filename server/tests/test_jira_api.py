@@ -364,12 +364,12 @@ class TestJiraTicketDB:
 
 class TestSchemaMigration:
 
-    def test_schema_version_is_5(self, _isolated_db):
+    def test_schema_version_is_6(self, _isolated_db):
         from sqlite_client import get_connection
         conn = get_connection()
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
         assert row is not None
-        assert int(row[0]) == 5
+        assert int(row[0]) == 6
 
     def test_jira_tickets_no_fk_constraint(self, _isolated_db):
         """jira_tickets.workspace_id should NOT have FK to workspaces."""

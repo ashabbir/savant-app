@@ -1387,12 +1387,13 @@ function _renderWsStats(ws, wsTasks, statsEl) {
 async function _refreshWsDetailSessions() {
   if (!_currentWsId) return;
   try {
-    const [sessRes, taskRes] = await Promise.all([
-      fetch(`/api/workspaces/${_currentWsId}/sessions?_=${Date.now()}`),
+    const [joinedSessions, taskRes] = await Promise.all([
+      (typeof _loadWorkspaceJoinedSessions === 'function'
+        ? _loadWorkspaceJoinedSessions(_currentWsId)
+        : Promise.resolve([])),
       fetch(`/api/tasks?workspace_id=${_currentWsId}&_=${Date.now()}`)
     ]);
-    const sessData = await sessRes.json();
-    _wsDetailSessions = sessData.sessions || sessData || [];
+    _wsDetailSessions = joinedSessions || [];
     _wsDetailSessions.sort((a, b) => (a.archived ? 1 : 0) - (b.archived ? 1 : 0));
 
     const ws = _workspaces.find(w => w.id === _currentWsId);
