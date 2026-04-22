@@ -16,6 +16,102 @@ A local project ready for AST generation and indexing.
 
 ---
 
+## Implementation Status (2026-04-22)
+
+Status legend:
+- ✅ Implemented
+- ⚠️ Implemented with caveats / needs stronger validation
+- ❌ Not implemented
+
+### Summary
+- Backend ingestion architecture is implemented end-to-end (source discovery, repo/directory ingestion, branch handling, path safety).
+- Add Project modal UI has been refactored to source-based flow (GitHub/GitLab/Directory + fallback state).
+- Core gap is mainly validation depth and end-to-end UI automation coverage, not missing backend capability.
+
+### Requirement-by-requirement status
+
+1) Add Project multi-source input
+- Status: ✅
+- Evidence:
+  - `GET /api/context/repos/sources` in `server/context/routes.py`
+  - `POST /api/context/repos` with `source` payload in `server/context/routes.py`
+  - Source-specific ingestion in `server/context/ingestion.py`
+
+2) Source availability rules (env-gated)
+- Status: ✅
+- Evidence:
+  - `get_source_availability()` in `server/context/ingestion.py`
+  - UI pulls and renders enabled sources via `_ctxLoadAddSources()` in `client/renderer/static/js/context-core.js`
+
+3) No available sources fallback
+- Status: ✅
+- Evidence:
+  - `_ctxApplyNoSourceFallback()` in `client/renderer/static/js/context-core.js`
+  - Submit disabled and required configuration message rendered
+
+4) GitHub/GitLab URL ingestion and auth
+- Status: ✅
+- Evidence:
+  - `ingest_repo()` + provider detection + token selection in `server/context/ingestion.py`
+  - Clone-if-missing / pull-if-existing behavior implemented in `_clone_checkout()` / `_update_checkout()`
+
+5) Directory ingestion flow
+- Status: ✅
+- Evidence:
+  - `ingest_directory()` in `server/context/ingestion.py`
+  - Enforces relative path + existence + read/execute access + base path containment
+
+6) Directory mounting requirement
+- Status: ✅
+- Evidence:
+  - `BASE_CODE_DIR` is authoritative base path in ingestion logic
+  - Works with mounted Docker/K8s volumes when `BASE_CODE_DIR` points to mount root
+
+7) Branch handling
+- Status: ✅
+- Evidence:
+  - Optional branch handling in `ingest_repo()`
+  - Explicit branch existence checks (`_ensure_branch_exists`)
+  - Default branch detection (`_default_remote_branch`)
+
+8) Post-ingestion state (ready for AST/index)
+- Status: ✅
+- Evidence:
+  - `POST /api/context/repos` only registers project path
+  - Existing AST/index endpoints remain unchanged and immediately usable for newly added project
+
+9) UI behavior / conditional rendering
+- Status: ✅
+- Evidence:
+  - Source selector + conditional field visibility in `client/renderer/index.html`
+  - `ctxUpdateAddSourceUI()` and source loading in `client/renderer/static/js/context-core.js`
+  - Loading state text `Preparing project...` set before submission
+
+10) Error handling clarity
+- Status: ⚠️
+- Notes:
+  - User-facing errors exist for invalid URL, missing branch, path traversal, missing directory.
+  - Some errors still come from raw git stderr (sanitized), which may be technical for non-engineering users.
+
+11) Security requirements
+- Status: ⚠️
+- Notes:
+  - Token redaction is present in `_sanitize_git_error()`.
+  - Directory traversal protections are implemented (`_assert_under_base`).
+  - Remaining risk: authenticated git URL is still used at clone/fetch command runtime; avoid logging command args and add explicit security test coverage.
+
+12) Storage behavior
+- Status: ✅
+- Evidence:
+  - Repos are cloned/updated under `BASE_CODE_DIR/<repo>`
+  - Directories are used in place without copy
+
+### Test coverage status
+- ✅ Backend ingestion tests added in `server/tests/test_context_repo_ingestion.py`.
+- ⚠️ No dedicated client E2E test yet for modal source switching/fallback UX.
+
+---
+
 ## Current Behavior (Baseline)
 
 - User selects a local folder

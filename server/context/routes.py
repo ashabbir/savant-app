@@ -243,29 +243,60 @@ def repos_status():
     return jsonify({"repo_count": len(stats), "status": stats})
 
 
+@context_bp.route("/api/context/repos/sources")
+def repo_sources():
+    from .ingestion import get_source_availability
+
+    availability = get_source_availability()
+    sources = availability.as_dict()
+    return jsonify({
+        "sources": sources,
+        "any_enabled": any(s["enabled"] for s in sources.values()),
+    })
+
+
 @context_bp.route("/api/context/repos", methods=["POST"])
 def add_repo():
-    """Add a project (does NOT index it)."""
+    """Add a project from a configured source (does NOT index it)."""
     if not _ensure_init():
         return jsonify({"error": "Context not initialized"}), 503
 
-    data = request.get_json(force=True)
-    path = data.get("path", "").strip()
-    name = data.get("name", "").strip()
-
-    if not path:
-        return jsonify({"error": "path required"}), 400
-    if not Path(path).is_dir():
-        return jsonify({"error": f"Directory not found: {path}"}), 400
-
-    name = name or Path(path).name
+    data = request.get_json(force=True) or {}
+    source = (data.get("source") or "").strip().lower()
+    branch = (data.get("branch") or "").strip() or None
 
     from .db import ContextDB
-    existing = ContextDB.get_repo(name)
-    if existing:
-        return jsonify({"error": f"Project '{name}' already exists"}), 409
 
-    repo = ContextDB.add_repo(name, path)
+    if source not in {"github", "gitlab", "directory"}:
+        return jsonify({"error": "source must be one of: github, gitlab, directory"}), 400
+
+    try:
+        if source in {"github", "gitlab"}:
+            from .ingestion import IngestionError, detect_repo_provider, ingest_repo
+
+            url = (data.get("url") or "").strip()
+            provider = detect_repo_provider(url)
+            if provider != source:
+                return jsonify({"error": f"URL does not match source '{source}'"}), 400
+            ingested = ingest_repo(url=url, branch=branch)
+        else:
+            from .ingestion import IngestionError, ingest_directory
+
+            directory = (data.get("directory") or "").strip()
+            ingested = ingest_directory(directory=directory)
+    except IngestionError as e:
+        return jsonify({"error": str(e)}), 400
+
+    existing = ContextDB.get_repo(ingested.name)
+    if existing and existing.get("path") != ingested.path:
+        return jsonify({
+            "error": (
+                f"Project '{ingested.name}' already exists at {existing.get('path')}. "
+                "Use a different source path or remove the existing project first."
+            )
+        }), 409
+
+    repo = ContextDB.add_repo(ingested.name, ingested.path)
     return jsonify(repo), 201
 
 

@@ -16,6 +16,7 @@ let _ctxCodeSelectedProject = null;
 let _ctxCodeProjects = [];
 let _ctxCodeItems = [];
 let _ctxFileCardCache = {}; // uri → {expanded, content, language}
+let _ctxAddSources = null;
 const _CTX_REFRESH_STATE_KEY = 'savant.ctx.refreshState.v1';
 // _ctxProjects is declared in globals.js
 
@@ -652,10 +653,108 @@ function _ctxRenderDetail(indexStatus) {
 
 // ── Project CRUD ──────────────────────────────────────────────────────────────
 
-function ctxAddProject() {
-  document.getElementById('ctx-add-path').value = '';
-  document.getElementById('ctx-add-name').value = '';
+function _ctxGetAddEnabledSources() {
+  if (!_ctxAddSources || !_ctxAddSources.sources) return [];
+  return Object.entries(_ctxAddSources.sources)
+    .filter(([, cfg]) => cfg && cfg.enabled)
+    .map(([key]) => key);
+}
+
+function _ctxSourceLabel(source) {
+  if (source === 'github') return 'GitHub';
+  if (source === 'gitlab') return 'GitLab';
+  if (source === 'directory') return 'Directory';
+  return source || '';
+}
+
+function _ctxSetAddSubmitState(label, disabled) {
+  const btn = document.getElementById('ctx-add-submit');
+  if (!btn) return;
+  btn.textContent = label;
+  btn.disabled = !!disabled;
+}
+
+function _ctxApplyNoSourceFallback() {
+  const fallback = document.getElementById('ctx-add-fallback');
+  const sourceSelect = document.getElementById('ctx-add-source');
+  const repoFields = document.getElementById('ctx-add-repo-fields');
+  const dirFields = document.getElementById('ctx-add-directory-fields');
+  if (fallback) {
+    fallback.style.display = 'block';
+    fallback.textContent = [
+      'No project sources are configured.',
+      '',
+      'Please configure at least one of the following:',
+      '',
+      '* GITHUB_TOKEN',
+      '* GITLAB_TOKEN',
+      '* BASE_CODE_DIR',
+    ].join('\n');
+  }
+  if (sourceSelect) {
+    sourceSelect.innerHTML = '<option value="">No sources available</option>';
+    sourceSelect.disabled = true;
+  }
+  if (repoFields) repoFields.style.display = 'none';
+  if (dirFields) dirFields.style.display = 'none';
+  _ctxSetAddSubmitState('ADD PROJECT', true);
+}
+
+function ctxUpdateAddSourceUI() {
+  const source = (document.getElementById('ctx-add-source') || {}).value || '';
+  const repoFields = document.getElementById('ctx-add-repo-fields');
+  const dirFields = document.getElementById('ctx-add-directory-fields');
+  if (repoFields) repoFields.style.display = source === 'directory' ? 'none' : 'block';
+  if (dirFields) dirFields.style.display = source === 'directory' ? 'block' : 'none';
+}
+
+async function _ctxLoadAddSources() {
+  const sourceSelect = document.getElementById('ctx-add-source');
+  const fallback = document.getElementById('ctx-add-fallback');
+  if (!sourceSelect) return;
+
+  sourceSelect.disabled = true;
+  sourceSelect.innerHTML = '<option value="">Loading sources...</option>';
+  if (fallback) {
+    fallback.style.display = 'none';
+    fallback.textContent = '';
+  }
+
+  try {
+    const res = await fetch('/api/context/repos/sources');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    _ctxAddSources = await res.json();
+  } catch (e) {
+    _ctxAddSources = null;
+    _ctxApplyNoSourceFallback();
+    showToast('error', 'Failed to load project sources');
+    return;
+  }
+
+  const enabled = _ctxGetAddEnabledSources();
+  if (!enabled.length) {
+    _ctxApplyNoSourceFallback();
+    return;
+  }
+
+  sourceSelect.innerHTML = enabled
+    .map((source) => `<option value="${_escHtml(source)}">${_escHtml(_ctxSourceLabel(source))}</option>`)
+    .join('');
+  sourceSelect.disabled = false;
+  _ctxSetAddSubmitState('ADD PROJECT', false);
+  ctxUpdateAddSourceUI();
+}
+
+async function ctxAddProject() {
+  const urlEl = document.getElementById('ctx-add-url');
+  const branchEl = document.getElementById('ctx-add-branch');
+  const dirEl = document.getElementById('ctx-add-directory');
+  if (urlEl) urlEl.value = '';
+  if (branchEl) branchEl.value = '';
+  if (dirEl) dirEl.value = '';
+  _ctxSetAddSubmitState('ADD PROJECT', true);
   document.getElementById('ctx-add-modal').style.display = 'flex';
+  await _ctxLoadAddSources();
 }
 
 function ctxCloseAddModal() {
@@ -663,34 +762,54 @@ function ctxCloseAddModal() {
 }
 
 async function ctxBrowseDirectory() {
-  if (window.electronAPI && window.electronAPI.pickDirectory) {
-    const dir = await window.electronAPI.pickDirectory();
-    if (dir) {
-      document.getElementById('ctx-add-path').value = dir;
-      if (!document.getElementById('ctx-add-name').value) {
-        document.getElementById('ctx-add-name').value = dir.split('/').filter(Boolean).pop() || '';
-      }
-    }
-  } else {
-    showToast('info', 'Use the text field to enter path (native picker requires Electron)');
-  }
+  showToast('info', 'Directory ingestion expects a path relative to BASE_CODE_DIR');
 }
 
 async function ctxConfirmAdd() {
-  const path = document.getElementById('ctx-add-path').value.trim();
-  const name = document.getElementById('ctx-add-name').value.trim() || path.split('/').filter(Boolean).pop() || '';
-  if (!path) { showToast('error', 'Directory path is required'); return; }
+  const enabled = _ctxGetAddEnabledSources();
+  if (!enabled.length) {
+    showToast('error', 'No project sources are configured');
+    return;
+  }
+
+  const source = (document.getElementById('ctx-add-source') || {}).value || '';
+  const payload = { source };
+
+  if (source === 'directory') {
+    const directory = (document.getElementById('ctx-add-directory') || {}).value?.trim() || '';
+    if (!directory) {
+      showToast('error', 'Directory path is required');
+      return;
+    }
+    payload.directory = directory;
+  } else {
+    const url = (document.getElementById('ctx-add-url') || {}).value?.trim() || '';
+    const branch = (document.getElementById('ctx-add-branch') || {}).value?.trim() || '';
+    if (!url) {
+      showToast('error', 'Repository URL is required');
+      return;
+    }
+    payload.url = url;
+    if (branch) payload.branch = branch;
+  }
+
+  _ctxSetAddSubmitState('Preparing project...', true);
   try {
     const res = await fetch('/api/context/repos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, path })
+      body: JSON.stringify(payload)
     });
     if (!res.ok) { let _em = `HTTP ${res.status}`; try { const _ej = await res.json(); _em = _ej.error || _em; } catch {} throw new Error(_em); }
+    const added = await res.json();
+    const name = added && added.name ? added.name : 'Project';
     showToast('success', `Project "${name}" added`);
     ctxCloseAddModal();
     ctxLoadProjects();
   } catch (e) { showToast('error', e.message); }
+  finally {
+    _ctxSetAddSubmitState('ADD PROJECT', false);
+  }
 }
 
 async function ctxIndexProject(name) {
