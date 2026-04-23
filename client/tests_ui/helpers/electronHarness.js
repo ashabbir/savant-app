@@ -35,12 +35,14 @@ async function waitForDashboardReady(page) {
 async function launchWithMock(options = {}) {
   const mock = createMockApiServer(options.mockState || {});
   const { baseUrl } = await mock.start();
+  const extraEnv = options.env || {};
 
   const app = await electron.launch({
     args: [APP_DIR],
     cwd: APP_DIR,
     env: {
       ...process.env,
+      ...extraEnv,
       NODE_ENV: "test",
       SAVANT_SERVER_URL: baseUrl,
     },

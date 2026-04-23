@@ -38,6 +38,11 @@ This file lists the key env vars used in current client/server architecture.
 - Used by: `client/main.js`
 - Purpose: default shell for local terminal PTYs.
 
+### `HOME` (test/runtime override)
+
+- Used by: client MCP config detection/setup code paths in Electron tests and local bridge.
+- Purpose: resolves provider config file locations for status/setup operations.
+
 ## 2) Server (`server/`)
 
 ### `FLASK_HOST`
@@ -69,6 +74,16 @@ This file lists the key env vars used in current client/server architecture.
 
 - Used by: `server/app.py`
 - Purpose: force container-mode path behavior.
+
+### `BASE_CODE_DIR`
+
+- Used by: `server/context/ingestion.py`
+- Purpose: server-side root for directory ingestion and clone/update targets.
+
+### `BASE_CODE_HOST_DIR`
+
+- Used by: Docker compose/env surfaces.
+- Purpose: host path mounted into container as `/base-code` so directory source mode can browse real codebases safely.
 
 ### `_VOL_MAP_0` ... `_VOL_MAP_5`
 

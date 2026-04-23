@@ -29,15 +29,50 @@ def _seed_root(base: Path) -> Path:
     return base / "abilities" if (base / "abilities").exists() else base
 
 
+def _target_root() -> Path:
+    return get_server_abilities_base_dir() / "abilities"
+
+
+def _asset_dirs() -> tuple[str, ...]:
+    # Canonical ability folders. Seeding decisions are based only on these assets.
+    return ("personas", "rules", "policies", "repos", "styles")
+
+
+def _iter_asset_files(target_root: Path):
+    for dirname in _asset_dirs():
+        base = target_root / dirname
+        if not base.exists():
+            continue
+        yield from base.rglob("*.md")
+
+
+def abilities_asset_count() -> int:
+    target_root = _target_root()
+    if not target_root.exists():
+        return 0
+    return sum(1 for _ in _iter_asset_files(target_root))
+
+
+def abilities_bootstrap_status() -> dict:
+    seed_base = _resolve_seed_base()
+    seed_root = _seed_root(seed_base)
+    count = abilities_asset_count()
+    seed_exists = seed_root.exists()
+    return {
+        "asset_count": count,
+        "bootstrap_available": count == 0 and seed_exists,
+        "seed_path": str(seed_root),
+        "seed_exists": seed_exists,
+    }
+
+
 def seed_abilities_if_missing() -> dict:
-    target_base = get_server_abilities_base_dir()
-    # AbilityStore always loads from <base>/abilities/...
-    target_root = target_base / "abilities"
+    target_root = _target_root()
     target_root.mkdir(parents=True, exist_ok=True)
 
-    existing = list(target_root.rglob("*.md"))
-    if existing:
-        return {"seeded": False, "reason": "already-populated", "count": len(existing)}
+    count = abilities_asset_count()
+    if count:
+        return {"seeded": False, "reason": "already-populated", "count": count}
 
     seed_base = _resolve_seed_base()
     seed_root = _seed_root(seed_base)

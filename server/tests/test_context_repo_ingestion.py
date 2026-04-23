@@ -23,6 +23,7 @@ def test_sources_endpoint_reflects_env(client, monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "gh-test")
     monkeypatch.setenv("GITLAB_TOKEN", "")
     monkeypatch.setenv("BASE_CODE_DIR", "/tmp/repos")
+    monkeypatch.setenv("BASE_CODE_HOST_DIR", "/Users/me/code/archived")
 
     resp = client.get("/api/context/repos/sources")
     assert resp.status_code == 200
@@ -30,6 +31,8 @@ def test_sources_endpoint_reflects_env(client, monkeypatch):
     assert data["sources"]["github"]["enabled"] is True
     assert data["sources"]["gitlab"]["enabled"] is False
     assert data["sources"]["directory"]["enabled"] is True
+    assert data["sources"]["directory"]["base_dir"] == "/tmp/repos"
+    assert data["sources"]["directory"]["base_host_dir"] == "/Users/me/code/archived"
     assert data["any_enabled"] is True
 
 

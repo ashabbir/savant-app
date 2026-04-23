@@ -30,6 +30,13 @@ def test_system_info_and_context_repos_endpoint(tmp_path):
     assert info_json["build"]["version"] == "8.0.0"
     assert "database" in info_json
     assert "directories" in info_json
+    assert "context_sources" in info_json
+    ctx_sources = info_json["context_sources"]
+    assert isinstance(ctx_sources.get("enabled"), dict)
+    assert "GITHUB_TOKEN" in ctx_sources["enabled"]
+    assert "GITLAB_TOKEN" in ctx_sources["enabled"]
+    assert "BASE_CODE_DIR" in ctx_sources["enabled"]
+    assert isinstance(ctx_sources.get("any_enabled"), bool)
 
     repos = client.get("/api/context/repos")
     assert repos.status_code == 200

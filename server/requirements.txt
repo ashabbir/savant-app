@@ -7,3 +7,6 @@ pathspec>=0.11.0
 pygments>=2.15.0
 tree-sitter==0.21.3
 tree-sitter-languages>=1.10.2
+huggingface_hub>=0.20.0
+sentence-transformers>=5.0.0
+torch>=2.0.0

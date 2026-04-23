@@ -5068,6 +5068,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
 <div id="left-tab-bar">
   <button class="left-tab-btn active" id="left-tab-ui" onclick="switchView('ui')" title="Dashboard">📊</button>
   <button class="left-tab-btn" id="left-tab-terminal" onclick="switchView('terminal')" title="Terminal">⌨</button>
+  <button class="left-tab-btn" id="left-tab-refresh" onclick="hardRefreshCurrentView()" title="Hard Refresh">↻</button>
   <div class="left-tab-spacer"></div>
   <button class="left-tab-action" id="left-tab-logs" onclick="toggleDevLogs()" title="Debug Logs">📋</button>
   <button class="left-tab-action" id="left-tab-tips" onclick="toggleTerminalTips()" title="Keyboard Shortcuts" style="display:none">?</button>
@@ -5350,6 +5351,14 @@ function showLoadingScreen(cb) { if (cb) cb(); }
           <button class="savant-subtab" onclick="switchTutorialTab('knowledge')">savant-knowledge</button>
         </div>
 
+        <div style="border:1px solid var(--border);border-radius:8px;background:rgba(0,0,0,0.18);padding:8px 10px;margin:0 0 14px 0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <span style="font-size:0.52rem;letter-spacing:0.8px;color:var(--cyan);text-transform:uppercase;">Recent MCP Logs (last 10)</span>
+            <button class="mcp-test-btn" style="padding:2px 8px;font-size:0.5rem;" onclick="clearMcpGuideLogs()">Clear</button>
+          </div>
+          <div id="mcp-guide-log-body" style="font-family:var(--font-mono);font-size:0.5rem;color:var(--text-dim);line-height:1.6;max-height:110px;overflow:auto;">No MCP activity yet.</div>
+        </div>
+
         <!-- ═══ SYSTEM STATUS TAB ═══ -->
         <div id="tutorial-panel-system" class="tutorial-tab-panel active">
           <div id="sys-status-content" class="sys-status-loading">Loading system status…</div>
@@ -5363,7 +5372,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
             <div class="info-row"><span class="info-label">Transport</span><span class="info-value">SSE</span></div>
             <div class="info-row"><span class="info-label">Port</span><span class="info-value">8091</span></div>
             <div class="info-row"><span class="info-label">URL</span><span class="info-value">http://127.0.0.1:8091/sse</span></div>
-            <div class="info-row" style="margin-top:8px;"><span class="info-label">Setup</span><span class="info-value" style="color:#aaa;">Auto-configured by Savant on launch into<br>~/.copilot/config.json, Claude Desktop, and ~/.codex/config.toml</span></div>
+            <div class="info-row" style="margin-top:8px;"><span class="info-label">Setup</span><span class="info-value" style="color:#aaa;">Server-side context index/AST service (no client agent config required)</span></div>
             <div class="mcp-test-row">
               <button class="mcp-test-btn" onclick="testMcpConnection('workspace', 8091, this)">⚡ TEST CONNECTION</button>
               <button class="mcp-test-btn" style="border-color:var(--orange);color:var(--orange);" onclick="restartMcpServer('workspace', 8091, this)">🔄 RESTART SERVER</button>
@@ -5656,6 +5665,9 @@ function showLoadingScreen(cb) { if (cb) cb(); }
             <div class="info-row"><span class="info-label">Port</span><span class="info-value">8092</span></div>
             <div class="info-row"><span class="info-label">URL</span><span class="info-value">http://127.0.0.1:8092/sse</span></div>
             <div class="info-row"><span class="info-label">Store</span><span class="info-value">~/.savant/abilities/abilities/</span></div>
+            <div class="info-row"><span class="info-label">Available Assets</span><span id="abilities-guide-count" class="info-value">Loading...</span></div>
+            <div class="info-row"><span class="info-label">Breakdown</span><span id="abilities-guide-breakdown" class="info-value" style="color:#aaa;">—</span></div>
+            <div class="info-row"><span class="info-label">Bootstrap</span><span id="abilities-guide-bootstrap" class="info-value" style="color:#aaa;">Checking...</span></div>
             <div class="info-row" style="margin-top:8px;"><span class="info-label">Setup</span><span class="info-value" style="color:#aaa;">Auto-configured by Savant on launch into<br>~/.copilot/config.json, Claude Desktop, and ~/.codex/config.toml</span></div>
             <div class="mcp-test-row">
               <button class="mcp-test-btn" onclick="testMcpConnection('abilities', 8092, this)">⚡ TEST CONNECTION</button>
@@ -6761,8 +6773,12 @@ function showLoadingScreen(cb) { if (cb) cb(); }
         </div>
       </div>
       <div id="ctx-add-directory-fields" style="display:none;margin-bottom:16px;">
-        <label style="font-family:var(--font-mono);font-size:0.5rem;color:var(--text-dim);display:block;margin-bottom:4px;">DIRECTORY (RELATIVE TO BASE_CODE_DIR)</label>
-        <input type="text" id="ctx-add-directory" placeholder="team/project" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:5px;font-family:var(--font-mono);font-size:0.65rem;">
+        <label id="ctx-add-directory-label" style="font-family:var(--font-mono);font-size:0.5rem;color:var(--text-dim);display:block;margin-bottom:4px;">DIRECTORY (RELATIVE TO BASE_CODE_DIR)</label>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="ctx-add-directory" placeholder="team/project" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:5px;font-family:var(--font-mono);font-size:0.65rem;">
+          <button type="button" onclick="ctxBrowseDirectory()" style="padding:8px 10px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:5px;font-family:var(--font-mono);font-size:0.6rem;cursor:pointer;">EXPLORE</button>
+        </div>
+        <div id="ctx-add-directory-hint" style="margin-top:6px;color:var(--text-dim);font-family:var(--font-mono);font-size:0.5rem;"></div>
       </div>
       <div class="ws-modal-actions">
         <button class="ws-modal-cancel" onclick="ctxCloseAddModal()">CANCEL</button>

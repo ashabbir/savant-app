@@ -34,6 +34,15 @@ def _ensure_init():
         return False
 
 
+def _validate_repo_path(repo):
+    repo_path = Path(repo.get("path", ""))
+    if not repo_path.exists():
+        return None, f"Project path no longer exists: {repo_path}"
+    if not repo_path.is_dir():
+        return None, f"Project path is not a directory: {repo_path}"
+    return repo_path, None
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -395,10 +404,19 @@ def generate_ast():
     repo = ContextDB.get_repo(name)
     if not repo:
         return jsonify({"error": f"Project not found: {name}"}), 404
+    repo_path, path_err = _validate_repo_path(repo)
+    if path_err:
+        ContextDB.update_repo_status(name, "error")
+        return jsonify({
+            "error": (
+                f"{path_err}. Re-add the project from Context > Add Project "
+                "or fix the server mount path."
+            )
+        }), 400
 
     from .indexer import Indexer
     indexer = Indexer()
-    indexer.generate_ast_in_background(Path(repo["path"]), repo_name=name)
+    indexer.generate_ast_in_background(repo_path, repo_name=name)
     return jsonify({"started": True, "name": name, "type": "ast"})
 
 
@@ -441,10 +459,19 @@ def index_repo():
     repo = ContextDB.get_repo(name)
     if not repo:
         return jsonify({"error": f"Project not found: {name}"}), 404
+    repo_path, path_err = _validate_repo_path(repo)
+    if path_err:
+        ContextDB.update_repo_status(name, "error")
+        return jsonify({
+            "error": (
+                f"{path_err}. Re-add the project from Context > Add Project "
+                "or fix the server mount path."
+            )
+        }), 400
 
     from .indexer import Indexer
     indexer = Indexer()
-    indexer.index_in_background(Path(repo["path"]), repo_name=name)
+    indexer.index_in_background(repo_path, repo_name=name)
     return jsonify({"started": True, "name": name})
 
 
@@ -463,10 +490,19 @@ def reindex_repo():
     repo = ContextDB.get_repo(name)
     if not repo:
         return jsonify({"error": f"Project not found: {name}"}), 404
+    repo_path, path_err = _validate_repo_path(repo)
+    if path_err:
+        ContextDB.update_repo_status(name, "error")
+        return jsonify({
+            "error": (
+                f"{path_err}. Re-add the project from Context > Add Project "
+                "or fix the server mount path."
+            )
+        }), 400
 
     from .indexer import Indexer
     indexer = Indexer()
-    indexer.index_in_background(Path(repo["path"]), repo_name=name)
+    indexer.index_in_background(repo_path, repo_name=name)
     return jsonify({"started": True, "name": name, "reindex": True})
 
 

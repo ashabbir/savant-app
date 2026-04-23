@@ -36,6 +36,8 @@
     "files": [
       "main.js",
       "client_store.js",
+      "mcp_agent_config.js",
+      "session_service.js",
       "preload.js",
       "icon.png",
       "loading.html",

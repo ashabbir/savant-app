@@ -22,6 +22,7 @@ from db.jira_tickets import JiraTicketDB
 from db.notifications import NotificationDB
 from hardening import rate_limit, validate_request, safe_limit
 from abilities.routes import abilities_bp
+from abilities.bootstrap import abilities_bootstrap_status
 from context.routes import context_bp
 from knowledge.routes import knowledge_bp
 from server_paths import get_server_data_dir, get_server_db_path, get_server_abilities_base_dir
@@ -3423,6 +3424,35 @@ def api_system_info():
         except Exception:
             pass
 
+    server_directories = {
+        "savant_app": savant_dir,
+        "data_dir": str(get_server_data_dir()),
+        "abilities_dir": str(get_server_abilities_base_dir()),
+        "session_dir": SESSION_DIR,
+        "claude_dir": CLAUDE_DIR,
+        "gemini_dir": GEMINI_DIR,
+        "gemini_chats_dir": GEMINI_CHATS_DIR,
+        "meta_dir": META_DIR,
+        "codex_dir": CODEX_DIR,
+        "codex_sessions_dir": CODEX_SESSIONS_DIR,
+        "codex_meta_dir": CODEX_META_DIR,
+        "hermes_dir": HERMES_DIR,
+        "hermes_sessions_dir": HERMES_SESSIONS_DIR,
+        "hermes_meta_dir": HERMES_META_DIR,
+    }
+
+    # Expose full server env map for diagnostics in System Info UI.
+    server_env_vars = {k: os.environ.get(k, "") for k in sorted(os.environ.keys())}
+
+    source_env = {
+        "GITHUB_TOKEN": bool(os.environ.get("GITHUB_TOKEN", "").strip()),
+        "GITLAB_TOKEN": bool(os.environ.get("GITLAB_TOKEN", "").strip()),
+        "BASE_CODE_DIR": bool(os.environ.get("BASE_CODE_DIR", "").strip()),
+    }
+    abilities_status = abilities_bootstrap_status()
+    missing_source_env = [k for k, enabled in source_env.items() if not enabled]
+    any_source_enabled = any(source_env.values())
+
     return jsonify({
         "version": pkg_version,
         "build": build_info,
@@ -3437,15 +3467,27 @@ def api_system_info():
             "status": "healthy" if db_ok else "unhealthy",
             "size_bytes": db_size,
         },
-        "directories": {
-            "savant_app": savant_dir,
-            "data_dir": str(get_server_data_dir()),
-            "abilities_dir": str(get_server_abilities_base_dir()),
-        },
+        "directories": server_directories,
         "environment": {
             "python": sys.version.split()[0],
             "platform": f"{platform.system()} {platform.machine()}",
         },
+        "server": {
+            "directories": server_directories,
+            "env_vars": server_env_vars,
+        },
+        "context_sources": {
+            "enabled": source_env,
+            "any_enabled": any_source_enabled,
+            "missing": missing_source_env,
+            "message": (
+                "No project sources are configured on the server. "
+                "Set at least one of: GITHUB_TOKEN, GITLAB_TOKEN, BASE_CODE_DIR."
+                if not any_source_enabled
+                else "Context project source configuration is available."
+            ),
+        },
+        "abilities": abilities_status,
         "blueprints": blueprints,
     })
 

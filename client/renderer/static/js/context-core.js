@@ -667,6 +667,50 @@ function _ctxSourceLabel(source) {
   return source || '';
 }
 
+function _ctxDirectorySourceConfig() {
+  return ((_ctxAddSources || {}).sources || {}).directory || {};
+}
+
+function _ctxNormalizeFsPath(input) {
+  return String(input || '').replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function _ctxRelativeToBase(selectedPath, basePath) {
+  const selected = _ctxNormalizeFsPath(selectedPath);
+  const base = _ctxNormalizeFsPath(basePath);
+  if (!selected || !base) return '';
+  if (selected === base) return '';
+  if (!selected.startsWith(base + '/')) return '';
+  return selected.slice(base.length + 1);
+}
+
+function _ctxRefreshDirectoryUi() {
+  const cfg = _ctxDirectorySourceConfig();
+  const baseHostDir = cfg.base_host_dir || '';
+  const baseDir = cfg.base_dir || '';
+  const label = document.getElementById('ctx-add-directory-label');
+  const hint = document.getElementById('ctx-add-directory-hint');
+  const input = document.getElementById('ctx-add-directory');
+
+  if (label) {
+    label.textContent = baseHostDir
+      ? `DIRECTORY (RELATIVE TO ${baseHostDir})`
+      : 'DIRECTORY (RELATIVE TO BASE_CODE_DIR)';
+  }
+  if (hint) {
+    if (baseHostDir) {
+      hint.textContent = `Browse and auto-fill relative path under: ${baseHostDir}`;
+    } else if (baseDir) {
+      hint.textContent = `Server base directory: ${baseDir}. Paste a relative path manually.`;
+    } else {
+      hint.textContent = 'Path must be relative to server BASE_CODE_DIR.';
+    }
+  }
+  if (input && baseHostDir) {
+    input.placeholder = 'team/project';
+  }
+}
+
 function _ctxSetAddSubmitState(label, disabled) {
   const btn = document.getElementById('ctx-add-submit');
   if (!btn) return;
@@ -697,6 +741,7 @@ function _ctxApplyNoSourceFallback() {
   }
   if (repoFields) repoFields.style.display = 'none';
   if (dirFields) dirFields.style.display = 'none';
+  _ctxRefreshDirectoryUi();
   _ctxSetAddSubmitState('ADD PROJECT', true);
 }
 
@@ -706,6 +751,7 @@ function ctxUpdateAddSourceUI() {
   const dirFields = document.getElementById('ctx-add-directory-fields');
   if (repoFields) repoFields.style.display = source === 'directory' ? 'none' : 'block';
   if (dirFields) dirFields.style.display = source === 'directory' ? 'block' : 'none';
+  _ctxRefreshDirectoryUi();
 }
 
 async function _ctxLoadAddSources() {
@@ -762,7 +808,33 @@ function ctxCloseAddModal() {
 }
 
 async function ctxBrowseDirectory() {
-  showToast('info', 'Directory ingestion expects a path relative to BASE_CODE_DIR');
+  if (!window.electronAPI?.pickDirectory) {
+    showToast('error', 'Directory picker is only available in the desktop app.');
+    return;
+  }
+
+  const cfg = _ctxDirectorySourceConfig();
+  const baseHostDir = cfg.base_host_dir || '';
+  if (!baseHostDir) {
+    showToast('error', 'Server is missing BASE_CODE_HOST_DIR. Enter a relative path manually.');
+    return;
+  }
+
+  try {
+    const selected = await window.electronAPI.pickDirectory();
+    if (!selected) return;
+
+    const relative = _ctxRelativeToBase(selected, baseHostDir);
+    if (!relative) {
+      showToast('error', `Selected directory must be inside: ${baseHostDir}`);
+      return;
+    }
+
+    const dirEl = document.getElementById('ctx-add-directory');
+    if (dirEl) dirEl.value = relative;
+  } catch (e) {
+    showToast('error', 'Failed to open directory picker: ' + (e.message || e));
+  }
 }
 
 async function ctxConfirmAdd() {

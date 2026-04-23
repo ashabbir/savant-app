@@ -20,12 +20,19 @@ class SourceAvailability:
     github: bool
     gitlab: bool
     directory: bool
+    base_dir: Optional[str] = None
+    base_host_dir: Optional[str] = None
 
-    def as_dict(self) -> Dict[str, Dict[str, bool]]:
+    def as_dict(self) -> Dict[str, Dict[str, object]]:
+        directory_cfg: Dict[str, object] = {"enabled": self.directory}
+        if self.base_dir:
+            directory_cfg["base_dir"] = self.base_dir
+        if self.base_host_dir:
+            directory_cfg["base_host_dir"] = self.base_host_dir
         return {
             "github": {"enabled": self.github},
             "gitlab": {"enabled": self.gitlab},
-            "directory": {"enabled": self.directory},
+            "directory": directory_cfg,
         }
 
 
@@ -35,11 +42,49 @@ class IngestedProject:
     path: str
 
 
+def inspect_project_source(repo_path: str) -> Dict[str, str]:
+    """Infer source metadata for a stored project path."""
+    resolved = Path(repo_path or "").expanduser().resolve()
+    source_path = str(resolved)
+    if not resolved.exists():
+        return {
+            "source": "unknown",
+            "source_label": "Unknown",
+            "source_origin": "",
+            "source_path": source_path,
+        }
+
+    remote_url = _git_remote_url(resolved)
+    if not remote_url:
+        return {
+            "source": "directory",
+            "source_label": "Server Directory",
+            "source_origin": source_path,
+            "source_path": source_path,
+        }
+
+    provider = _detect_provider_from_remote(remote_url)
+    return {
+        "source": provider,
+        "source_label": {
+            "github": "GitHub",
+            "gitlab": "GitLab",
+            "git": "Git Repository",
+        }.get(provider, "Git Repository"),
+        "source_origin": _sanitize_remote_for_display(remote_url),
+        "source_path": source_path,
+    }
+
+
 def get_source_availability() -> SourceAvailability:
+    base_dir = os.environ.get("BASE_CODE_DIR", "").strip() or None
+    base_host_dir = os.environ.get("BASE_CODE_HOST_DIR", "").strip() or None
     return SourceAvailability(
         github=bool(os.environ.get("GITHUB_TOKEN", "").strip()),
         gitlab=bool(os.environ.get("GITLAB_TOKEN", "").strip()),
-        directory=bool(os.environ.get("BASE_CODE_DIR", "").strip()),
+        directory=bool(base_dir),
+        base_dir=base_dir,
+        base_host_dir=base_host_dir,
     )
 
 
@@ -262,3 +307,42 @@ def _sanitize_git_error(message: str) -> str:
         if token:
             out = out.replace(token, "[REDACTED]")
     return out
+
+
+def _git_remote_url(repo_path: Path) -> str:
+    proc = _run_git(
+        ["git", "-C", str(repo_path), "remote", "get-url", "origin"],
+        raise_on_error=False,
+    )
+    if proc.returncode != 0:
+        return ""
+    return (proc.stdout or "").strip()
+
+
+def _detect_provider_from_remote(remote_url: str) -> str:
+    candidate = (remote_url or "").strip().lower()
+    if "github.com" in candidate:
+        return "github"
+    if "gitlab" in candidate:
+        return "gitlab"
+    return "git"
+
+
+def _sanitize_remote_for_display(remote_url: str) -> str:
+    remote = (remote_url or "").strip()
+    if not remote:
+        return ""
+
+    if remote.startswith(("http://", "https://")):
+        parsed = urlparse(remote)
+        host = parsed.hostname or ""
+        netloc = host
+        if parsed.port:
+            netloc = f"{host}:{parsed.port}"
+        return urlunparse(parsed._replace(netloc=netloc))
+
+    if remote.startswith("git@"):
+        # Keep SSH remote readable but remove any accidental password-like segment.
+        return remote.split("@", 1)[0] + "@" + remote.split("@", 1)[1]
+
+    return remote

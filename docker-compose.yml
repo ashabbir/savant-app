@@ -1,0 +1,51 @@
+services:
+  savant-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    image: savant-server:latest
+    container_name: savant-server
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+      - /run:rw,noexec,nosuid,size=64m
+    ports:
+      - "8090:8090"
+      - "8091:8091"
+      - "8092:8092"
+      - "8093:8093"
+      - "8094:8094"
+    environment:
+      HOME: /data/savant
+      HF_HOME: /data/savant/hf
+      HUGGINGFACE_HUB_CACHE: /data/savant/hf/hub
+      TRANSFORMERS_CACHE: /data/savant/hf/transformers
+      SAVANT_SERVER_DATA_DIR: /data/savant
+      EMBEDDING_MODEL_DIR: /data/savant/models-v1
+      BASE_CODE_DIR: /base-code
+      BASE_CODE_HOST_DIR: ${BASE_CODE_HOST_DIR:-/Users/ahmedshabbir/code/archived}
+      SAVANT_API_ONLY: "1"
+      SESSION_DIR: /nonexistent
+      CLAUDE_DIR: /nonexistent
+      GEMINI_DIR: /nonexistent
+      CODEX_DIR: /nonexistent
+      HERMES_DIR: /nonexistent
+      META_DIR: /nonexistent
+    volumes:
+      - savant-server-data:/data/savant
+      - ${BASE_CODE_HOST_DIR:-/Users/ahmedshabbir/code/archived}:/base-code:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+volumes:
+  savant-server-data:

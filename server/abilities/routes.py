@@ -31,7 +31,6 @@ _resolver: Optional[Resolver] = None
 def _get_store() -> AbilityStore:
     global _store
     if _store is None:
-        seed_abilities_if_missing()
         _store = AbilityStore(Path(_BASE_DIR))
     # Reload on every request to pick up file changes
     _store.load()
@@ -219,4 +218,21 @@ def stats():
         return jsonify(store.stats())
     except Exception as e:
         logger.error(f"stats failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@abilities_bp.route("/api/abilities/bootstrap", methods=["POST"])
+def bootstrap():
+    try:
+        result = seed_abilities_if_missing()
+        if result.get("seeded"):
+            global _store, _resolver
+            _store = None
+            _resolver = None
+            return jsonify(result), 201
+        if result.get("reason") == "already-populated":
+            return jsonify(result), 409
+        return jsonify(result), 500
+    except Exception as e:
+        logger.error(f"bootstrap failed: {e}")
         return jsonify({"error": str(e)}), 500

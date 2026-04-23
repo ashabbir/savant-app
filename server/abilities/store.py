@@ -48,7 +48,12 @@ class AbilityStore:
     def load(self) -> None:
         root = self.base_path / "abilities"
         if not root.exists():
-            raise RuntimeError(f"Abilities directory not found: {root}")
+            root.mkdir(parents=True, exist_ok=True)
+            self.blocks_by_id.clear()
+            self.ids_by_tag.clear()
+            self.ids_by_type.clear()
+            self.include_edges.clear()
+            return
 
         self.blocks_by_id.clear()
         self.ids_by_tag.clear()

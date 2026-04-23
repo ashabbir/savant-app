@@ -27,6 +27,12 @@ test("session service module exists", () => {
   assert.ok(fs.existsSync(path.join(CLIENT, "session_service.js")));
 });
 
+test("packaging config includes session_service module", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(CLIENT, "package.json"), "utf-8"));
+  const files = (pkg.build && pkg.build.files) || [];
+  assert.ok(files.includes("session_service.js"));
+});
+
 test("main process wires local session IPC handlers", () => {
   const main = fs.readFileSync(path.join(CLIENT, "main.js"), "utf-8");
   assert.ok(main.includes("savant:list-local-sessions"));
@@ -58,4 +64,3 @@ test("sessions tab consumes local session bridge first", () => {
 console.log("\n────────────────────────────────────────");
 console.log(`Results: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
-

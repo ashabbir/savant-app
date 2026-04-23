@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from abilities import bootstrap as bootstrap_module
-from abilities.bootstrap import _resolve_seed_base, seed_abilities_if_missing
+from abilities.bootstrap import _resolve_seed_base, seed_abilities_if_missing, abilities_asset_count
 from server_paths import (
     _default_data_dir,
     get_server_abilities_base_dir,
@@ -95,3 +95,77 @@ def test_server_paths_support_explicit_locations(monkeypatch, tmp_path):
 def test_default_data_dir_switches_to_container_path(monkeypatch):
     monkeypatch.setenv("RUNNING_IN_DOCKER", "1")
     assert _default_data_dir().as_posix() == "/data/savant"
+
+
+def test_abilities_asset_count_is_zero_when_target_dir_missing(monkeypatch, tmp_path):
+    data_dir = tmp_path / "data-missing"
+    monkeypatch.setenv("SAVANT_SERVER_DATA_DIR", str(data_dir))
+    assert abilities_asset_count() == 0
+
+
+def test_seed_when_target_exists_but_empty(monkeypatch, tmp_path):
+    data_dir = tmp_path / "data-empty"
+    target_root = data_dir / "abilities"
+    target_root.mkdir(parents=True, exist_ok=True)
+
+    seed_dir = tmp_path / "seed-empty"
+    seed_file = seed_dir / "abilities" / "personas" / "engineer.md"
+    seed_file.parent.mkdir(parents=True, exist_ok=True)
+    seed_file.write_text(
+        "---\nid: persona.engineer\ntype: persona\ntags: [engineering]\npriority: 100\n---\nbody\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("SAVANT_SERVER_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("SAVANT_ABILITIES_SEED_DIR", str(seed_dir))
+
+    result = seed_abilities_if_missing()
+    assert result["seeded"] is True
+    assert (target_root / "personas" / "engineer.md").exists()
+
+
+def test_seed_when_target_has_subdirs_but_no_files(monkeypatch, tmp_path):
+    data_dir = tmp_path / "data-subdirs-empty"
+    target_root = data_dir / "abilities"
+    for dirname in ("personas", "rules", "policies", "repos", "styles"):
+        (target_root / dirname).mkdir(parents=True, exist_ok=True)
+
+    seed_dir = tmp_path / "seed-subdirs-empty"
+    seed_file = seed_dir / "abilities" / "rules" / "backend_api.md"
+    seed_file.parent.mkdir(parents=True, exist_ok=True)
+    seed_file.write_text(
+        "---\nid: rule.backend.api\ntype: rule\ntags: [backend]\npriority: 100\n---\nbody\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("SAVANT_SERVER_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("SAVANT_ABILITIES_SEED_DIR", str(seed_dir))
+
+    result = seed_abilities_if_missing()
+    assert result["seeded"] is True
+    assert (target_root / "rules" / "backend_api.md").exists()
+
+
+def test_no_seed_when_target_already_has_asset_file(monkeypatch, tmp_path):
+    data_dir = tmp_path / "data-populated"
+    target_file = data_dir / "abilities" / "personas" / "existing.md"
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    target_file.write_text(
+        "---\nid: persona.existing\ntype: persona\ntags: [existing]\npriority: 100\n---\nbody\n",
+        encoding="utf-8",
+    )
+
+    seed_dir = tmp_path / "seed-populated"
+    seed_file = seed_dir / "abilities" / "personas" / "engineer.md"
+    seed_file.parent.mkdir(parents=True, exist_ok=True)
+    seed_file.write_text(
+        "---\nid: persona.engineer\ntype: persona\ntags: [engineering]\npriority: 100\n---\nbody\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("SAVANT_SERVER_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("SAVANT_ABILITIES_SEED_DIR", str(seed_dir))
+
+    result = seed_abilities_if_missing()
+    assert result["seeded"] is False
+    assert result["reason"] == "already-populated"

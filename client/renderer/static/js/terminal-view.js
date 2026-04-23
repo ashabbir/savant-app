@@ -10,6 +10,7 @@ function switchView(view) {
   const container = document.querySelector('.container');
   const uiBtn = document.getElementById('left-tab-ui');
   const termBtn = document.getElementById('left-tab-terminal');
+  const refreshBtn = document.getElementById('left-tab-refresh');
   const closeBtn = document.getElementById('left-tab-close');
   const tipsBtn = document.getElementById('left-tab-tips');
   const logsBtn = document.getElementById('left-tab-logs');
@@ -23,6 +24,7 @@ function switchView(view) {
     if (container) container.style.display = 'none';
     if (uiBtn) uiBtn.classList.remove('active');
     if (termBtn) termBtn.classList.add('active');
+    if (refreshBtn) refreshBtn.style.display = 'none';
     if (closeBtn) closeBtn.style.display = '';
     if (tipsBtn) tipsBtn.style.display = '';
     if (logsBtn) logsBtn.style.display = 'none';
@@ -35,11 +37,17 @@ function switchView(view) {
     if (container) container.style.display = '';
     if (uiBtn) uiBtn.classList.add('active');
     if (termBtn) termBtn.classList.remove('active');
+    if (refreshBtn) refreshBtn.style.display = '';
     if (closeBtn) closeBtn.style.display = 'none';
     if (tipsBtn) tipsBtn.style.display = 'none';
     if (logsBtn) logsBtn.style.display = '';
     closeTerminalTips();
   }
+}
+
+function hardRefreshCurrentView() {
+  if (_tvCurrentView !== 'ui') return;
+  window.location.reload();
 }
 
 function toggleTerminalTips() {

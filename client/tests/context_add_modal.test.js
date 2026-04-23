@@ -47,6 +47,9 @@ function buildSandbox(fetchImpl, toastLog) {
     },
     window: {
       location: { reload: () => {} },
+      electronAPI: {
+        pickDirectory: async () => null,
+      },
     },
     localStorage: { getItem: () => null, setItem: () => {} },
     sessionStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
@@ -203,4 +206,60 @@ test('ctxConfirmAdd submits directory payload and reports API errors', async () 
   await sandbox.ctxConfirmAdd();
 
   assert.ok(toasts.some((t) => t.level === 'error' && /BASE_CODE_DIR/.test(t.msg)));
+});
+
+test('ctxBrowseDirectory fills relative path when selected path is under BASE_CODE_HOST_DIR', async () => {
+  const toasts = [];
+  const { sandbox, els } = buildSandbox(async () => ({
+    ok: true,
+    json: async () => ({
+      sources: {
+        github: { enabled: false },
+        gitlab: { enabled: false },
+        directory: {
+          enabled: true,
+          base_dir: '/base-code',
+          base_host_dir: '/Users/me/code/archived',
+        },
+      },
+    }),
+  }), toasts);
+
+  sandbox.window.electronAPI.pickDirectory = async () => '/Users/me/code/archived/team/service-a';
+  await sandbox.ctxAddProject();
+  els['ctx-add-source'].value = 'directory';
+  sandbox.ctxUpdateAddSourceUI();
+
+  await sandbox.ctxBrowseDirectory();
+
+  assert.equal(els['ctx-add-directory'].value, 'team/service-a');
+  assert.equal(toasts.length, 0);
+});
+
+test('ctxBrowseDirectory shows error when selected directory is outside BASE_CODE_HOST_DIR', async () => {
+  const toasts = [];
+  const { sandbox, els } = buildSandbox(async () => ({
+    ok: true,
+    json: async () => ({
+      sources: {
+        github: { enabled: false },
+        gitlab: { enabled: false },
+        directory: {
+          enabled: true,
+          base_dir: '/base-code',
+          base_host_dir: '/Users/me/code/archived',
+        },
+      },
+    }),
+  }), toasts);
+
+  sandbox.window.electronAPI.pickDirectory = async () => '/Users/me/other/project-x';
+  await sandbox.ctxAddProject();
+  els['ctx-add-source'].value = 'directory';
+  sandbox.ctxUpdateAddSourceUI();
+
+  await sandbox.ctxBrowseDirectory();
+
+  assert.equal(els['ctx-add-directory'].value, '');
+  assert.ok(toasts.some((t) => t.level === 'error' && /must be inside/.test(t.msg)));
 });

@@ -6,7 +6,7 @@ function _updateHash() {
   if (_currentWsId) parts.push('ws=' + _currentWsId);
   const newHash = '#' + parts.join('&');
   if ('#' + window.location.hash.slice(1) !== newHash) {
-    history.replaceState(null, '', '/' + newHash);
+    history.replaceState(null, '', window.location.pathname + newHash);
   }
 }
 
@@ -40,6 +40,32 @@ function _peekNavState() {
 
 // Release notes
 const RELEASES = [
+  {
+    version: 'v8.1.0',
+    date: '2026-04-22',
+    tag: 'major',
+    tagline: 'Multi-source context ingestion, client-owned MCP config detection, and stronger MCP/system diagnostics.',
+    description: 'SAVANT v8.1.0 extends the client/server split with production ingestion and diagnostics upgrades. Context projects can now be added from GitHub, GitLab (including self-hosted), or server directories under BASE_CODE_DIR. The MCP guide now includes action logs, abilities bootstrap visibility, and context/source diagnostics. AI Agent MCP config status and setup are now resolved from the local Electron client filesystem instead of server-side path assumptions.',
+    abilities: [
+      { icon: '📥', name: 'Multi-Source Ingestion', desc: 'Context Add Project supports GitHub URL, GitLab URL, and server directory sources with source-gated UI.' },
+      { icon: '🛡️', name: 'Safe Directory Intake', desc: 'Directory ingestion is restricted to BASE_CODE_DIR with traversal/outside-path protection and clear errors.' },
+      { icon: '🔄', name: 'Repo Reuse + Update', desc: 'Re-adding an existing repo updates checkout in place (fetch/pull) instead of duplicating project records.' },
+      { icon: '📋', name: 'MCP Guide Logs', desc: 'MCP Tool Guide now shows recent action logs for test/restart/setup operations to make runtime behavior visible.' },
+      { icon: '🧭', name: 'Client MCP Config Source', desc: 'AI Agent MCP Config cards now read and update local config files via Electron bridge, with server fallback only when needed.' },
+    ],
+    items: [
+      { type: 'feat', text: 'Context ingestion API: GET /api/context/repos/sources and source-only POST /api/context/repos payload (github|gitlab|directory)' },
+      { type: 'feat', text: 'Ingestion service adds provider detection, branch handling, repo update-in-place semantics, and token-safe git error sanitization' },
+      { type: 'feat', text: 'Context project overview now surfaces source metadata (provider/origin/path) for indexed repositories' },
+      { type: 'feat', text: 'Abilities guide shows live asset counts/breakdown and conditional bootstrap action when store is empty' },
+      { type: 'feat', text: 'System Info includes full server env + directories and explicit no-source server-side guidance block' },
+      { type: 'feat', text: 'Left action rail adds UI-only hard refresh button; hidden in terminal mode' },
+      { type: 'feat', text: 'Added Docker Compose flows for server runtime with BASE_CODE_DIR host mount support' },
+      { type: 'fix', text: 'Fixed module packaging/runtime issues around session service imports in client distribution' },
+      { type: 'fix', text: 'MCP config status no longer reports false "No config file" due to server/client filesystem mismatch' },
+      { type: 'test', text: 'Expanded server ingestion/bootstrap coverage, client modal/unit coverage, and Playwright coverage for MCP config behavior' },
+    ],
+  },
   {
     version: 'v8.0.0',
     date: '2026-04-21',
@@ -864,7 +890,10 @@ function toggleTutorial() {
   const modal = document.getElementById('tutorial-modal');
   const showing = modal.style.display !== 'flex';
   modal.style.display = showing ? 'flex' : 'none';
-  if (showing) fetchSystemStatus();
+  if (showing) {
+    fetchSystemStatus();
+    renderMcpGuideLogs();
+  }
 }
 
 function switchTutorialTab(tabName) {
@@ -874,6 +903,54 @@ function switchTutorialTab(tabName) {
   event.target.classList.add('active');
   document.getElementById('tutorial-panel-' + tabName).classList.add('active');
   if (tabName === 'system') fetchSystemStatus();
+  if (tabName === 'abilities') refreshAbilitiesGuideStatus();
+  renderMcpGuideLogs();
+}
+
+const _mcpGuideLogs = [];
+const _MCP_GUIDE_LOG_MAX = 10;
+
+function _mcpGuideEsc(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function logMcpGuide(message, level = 'info') {
+  const ts = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  _mcpGuideLogs.push({ ts, level, message: String(message || '') });
+  if (_mcpGuideLogs.length > _MCP_GUIDE_LOG_MAX) _mcpGuideLogs.shift();
+  if (typeof window._savantLog === 'function') {
+    window._savantLog(`[mcp-guide] ${message}`, level);
+  }
+  renderMcpGuideLogs();
+}
+
+function renderMcpGuideLogs() {
+  const el = document.getElementById('mcp-guide-log-body');
+  if (!el) return;
+  if (!_mcpGuideLogs.length) {
+    el.innerHTML = 'No MCP activity yet.';
+    return;
+  }
+  el.innerHTML = _mcpGuideLogs
+    .map((entry) => {
+      let color = 'var(--text-dim)';
+      if (entry.level === 'ok') color = '#22c55e';
+      if (entry.level === 'warn') color = '#f59e0b';
+      if (entry.level === 'error') color = '#ff6b6b';
+      return `<div style="display:flex;gap:8px;align-items:flex-start;"><span style="color:#777;">${_mcpGuideEsc(entry.ts)}</span><span style="color:${color};word-break:break-word;">${_mcpGuideEsc(entry.message)}</span></div>`;
+    })
+    .join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearMcpGuideLogs() {
+  _mcpGuideLogs.length = 0;
+  renderMcpGuideLogs();
 }
 
 function _fmtBytes(bytes) {
@@ -889,12 +966,20 @@ async function fetchSystemStatus() {
   el.className = 'sys-status-loading';
   el.textContent = 'Loading system status…';
   try {
-    const [sysRes, mcpCfgRes] = await Promise.all([
-      fetch('/api/system/info', { signal: AbortSignal.timeout(8000) }),
-      fetch('/api/check-mcp', { signal: AbortSignal.timeout(8000) }),
-    ]);
+    const sysRes = await fetch('/api/system/info', { signal: AbortSignal.timeout(8000) });
     const d = await sysRes.json();
-    const mcpCfg = await mcpCfgRes.json();
+    let mcpCfg = null;
+    if (window.electronAPI && typeof window.electronAPI.checkMcpAgentConfigs === 'function') {
+      try {
+        mcpCfg = await window.electronAPI.checkMcpAgentConfigs();
+      } catch (err) {
+        logMcpGuide(`Local MCP config read failed: ${err && err.message ? err.message : err}`, 'warn');
+      }
+    }
+    if (!mcpCfg || typeof mcpCfg !== 'object' || Array.isArray(mcpCfg)) {
+      const mcpCfgRes = await fetch('/api/check-mcp', { signal: AbortSignal.timeout(8000) });
+      mcpCfg = await mcpCfgRes.json();
+    }
 
     // Build MCP server rows
     const mcpRows = Object.entries(d.mcp_servers || {}).map(([name, info]) => {
@@ -910,21 +995,25 @@ async function fetchSystemStatus() {
 
     // Build AI Agent MCP config rows
     const agentIcons = { copilot: '🤖', claude: '🧠', gemini: '💎', codex: '📦', hermes: '🪶' };
-    const agentConfigRows = Object.entries(mcpCfg).map(([provider, info]) => {
+    const agentLabels = { copilot: 'Copilot CLI', claude: 'Claude Desktop', gemini: 'Gemini CLI', codex: 'Codex CLI', hermes: 'Hermes Agent' };
+    const agentOrder = ['claude', 'codex', 'copilot', 'gemini', 'hermes'];
+    const agentConfigRows = agentOrder.map((provider) => {
+      const info = (mcpCfg && mcpCfg[provider]) ? mcpCfg[provider] : {};
       const icon = agentIcons[provider] || '⚙️';
       const configured = info.savant_configured;
       const exists = info.config_exists;
+      const label = info.label || agentLabels[provider] || provider;
       let statusHtml;
       if (configured) {
         statusHtml = '<span class="sys-val ok">● Configured</span>';
       } else if (exists) {
         statusHtml = `<span class="sys-val err">○ Not configured</span>
-          <button class="mcp-setup-btn" onclick="setupMcpAgent('${provider}', this)" title="Configure Savant MCP servers for ${info.label}">Setup</button>`;
+          <button class="mcp-setup-btn" onclick="setupMcpAgent('${provider}', this)" title="Configure Savant MCP servers for ${label}">Setup</button>`;
       } else {
         statusHtml = '<span class="sys-val" style="color:var(--text-dim);">— No config file</span>';
       }
       return `<div class="sys-row" style="align-items:center;">
-        <span class="sys-label">${icon} ${info.label}</span>
+        <span class="sys-label">${icon} ${label}</span>
         <span style="display:flex;align-items:center;gap:8px;">${statusHtml}</span>
       </div>`;
     }).join('');
@@ -937,6 +1026,30 @@ async function fetchSystemStatus() {
     const wt = d.build?.worktree;
     const branchLabel = wt ? `${branch} <span style="color:var(--magenta);">(worktree: ${wt})</span>` : branch;
     const versionLine = `<div class="sys-version-bar">v${ver} · <span style="color:var(--yellow);">${branchLabel}</span>${commit ? ` · <span style="color:var(--text-dim);">${commit}</span>` : ''}</div>`;
+    const ctxSrc = d.context_sources || {};
+    const srcEnabled = ctxSrc.enabled || {};
+    const srcMissing = Array.isArray(ctxSrc.missing) ? ctxSrc.missing : [];
+    const sourceRows = ['GITHUB_TOKEN', 'GITLAB_TOKEN', 'BASE_CODE_DIR']
+      .map((k) => `<div class="sys-row"><span class="sys-label">${k}</span><span class="sys-val ${srcEnabled[k] ? 'ok' : 'err'}">${srcEnabled[k] ? 'Configured' : 'Missing'}</span></div>`)
+      .join('');
+    const sourceWarning = !ctxSrc.any_enabled
+      ? `<div style="margin-top:8px;padding:8px 10px;border:1px solid rgba(239,68,68,0.5);border-radius:6px;background:rgba(239,68,68,0.08);font-size:0.52rem;line-height:1.5;color:#fecaca;white-space:pre-line;">No project sources are configured.
+
+Please configure at least one of the following:
+
+* GITHUB_TOKEN
+* GITLAB_TOKEN
+* BASE_CODE_DIR
+
+This must be configured on savant-server (not in the desktop client).</div>`
+      : '';
+    const abilities = d.abilities || {};
+    const abilitiesCount = Number(abilities.asset_count || 0);
+    const abilitiesBootstrap = !!abilities.bootstrap_available;
+    const abilitiesSeedPath = abilities.seed_path || '—';
+    const abilitiesBootstrapControl = abilitiesBootstrap
+      ? `<button class="mcp-setup-btn" onclick="bootstrapAbilities(this)" title="Seed default abilities into the server abilities directory">Bootstrap Abilities</button>`
+      : `<span class="sys-val ok">Configured</span>`;
 
     const serverBase = (window.__SAVANT_SERVER_URL__ || location.origin || '').replace(/\/$/, '');
     el.innerHTML = `
@@ -954,6 +1067,18 @@ async function fetchSystemStatus() {
           <div class="sys-row"><span class="sys-label">Status</span><span class="sys-val ok">● Running</span></div>
           <div class="sys-row"><span class="sys-label">Port</span><span class="sys-val port">${d.flask.port}</span></div>
           <div class="sys-row"><span class="sys-label">PID</span><span class="sys-val">${d.flask.pid}</span></div>
+        </div>
+        <div class="sys-status-card">
+          <h5>Context Sources</h5>
+          ${sourceRows}
+          ${sourceWarning}
+          ${ctxSrc.any_enabled ? '<div style="margin-top:8px;color:var(--text-dim);font-size:0.5rem;">Configured on server: ' + (srcMissing.length ? ('missing ' + srcMissing.join(', ')) : 'all source env vars present') + '</div>' : ''}
+        </div>
+        <div class="sys-status-card">
+          <h5>Abilities</h5>
+          <div class="sys-row"><span class="sys-label">Assets</span><span class="sys-val">${abilitiesCount}</span></div>
+          <div class="sys-row"><span class="sys-label">Seed Source</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${abilitiesSeedPath}</span></div>
+          <div class="sys-row"><span class="sys-label">Bootstrap</span><span style="display:flex;align-items:center;gap:8px;">${abilitiesBootstrapControl}</span></div>
         </div>
         <div class="sys-status-card">
           <h5>Database</h5>
@@ -990,53 +1115,140 @@ async function fetchSystemStatus() {
   }
 }
 
+function _abilitiesGuideSet(elId, value) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.innerHTML = value;
+}
+
+async function refreshAbilitiesGuideStatus() {
+  _abilitiesGuideSet('abilities-guide-count', 'Loading...');
+  _abilitiesGuideSet('abilities-guide-breakdown', 'Loading...');
+  _abilitiesGuideSet('abilities-guide-bootstrap', 'Loading...');
+  try {
+    const [sysRes, statsRes] = await Promise.all([
+      fetch('/api/system/info', { signal: AbortSignal.timeout(8000) }),
+      fetch('/api/abilities/stats', { signal: AbortSignal.timeout(8000) }),
+    ]);
+    const sys = await sysRes.json();
+    const stats = await statsRes.json();
+    const abilities = sys.abilities || {};
+    const statsCount =
+      Number(stats.personas || 0) +
+      Number(stats.rules || 0) +
+      Number(stats.policies || 0) +
+      Number(stats.repos || 0) +
+      Number(stats.styles || 0);
+    const count = Number.isFinite(statsCount) ? statsCount : Number(abilities.asset_count || 0);
+    const bootstrapAvailable = !!abilities.bootstrap_available;
+
+    _abilitiesGuideSet('abilities-guide-count', String(count));
+    _abilitiesGuideSet(
+      'abilities-guide-breakdown',
+      `personas ${stats.personas || 0} · rules ${stats.rules || 0} · policies ${stats.policies || 0} · repos ${stats.repos || 0} · styles ${stats.styles || 0}`
+    );
+    if (bootstrapAvailable) {
+      _abilitiesGuideSet(
+        'abilities-guide-bootstrap',
+        '<button class="mcp-test-btn" onclick="bootstrapAbilitiesFromGuide(this)">Bootstrap Abilities</button>'
+      );
+    } else {
+      _abilitiesGuideSet('abilities-guide-bootstrap', '<span style="color:#22c55e;">Not available (assets already exist)</span>');
+    }
+  } catch (e) {
+    _abilitiesGuideSet('abilities-guide-count', 'Error');
+    _abilitiesGuideSet('abilities-guide-breakdown', 'Failed to load');
+    const msg = (typeof escapeHtml === 'function') ? escapeHtml(e.message || String(e)) : (e.message || String(e));
+    _abilitiesGuideSet('abilities-guide-bootstrap', `<span style="color:#ff6b6b;">${msg}</span>`);
+  }
+}
+
+async function bootstrapAbilitiesFromGuide(btn) {
+  const button = btn || null;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Bootstrapping...';
+  }
+  try {
+    const res = await fetch('/api/abilities/bootstrap', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 409) {
+        showToast('info', 'Abilities already exist; bootstrap skipped.', 6000);
+      } else {
+        throw new Error(data.error || data.reason || `HTTP ${res.status}`);
+      }
+    } else {
+      showToast('success', `Bootstrapped ${data.count || 0} abilities files.`, 7000);
+    }
+  } catch (e) {
+    showToast('error', `Abilities bootstrap failed: ${e.message}`, 8000);
+  } finally {
+    fetchSystemStatus();
+    refreshAbilitiesGuideStatus();
+  }
+}
+
+async function bootstrapAbilities(btn) {
+  const button = btn || null;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Bootstrapping...';
+  }
+  try {
+    const res = await fetch('/api/abilities/bootstrap', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 409) {
+        showToast('info', 'Abilities already exist; bootstrap skipped.', 6000);
+      } else {
+        throw new Error(data.error || data.reason || `HTTP ${res.status}`);
+      }
+    } else {
+      showToast('success', `Bootstrapped ${data.count || 0} abilities files.`, 7000);
+    }
+  } catch (e) {
+    showToast('error', `Abilities bootstrap failed: ${e.message}`, 8000);
+  } finally {
+    fetchSystemStatus();
+  }
+}
+
 async function setupMcpAgent(provider, btn) {
   btn.disabled = true;
   btn.textContent = '…';
   try {
-    const res = await fetch('/api/setup-mcp', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ providers: [provider], force: true })
-    });
-    const data = await res.json();
-    const r = (data.results || [])[0];
-    if (r && r.status === 'configured') {
-      showToast('success', `Savant MCP servers configured for ${r.label}`, 6000);
-      // Show Hermes SSE patch results if present
-      if (r.sse_patch) {
-        if (r.sse_patch.patches_applied && r.sse_patch.patches_applied.length > 0) {
-          showToast('success', `Hermes SSE patches applied: ${r.sse_patch.patches_applied.join(', ')}`, 10000);
-        } else if (r.sse_patch.all_good) {
-          showToast('info', `Hermes SSE support already present`, 5000);
-        }
-        if (r.sse_patch.errors && r.sse_patch.errors.length > 0) {
-          showToast('warning', `Hermes SSE patch issues: ${r.sse_patch.errors.join(', ')}`, 10000);
-        }
-      }
-      // Refresh the system status to update the card
-      fetchSystemStatus();
-    } else if (r && r.status === 'already_configured') {
-      showToast('info', `MCP already configured for ${r.label}`, 5000);
-      // Show Hermes SSE patch results
-      if (r.sse_patch) {
-        if (r.sse_patch.patches_applied && r.sse_patch.patches_applied.length > 0) {
-          showToast('success', `Hermes SSE patches applied: ${r.sse_patch.patches_applied.join(', ')}`, 10000);
-        } else if (r.sse_patch.all_good) {
-          showToast('info', `Hermes SSE support already present`, 5000);
-        }
-        if (r.sse_patch.errors && r.sse_patch.errors.length > 0) {
-          showToast('warning', `Hermes SSE patch issues: ${r.sse_patch.errors.join(', ')}`, 10000);
-        }
+    let r = null;
+    if (window.electronAPI && typeof window.electronAPI.setupMcpAgentConfigs === 'function') {
+      logMcpGuide(`SETUP ${provider}: updating local agent config`, 'sys');
+      const data = await window.electronAPI.setupMcpAgentConfigs({ providers: [provider] });
+      r = (data && data.results && data.results[0]) ? data.results[0] : null;
+    } else {
+      const res = await fetch('/api/setup-mcp', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ providers: [provider], force: true })
+      });
+      const data = await res.json();
+      r = (data.results || [])[0];
+    }
+    if (r && (r.status === 'configured' || r.status === 'already_configured')) {
+      logMcpGuide(`SETUP ${provider}: ${r.status}`, 'ok');
+      if (r.status === 'already_configured') {
+        showToast('info', `MCP already configured for ${r.label}`, 5000);
+      } else {
+        showToast('success', `Savant MCP servers configured for ${r.label}`, 6000);
       }
       fetchSystemStatus();
     } else {
       const msg = r ? (r.error || r.reason || r.status) : 'unknown error';
+      logMcpGuide(`SETUP ${provider}: failed — ${msg}`, 'error');
       showToast('error', `MCP setup failed: ${msg}`, 8000);
       btn.disabled = false;
       btn.textContent = 'Setup';
     }
   } catch (e) {
+    logMcpGuide(`SETUP ${provider}: error — ${e.message || e}`, 'error');
     showToast('error', `MCP setup error: ${e.message}`, 8000);
     btn.disabled = false;
     btn.textContent = 'Setup';
@@ -1045,6 +1257,7 @@ async function setupMcpAgent(provider, btn) {
 
 async function testMcpConnection(name, port, btn) {
   const statusEl = document.getElementById('mcp-test-' + name);
+  logMcpGuide(`TEST ${name}: probing /api/mcp/health/${name}`, 'sys');
   btn.disabled = true;
   statusEl.className = 'mcp-test-status loading';
   statusEl.textContent = '● Testing...';
@@ -1054,13 +1267,16 @@ async function testMcpConnection(name, port, btn) {
     if (data.status === 'ok') {
       statusEl.className = 'mcp-test-status ok';
       statusEl.textContent = '● Connected — port ' + port + ' responding';
+      logMcpGuide(`TEST ${name}: connected on port ${port}`, 'ok');
     } else {
       statusEl.className = 'mcp-test-status fail';
       statusEl.textContent = '● Offline — ' + (data.error || 'not responding on port ' + port);
+      logMcpGuide(`TEST ${name}: offline — ${data.error || `not responding on port ${port}`}`, 'warn');
     }
   } catch (e) {
     statusEl.className = 'mcp-test-status fail';
     statusEl.textContent = '● Error — could not reach health endpoint';
+    logMcpGuide(`TEST ${name}: error — ${e.message || e}`, 'error');
   }
   btn.disabled = false;
 }
@@ -1068,21 +1284,26 @@ async function testMcpConnection(name, port, btn) {
 async function restartMcpServer(name, port, btn) {
   if (!window.electronAPI || !window.electronAPI.restartMcp) {
     alert('Restart only available in desktop app');
+    logMcpGuide(`RESTART ${name}: unavailable (desktop bridge missing)`, 'error');
     return;
   }
   const statusEl = document.getElementById('mcp-test-' + name);
+  logMcpGuide(`RESTART ${name}: requested`, 'sys');
   btn.disabled = true;
   statusEl.className = 'mcp-test-status loading';
   statusEl.textContent = '● Restarting...';
   try {
     await window.electronAPI.restartMcp(name);
+    logMcpGuide(`RESTART ${name}: signal sent, waiting for health`, 'sys');
     // Wait a bit for server to come up
     setTimeout(() => {
+      logMcpGuide(`RESTART ${name}: running post-restart health check`, 'sys');
       testMcpConnection(name, port, btn);
     }, 1500);
   } catch (e) {
     statusEl.className = 'mcp-test-status fail';
     statusEl.textContent = '● Restart failed: ' + e.message;
+    logMcpGuide(`RESTART ${name}: failed — ${e.message || e}`, 'error');
     btn.disabled = false;
   }
 }

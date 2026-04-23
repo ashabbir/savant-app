@@ -55,6 +55,21 @@ function showLoadingThenNavigate(url) {
   window.location.href = url;
 }
 
+(function setupNavigationErrorBridge() {
+  if (typeof window === 'undefined') return;
+  if (window.__savantNavErrorBridgeInstalled) return;
+  window.__savantNavErrorBridgeInstalled = true;
+  if (!window.electronAPI || typeof window.electronAPI.onNavigationError !== 'function') return;
+  window.electronAPI.onNavigationError((payload) => {
+    const code = payload && payload.errorCode != null ? payload.errorCode : 'unknown';
+    const desc = payload && payload.errorDescription ? payload.errorDescription : 'Navigation failed';
+    const url = payload && payload.url ? payload.url : '';
+    const msg = `${desc} (code ${code})${url ? ` — ${url}` : ''}`;
+    try { console.error('[navigation-error]', msg); } catch {}
+    try { showToast('error', msg, 10000); } catch {}
+  });
+})();
+
 function showToast(type, message, autoClose = 5000) {
   let container = document.querySelector('.toast-container');
   if (!container) {

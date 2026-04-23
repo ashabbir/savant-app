@@ -48,6 +48,16 @@ Server API handles non-local shared domains:
 
 Client communicates with server through HTTP APIs and optional SSE status streams.
 
+### Context Project Ingestion Flow (Server-Owned)
+
+1. Client requests source availability (`/api/context/repos/sources`).
+2. User submits source payload (`source=github|gitlab|directory`) to `/api/context/repos`.
+3. Server ingestion service validates source and security constraints:
+   - token gating for remote repos
+   - `BASE_CODE_DIR` traversal protection for directory mode
+4. Server clones/updates or resolves directory under `BASE_CODE_DIR`.
+5. Existing indexing/AST pipelines run against the resulting project path.
+
 ## 5) Offline Behavior
 
 When server is unavailable:
@@ -72,3 +82,11 @@ MCP servers are server-side.
 4. Results returned to calling tool.
 
 Client does not host business MCP servers in the v8 split.
+
+## 7) AI Agent MCP Config Flow (Client-Owned)
+
+1. System Info requests provider config status through `window.electronAPI.checkMcpAgentConfigs()`.
+2. Electron main reads local agent config files on the desktop machine.
+3. UI renders configured/not-configured/no-config-file status per provider.
+4. Setup button calls `window.electronAPI.setupMcpAgentConfigs(...)` to patch local files.
+5. Server `/api/check-mcp` and `/api/setup-mcp` remain fallback paths when desktop bridge is unavailable.

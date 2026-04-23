@@ -29,6 +29,68 @@ window._savantDone = function() {
   _savantLog('Startup complete — dashboard loaded', 'ok');
 };
 
+function _devLogFormatValue(v) {
+  if (typeof v === 'string') return v;
+  if (v instanceof Error) return v.stack || v.message || String(v);
+  try { return JSON.stringify(v); } catch { return String(v); }
+}
+
+// Capture renderer console output into the in-app dev log panel.
+if (!window.__savantDevConsoleWrapped) {
+  window.__savantDevConsoleWrapped = true;
+  const methods = ['log', 'info', 'warn', 'error', 'debug'];
+  const levelMap = { log: 'info', info: 'info', warn: 'warn', error: 'error', debug: 'sys' };
+  methods.forEach((method) => {
+    const original = console[method] ? console[method].bind(console) : null;
+    console[method] = (...args) => {
+      if (original) original(...args);
+      const msg = args.map(_devLogFormatValue).join(' ');
+      window._savantLog(`[console.${method}] ${msg}`, levelMap[method] || 'info');
+    };
+  });
+}
+
+// Capture uncaught runtime failures in renderer.
+if (!window.__savantDevErrorHooks) {
+  window.__savantDevErrorHooks = true;
+  window.addEventListener('error', (ev) => {
+    const src = ev && ev.filename ? `${ev.filename}:${ev.lineno || 0}` : 'unknown';
+    const msg = ev && ev.error ? _devLogFormatValue(ev.error) : (ev && ev.message ? ev.message : 'Unknown error');
+    window._savantLog(`[window.error] ${msg} @ ${src}`, 'error');
+  });
+  window.addEventListener('unhandledrejection', (ev) => {
+    const reason = ev && Object.prototype.hasOwnProperty.call(ev, 'reason') ? ev.reason : 'Unknown rejection';
+    window._savantLog(`[window.unhandledrejection] ${_devLogFormatValue(reason)}`, 'error');
+  });
+}
+
+// Capture API request outcomes (status + latency) for frontend diagnostics.
+if (!window.__savantDevFetchWrapped && typeof window.fetch === 'function') {
+  window.__savantDevFetchWrapped = true;
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async function(url, init) {
+    const method = String((init && init.method) || 'GET').toUpperCase();
+    const raw = String(url || '');
+    const isApi = raw.startsWith('/api/') || raw.includes('/api/');
+    const t0 = performance.now();
+    try {
+      const res = await originalFetch(url, init);
+      if (isApi) {
+        const ms = Math.round(performance.now() - t0);
+        const lvl = res.ok ? 'sys' : 'warn';
+        window._savantLog(`[api] ${method} ${raw} -> ${res.status} (${ms}ms)`, lvl);
+      }
+      return res;
+    } catch (e) {
+      if (isApi) {
+        const ms = Math.round(performance.now() - t0);
+        window._savantLog(`[api] ${method} ${raw} -> ERROR (${ms}ms): ${_devLogFormatValue(e)}`, 'error');
+      }
+      throw e;
+    }
+  };
+}
+
 function _appendDevLogEntry(body, entry) {
   const row = document.createElement('div');
   row.className = 'dev-log-entry';

@@ -2,7 +2,7 @@
 
 This directory is the canonical architecture and runtime reference for this repo.
 
-Current product shape (v8 client/server rewrite):
+Current product shape (v8.1 client/server split):
 
 - `savant-app` -> `client/` (Electron desktop runtime)
 - `savant-server` -> `server/` (API + MCP backend)
@@ -11,6 +11,12 @@ Session ownership model:
 
 - Session list/detail/mutations are client-side and local filesystem driven.
 - Shared business data (workspaces/tasks/knowledge/context) is server-side.
+
+Branch updates captured in this memory bank:
+
+- Context ingestion is source-driven (GitHub/GitLab/Directory) with server-side `BASE_CODE_DIR` enforcement.
+- MCP guide diagnostics include recent action logs and abilities bootstrap visibility.
+- AI agent MCP config status/setup is client-owned via Electron IPC (local filesystem), with server endpoints kept as fallback.
 
 Contents:
 

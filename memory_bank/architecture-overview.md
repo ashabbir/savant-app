@@ -18,6 +18,7 @@ They communicate over HTTP/SSE contracts.
 - Terminal/xterm and D3 UI surfaces
 - Local preferences/cache/offline queue (`client/client_store.js`)
 - Local provider session discovery, detail, and mutation (`client/session_service.js`)
+- Local AI agent MCP config detection/setup (`client/mcp_agent_config.js` via Electron IPC)
 
 ### Server owns
 
@@ -25,6 +26,7 @@ They communicate over HTTP/SSE contracts.
 - Abilities/context/knowledge APIs
 - MCP servers (`server/mcp/*.py`)
 - Central shared persistence (server DB and server data root)
+- Context project ingestion orchestration (GitHub/GitLab/Directory) under `BASE_CODE_DIR`
 
 ## 3) Session Architecture (Current)
 
@@ -83,3 +85,4 @@ This keeps session lifecycle responsive even when server connectivity is down.
 - Preserve UI behavior while moving ownership to correct side
 - Keep provider-specific session logic modular for easy future providers
 - Keep client/server concerns strict so two teams can work independently
+- Keep credentials and provider configs local to client machine; avoid server-side assumptions about desktop config files

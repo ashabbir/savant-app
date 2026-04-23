@@ -966,16 +966,16 @@ def create_task(title: str, workspace_id: str,
     })</code></pre>
       <p><strong>Key rules:</strong> Docstrings become tool descriptions shown to AI. Type hints are required for JSON schema generation. Return <code>dict</code> or <code>list</code>.</p>
 
-      <h3>Auto-Configuration</h3>
-      <p>On startup, <code>setupMcpConfigs()</code> in <code>main.js</code> automatically patches config files for:</p>
+      <h3>Client-Side MCP Configuration</h3>
+      <p>MCP agent config detection/setup is handled in the Electron client (local filesystem), not by server-side path probing. Setup is user-triggered from Preferences or the MCP System panel.</p>
       <ul>
-       <li><strong>Copilot CLI</strong> — <code>~/.copilot/config.json</code></li>
+       <li><strong>Copilot CLI</strong> — <code>~/.copilot/mcp-config.json</code> or <code>~/.copilot/config.json</code></li>
        <li><strong>Claude Desktop</strong> — <code>~/Library/Application Support/Claude/claude_desktop_config.json</code></li>
        <li><strong>Gemini CLI</strong> — <code>~/.gemini/settings.json</code></li>
        <li><strong>Codex CLI</strong> — <code>~/.codex/config.toml</code></li>
         <li><strong>Hermes Agent</strong> — <code>~/.hermes/config.yaml</code> <em>(preferred — also installs skills)</em></li>
       </ul>
-      <p>This means AI tools automatically discover Savant's MCP servers without manual config.</p>
+      <p>This avoids false status results in containerized server deployments where agent config files exist only on the desktop machine.</p>
     `
   },
   {
@@ -1497,7 +1497,7 @@ def tool_name(param: str, optional: str = "default") -> dict:
     id: 'agent-setup-flow', title: 'What Happens on Setup', _sub: true, children: [],
     content: `
       <h2>What Happens on Setup</h2>
-      <p>When you enable a provider (via the Preferences UI or <code>POST /api/setup-mcp</code>), Savant performs these steps:</p>
+      <p>When you enable a provider (via the Preferences UI or MCP System Setup button), Savant performs these steps:</p>
 
       ${_gSteps([
         { title: 'Locate Config File', desc: 'Each provider stores MCP config in a different location and format (JSON, YAML, or TOML). Savant knows where each one lives.', color: 'var(--cyan)' },
@@ -1509,11 +1509,13 @@ def tool_name(param: str, optional: str = "default") -> dict:
       <h3>Already Configured?</h3>
       <p>If MCP is already configured for a provider, Savant checks each entry individually. Missing servers are added, existing ones are left untouched. For Hermes, skill files are still checked for updates even if MCP config hasn't changed.</p>
 
-      <h3>API</h3>
+      <h3>Bridges and Fallback API</h3>
       <table class="guide-table">
         <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
-        <tr><td><code>/api/setup-mcp</code></td><td>POST</td><td>Configure MCP for a provider. Body: <code>{ "provider": "hermes" }</code></td></tr>
-        <tr><td><code>/api/check-mcp</code></td><td>GET</td><td>Check which providers have MCP configured. Returns per-provider status.</td></tr>
+        <tr><td><code>window.electronAPI.checkMcpAgentConfigs()</code></td><td>IPC</td><td>Primary path: read provider config status from local desktop filesystem.</td></tr>
+        <tr><td><code>window.electronAPI.setupMcpAgentConfigs({...})</code></td><td>IPC</td><td>Primary path: write/update local provider config for selected providers.</td></tr>
+        <tr><td><code>/api/check-mcp</code></td><td>GET</td><td>Server fallback for status checks when desktop bridge is unavailable.</td></tr>
+        <tr><td><code>/api/setup-mcp</code></td><td>POST</td><td>Server fallback for setup when desktop bridge is unavailable.</td></tr>
       </table>
     `
   },
@@ -1526,7 +1528,7 @@ def tool_name(param: str, optional: str = "default") -> dict:
       <table class="guide-table">
         <tr><th>Provider</th><th>Config File</th><th>Format</th><th>Extra Setup</th></tr>
        <tr><td style="color:var(--cyan);">Copilot CLI</td><td><code>~/.copilot/mcp-config.json</code></td><td>JSON</td><td>—</td></tr>
-       <tr><td style="color:var(--green);">Claude Code</td><td><code>.mcp.json</code> (project-level)</td><td>JSON</td><td>—</td></tr>
+       <tr><td style="color:var(--green);">Claude Desktop</td><td><code>~/Library/Application Support/Claude/claude_desktop_config.json</code></td><td>JSON</td><td>—</td></tr>
        <tr><td style="color:var(--magenta);">Codex</td><td><code>~/.codex/config.toml</code></td><td>TOML</td><td>—</td></tr>
         <tr><td style="color:var(--yellow);">Gemini CLI</td><td><code>~/.gemini/settings.json</code></td><td>JSON</td><td>—</td></tr>
         <tr><td style="color:var(--orange);">Hermes ⭐</td><td><code>~/.hermes/config.yaml</code></td><td>YAML</td><td>SSE patches + skill install</td></tr>
@@ -1649,8 +1651,8 @@ args = ["/path/to/server/mcp/stdio.py", "workspace"]</pre>
       </table>
 
       <h3>Verifying Setup</h3>
-      <p>Use the <code>GET /api/check-mcp</code> endpoint to verify all providers are configured. The response shows per-provider status and which servers are connected.</p>
-      <p>In the MCP tab's Workspace sub-tab, the server health cards show real-time connectivity status for each Savant MCP server.</p>
+      <p>Use MCP System Info in the app to verify provider config status. Savant reads these states from local client config files via Electron IPC and displays per-provider status.</p>
+      <p>In the MCP tab, health cards still show real-time connectivity status for each Savant MCP server.</p>
     `
   },
   {

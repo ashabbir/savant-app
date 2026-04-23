@@ -7,6 +7,8 @@ tags:
 priority: 100
 includes:
   - rule.delivery
+  - rule.backend.api
+  - rule.frontend.ui
   - policy.style.concise
 name: Engineer
 aliases:

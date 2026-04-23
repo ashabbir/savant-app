@@ -1,14 +1,35 @@
 # Savant Monorepo
 
-## v8.0.0 Hero Release
+## v8.1.0 Hero Release
 
-Savant v8.0.0 is the client-server rewrite baseline.
+Savant v8.1.0 builds on the client-server rewrite baseline with multi-source context ingestion, stronger MCP/system diagnostics, and client-owned MCP config detection/setup.
 
-What is happening in this refactor:
+What is included in this branch:
 - The product is now split into `savant-app` (client) and `savant-server` (backend).
 - Shared data moves to centralized server storage (API + DB + MCP-side orchestration).
 - Client keeps local-only concerns (UI runtime, terminal/xterm, D3 views, local cache, offline queue).
 - Client/server integration is standardized through HTTP/SSE contracts for enterprise deployment.
+- Context project ingestion supports source modes:
+  - GitHub URL
+  - GitLab URL (including self-hosted GitLab-style domains)
+  - Server directory (relative to `BASE_CODE_DIR`)
+- MCP Tool Guide now includes in-guide action logs and abilities bootstrap visibility.
+- AI Agent MCP config status/setup is resolved from client-local config files through Electron IPC (with server API fallback).
+
+## Quick Start (One Command Server)
+
+Run server in Docker with mounted code base for context directory source:
+
+```bash
+BASE_CODE_HOST_DIR=~/code/archived docker compose up -d --build
+```
+
+Then run client in dev mode:
+
+```bash
+cd client
+SAVANT_SERVER_URL=http://127.0.0.1:8090 npm run dev
+```
 
 Savant is now split into two independent applications:
 
@@ -123,6 +144,20 @@ npm run test:frontend
 cd client
 npm test
 npm run test:coverage
+npm run test:frontend
+npm run test:ui
+```
+
+### One command full repo tests
+
+```bash
+./run-all-tests.sh
+```
+
+### Build DMG (frontend/client)
+
+```bash
+./build-client.sh
 ```
 
 ## Production Notes

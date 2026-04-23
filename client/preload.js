@@ -60,8 +60,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   pickDirectory: () => ipcRenderer.invoke("pick-directory"),
   openPath: (filePath) => ipcRenderer.invoke("shell:openPath", filePath),
   restartMcp: (name) => ipcRenderer.invoke("mcp:restart", name),
+  checkMcpAgentConfigs: () => ipcRenderer.invoke("savant:check-mcp-agent-configs"),
+  setupMcpAgentConfigs: (payload) => ipcRenderer.invoke("savant:setup-mcp-agent-configs", payload || {}),
   navigate: (url) => ipcRenderer.invoke("app:navigate", url),
   getLogPaths: () => ipcRenderer.invoke("app:get-log-paths"),
+  onNavigationError: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on("app:navigation-error", handler);
+    return () => ipcRenderer.removeListener("app:navigation-error", handler);
+  },
 });
 
 // Expose Savant client/server bridge (server config + offline outbox)

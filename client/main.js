@@ -6,6 +6,7 @@ const http = require("http");
 const fs = require("fs");
 const { SavantClientStore, newIdempotencyKey } = require("./client_store");
 const { LocalSessionService } = require("./session_service");
+const { getMcpAgentConfigStatus, setupMcpAgentConfigProvider } = require("./mcp_agent_config");
 
 // GPU sandbox fix for ad-hoc signed macOS apps
 app.commandLine.appendSwitch("no-sandbox");
@@ -817,6 +818,27 @@ function _attachWebContentsDiagnostics(webContents, label) {
 
   webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     _err(`[${label}] did-fail-load code=${errorCode} mainFrame=${!!isMainFrame} url=${validatedURL} err=${errorDescription}`);
+    try {
+      webContents.send("app:navigation-error", {
+        errorCode,
+        errorDescription,
+        url: validatedURL,
+        isMainFrame: !!isMainFrame,
+      });
+    } catch {}
+
+    // Recovery path: malformed hash URLs can become file:///#tab=... and blank the app.
+    if (isMainFrame && typeof validatedURL === "string" && /^file:\/\/\/?#tab=/.test(validatedURL)) {
+      const hash = validatedURL.includes("#") ? validatedURL.slice(validatedURL.indexOf("#")) : "";
+      _err(`[${label}] recovering from malformed dashboard URL: ${validatedURL}`);
+      webContents.loadFile(DASHBOARD_FILE).then(() => {
+        if (!hash) return;
+        const script = `history.replaceState(null, '', window.location.pathname + ${JSON.stringify(hash)});`;
+        return webContents.executeJavaScript(script).catch(() => {});
+      }).catch((err) => {
+        _err(`[${label}] dashboard recovery failed: ${err && err.message ? err.message : err}`);
+      });
+    }
   });
   webContents.on("render-process-gone", (_event, details) => {
     _err(`[${label}] render-process-gone reason=${details && details.reason ? details.reason : "unknown"} exitCode=${details && details.exitCode != null ? details.exitCode : "?"}`);
@@ -1949,6 +1971,14 @@ app.on("ready", async () => {
       if (!input) return { ok: false, error: "url_required" };
 
       try {
+        if (input.startsWith("#")) {
+          _log(`[nav] load dashboard hash=${input}`);
+          await targetWin.loadFile(DASHBOARD_FILE);
+          const script = `history.replaceState(null, '', window.location.pathname + ${JSON.stringify(input)});`;
+          await targetWin.webContents.executeJavaScript(script);
+          return { ok: true, strategy: "loadFile:dashboard-hash" };
+        }
+
         const baseDirUrl = `file://${path.dirname(DASHBOARD_FILE).replace(/\\/g, "/")}/`;
         const resolved = new URL(input, baseDirUrl);
         const pageName = path.basename(resolved.pathname || "").toLowerCase();
@@ -1983,6 +2013,38 @@ app.on("ready", async () => {
       mainLogFile: _getLogFile(),
       userDataDir: app.getPath("userData"),
     }));
+    ipcMain.handle("savant:check-mcp-agent-configs", async () => {
+      return getMcpAgentConfigStatus({ homeDir: app.getPath("home") });
+    });
+    ipcMain.handle("savant:setup-mcp-agent-configs", async (_event, payload = {}) => {
+      const requested = Array.isArray(payload.providers) ? payload.providers : [payload.provider];
+      const providers = requested
+        .map((p) => String(p || "").trim().toLowerCase())
+        .filter(Boolean);
+      const targets = providers.length ? providers : ["copilot", "claude", "gemini", "codex", "hermes"];
+      const ports = {};
+      for (const [name, cfg] of Object.entries(MCP_SERVERS)) {
+        ports[name] = Number(cfg.port);
+      }
+      const stdioPath = path.join(getSavantDir(), "mcp", "stdio.py");
+      const pythonCmd = _findMcpPython() || "python3";
+      const results = targets.map((provider) =>
+        setupMcpAgentConfigProvider(provider, {
+          homeDir: app.getPath("home"),
+          ports,
+          pythonCmd,
+          stdioPath,
+        })
+      );
+      return {
+        results,
+        summary: {
+          configured: results.filter((r) => r.status === "configured").length,
+          skipped: results.filter((r) => r.status === "skipped").length,
+          errors: results.filter((r) => r.status === "error").length,
+        },
+      };
+    });
 
     ipcMain.handle("savant:get-server-config", async () => {
       return { serverUrl: serverBaseUrl, online: _serverOnline };

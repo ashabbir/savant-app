@@ -36,6 +36,13 @@ cd client
 SAVANT_SERVER_URL=http://127.0.0.1:8090 npm run dev
 ```
 
+### Run server with Docker Compose
+
+```bash
+# from repo root
+BASE_CODE_HOST_DIR=~/code/archived docker compose up -d --build
+```
+
 ### Run tests
 
 ```bash
@@ -92,12 +99,14 @@ Core rule: client and server must run independently and communicate over HTTP/SS
   - one server URL per install
   - local UI/user preferences
   - offline mutation queue (FIFO)
+- Local AI tool MCP config detection/setup (`client/mcp_agent_config.js` via preload IPC).
 
 ### Server owns
 - API and orchestration (`server/app.py`).
 - Feature API modules/blueprints (`server/abilities`, `server/context`, `server/knowledge`).
 - Centralized persistence and source of truth (`server/sqlite_client.py`, `server/db/*`).
 - MCP servers (`server/mcp/*.py`) that expose server-side tools.
+- Context project ingestion orchestration under `BASE_CODE_DIR` (GitHub/GitLab/Directory sources).
 
 ### Strict non-ownership
 - Server must not own renderer HTML/CSS/JS, xterm UI, or guide UI runtime.
