@@ -1,7 +1,12 @@
 from pathlib import Path
 
 from abilities import bootstrap as bootstrap_module
-from abilities.bootstrap import _resolve_seed_base, seed_abilities_if_missing, abilities_asset_count
+from abilities.bootstrap import (
+    _resolve_seed_base,
+    abilities_bootstrap_status,
+    seed_abilities_if_missing,
+    abilities_asset_count,
+)
 from server_paths import (
     _default_data_dir,
     get_server_abilities_base_dir,
@@ -70,12 +75,56 @@ def test_resolve_seed_base_falls_back_when_repo_seed_missing(monkeypatch):
         as_posix = str(path_obj).replace("\\", "/")
         if as_posix.endswith("/savant/abilities"):
             return False
+        if as_posix.endswith("/server/data/abilities"):
+            return False
+        return original_exists(path_obj)
+
+    monkeypatch.setattr(bootstrap_module.Path, "exists", fake_exists)
+    resolved = _resolve_seed_base()
+    assert resolved.name == "savant-abilities-seed"
+    assert (resolved / "abilities" / "personas" / "engineer.md").exists()
+
+
+def test_resolve_seed_base_uses_server_data_when_repo_seed_missing(monkeypatch):
+    monkeypatch.delenv("SAVANT_ABILITIES_SEED_DIR", raising=False)
+    original_exists = bootstrap_module.Path.exists
+
+    def fake_exists(path_obj):
+        as_posix = str(path_obj).replace("\\", "/")
+        if as_posix.endswith("/savant/abilities"):
+            return False
+        if as_posix.endswith("/server/data/abilities"):
+            return True
         return original_exists(path_obj)
 
     monkeypatch.setattr(bootstrap_module.Path, "exists", fake_exists)
     resolved = _resolve_seed_base()
     assert resolved.name == "abilities"
-    assert resolved.parent.name == "seed"
+    assert resolved.parent.name == "data"
+
+
+def test_resolve_seed_base_materializes_embedded_seed_when_all_sources_missing(monkeypatch, tmp_path):
+    monkeypatch.delenv("SAVANT_ABILITIES_SEED_DIR", raising=False)
+    bootstrap_module._EMBEDDED_SEED_CACHE = None
+    monkeypatch.setattr(bootstrap_module.tempfile, "gettempdir", lambda: str(tmp_path))
+    original_exists = bootstrap_module.Path.exists
+
+    def fake_exists(path_obj):
+        as_posix = str(path_obj).replace("\\", "/")
+        if as_posix.endswith("/savant/abilities"):
+            return False
+        if as_posix.endswith("/server/data/abilities"):
+            return False
+        if as_posix.endswith("/seed/abilities"):
+            return False
+        return original_exists(path_obj)
+
+    monkeypatch.setattr(bootstrap_module.Path, "exists", fake_exists)
+    resolved = _resolve_seed_base()
+    assert resolved.name == "savant-abilities-seed"
+    assert (resolved / "abilities" / "personas" / "engineer.md").exists()
+    resolved_again = _resolve_seed_base()
+    assert resolved_again == resolved
 
 
 def test_server_paths_support_explicit_locations(monkeypatch, tmp_path):
@@ -101,6 +150,17 @@ def test_abilities_asset_count_is_zero_when_target_dir_missing(monkeypatch, tmp_
     data_dir = tmp_path / "data-missing"
     monkeypatch.setenv("SAVANT_SERVER_DATA_DIR", str(data_dir))
     assert abilities_asset_count() == 0
+
+
+def test_bootstrap_status_reports_store_empty_when_target_missing(monkeypatch, tmp_path):
+    data_dir = tmp_path / "data-status-missing"
+    bootstrap_module._EMBEDDED_SEED_CACHE = None
+    monkeypatch.setenv("SAVANT_SERVER_DATA_DIR", str(data_dir))
+
+    status = abilities_bootstrap_status()
+    assert status["asset_count"] == 0
+    assert status["store_has_files"] is False
+    assert status["bootstrap_available"] is True
 
 
 def test_seed_when_target_exists_but_empty(monkeypatch, tmp_path):
@@ -156,6 +216,28 @@ def test_no_seed_when_target_already_has_asset_file(monkeypatch, tmp_path):
     )
 
     seed_dir = tmp_path / "seed-populated"
+    seed_file = seed_dir / "abilities" / "personas" / "engineer.md"
+    seed_file.parent.mkdir(parents=True, exist_ok=True)
+    seed_file.write_text(
+        "---\nid: persona.engineer\ntype: persona\ntags: [engineering]\npriority: 100\n---\nbody\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("SAVANT_SERVER_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("SAVANT_ABILITIES_SEED_DIR", str(seed_dir))
+
+    result = seed_abilities_if_missing()
+    assert result["seeded"] is False
+    assert result["reason"] == "already-populated"
+
+
+def test_no_seed_when_target_has_any_existing_file(monkeypatch, tmp_path):
+    data_dir = tmp_path / "data-has-file"
+    target_file = data_dir / "abilities" / "README.txt"
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    target_file.write_text("existing", encoding="utf-8")
+
+    seed_dir = tmp_path / "seed-any-file"
     seed_file = seed_dir / "abilities" / "personas" / "engineer.md"
     seed_file.parent.mkdir(parents=True, exist_ok=True)
     seed_file.write_text(

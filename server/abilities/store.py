@@ -1,7 +1,7 @@
 """
 AbilityStore — loads, indexes, and validates ability blocks from the filesystem.
 
-Source of truth: ~/.savant/abilities/abilities/
+Source of truth: server abilities directory resolved from env / server data.
 Each .md file has YAML frontmatter (id, type, tags, priority, includes) + markdown body.
 """
 

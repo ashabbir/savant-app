@@ -1055,6 +1055,7 @@ This must be configured on savant-server (not in the desktop client).</div>`
     const abilitiesCount = Number(abilities.asset_count || 0);
     const abilitiesBootstrap = !!abilities.bootstrap_available;
     const abilitiesSeedPath = abilities.seed_path || '—';
+    const abilitiesStorePath = d.directories?.abilities_dir || '—';
     const abilitiesBootstrapControl = abilitiesBootstrap
       ? `<button class="mcp-setup-btn" onclick="bootstrapAbilities(this)" title="Seed default abilities into the server abilities directory">Bootstrap Abilities</button>`
       : `<span class="sys-val ok">Configured</span>`;
@@ -1085,6 +1086,7 @@ This must be configured on savant-server (not in the desktop client).</div>`
         <div class="sys-status-card">
           <h5>Abilities</h5>
           <div class="sys-row"><span class="sys-label">Assets</span><span class="sys-val">${abilitiesCount}</span></div>
+          <div class="sys-row"><span class="sys-label">Server Store</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${abilitiesStorePath}</span></div>
           <div class="sys-row"><span class="sys-label">Seed Source</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${abilitiesSeedPath}</span></div>
           <div class="sys-row"><span class="sys-label">Bootstrap</span><span style="display:flex;align-items:center;gap:8px;">${abilitiesBootstrapControl}</span></div>
         </div>
@@ -1133,6 +1135,7 @@ async function refreshAbilitiesGuideStatus() {
   _abilitiesGuideSet('abilities-guide-count', 'Loading...');
   _abilitiesGuideSet('abilities-guide-breakdown', 'Loading...');
   _abilitiesGuideSet('abilities-guide-bootstrap', 'Loading...');
+  _abilitiesGuideSet('abilities-guide-store', 'Loading...');
   try {
     const [sysRes, statsRes] = await Promise.all([
       fetch('/api/system/info', { signal: AbortSignal.timeout(8000) }),
@@ -1141,6 +1144,7 @@ async function refreshAbilitiesGuideStatus() {
     const sys = await sysRes.json();
     const stats = await statsRes.json();
     const abilities = sys.abilities || {};
+    const abilitiesDir = (sys.directories && sys.directories.abilities_dir) || '—';
     const statsCount =
       Number(stats.personas || 0) +
       Number(stats.rules || 0) +
@@ -1151,6 +1155,7 @@ async function refreshAbilitiesGuideStatus() {
     const bootstrapAvailable = !!abilities.bootstrap_available;
 
     _abilitiesGuideSet('abilities-guide-count', String(count));
+    _abilitiesGuideSet('abilities-guide-store', abilitiesDir);
     _abilitiesGuideSet(
       'abilities-guide-breakdown',
       `personas ${stats.personas || 0} · rules ${stats.rules || 0} · policies ${stats.policies || 0} · repos ${stats.repos || 0} · styles ${stats.styles || 0}`

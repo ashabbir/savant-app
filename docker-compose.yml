@@ -18,10 +18,11 @@ services:
     ports:
       - "8090:8090"
       - "8091:8091"
-      - "8092:8092"
       - "8093:8093"
       - "8094:8094"
     environment:
+      RUNNING_IN_DOCKER: 'true'
+      SAVANT_ABILITIES_SEED_DIR: /tmp/savant-abilities-seed/abilities
       HOME: /data/savant
       HF_HOME: /data/savant/hf
       HUGGINGFACE_HUB_CACHE: /data/savant/hf/hub
@@ -49,3 +50,4 @@ services:
 
 volumes:
   savant-server-data:
+

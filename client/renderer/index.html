@@ -5664,11 +5664,11 @@ function showLoadingScreen(cb) { if (cb) cb(); }
             <div class="info-row"><span class="info-label">Transport</span><span class="info-value">SSE</span></div>
             <div class="info-row"><span class="info-label">Port</span><span class="info-value">8092</span></div>
             <div class="info-row"><span class="info-label">URL</span><span class="info-value">http://127.0.0.1:8092/sse</span></div>
-            <div class="info-row"><span class="info-label">Store</span><span class="info-value">~/.savant/abilities/abilities/</span></div>
+            <div class="info-row"><span class="info-label">Server Store</span><span class="info-value" id="abilities-guide-store">Loading...</span></div>
             <div class="info-row"><span class="info-label">Available Assets</span><span id="abilities-guide-count" class="info-value">Loading...</span></div>
             <div class="info-row"><span class="info-label">Breakdown</span><span id="abilities-guide-breakdown" class="info-value" style="color:#aaa;">—</span></div>
             <div class="info-row"><span class="info-label">Bootstrap</span><span id="abilities-guide-bootstrap" class="info-value" style="color:#aaa;">Checking...</span></div>
-            <div class="info-row" style="margin-top:8px;"><span class="info-label">Setup</span><span class="info-value" style="color:#aaa;">Auto-configured by Savant on launch into<br>~/.copilot/config.json, Claude Desktop, and ~/.codex/config.toml</span></div>
+            <div class="info-row" style="margin-top:8px;"><span class="info-label">Setup</span><span class="info-value" style="color:#aaa;">Server-owned storage resolved from env and Docker runtime</span></div>
             <div class="mcp-test-row">
               <button class="mcp-test-btn" onclick="testMcpConnection('abilities', 8092, this)">⚡ TEST CONNECTION</button>
               <button class="mcp-test-btn" style="border-color:var(--orange);color:var(--orange);" onclick="restartMcpServer('abilities', 8092, this)">🔄 RESTART SERVER</button>
@@ -5786,7 +5786,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
           </div>
 
           <div class="tutorial-tip">
-            <strong>📁 File-backed:</strong> All abilities live as markdown files in <code>~/.savant/abilities/abilities/</code>. Each file has YAML frontmatter (id, type, tags, priority, includes) and a markdown body. Edit them directly or via MCP tools.
+            <strong>📁 File-backed:</strong> All abilities live as markdown files in the server abilities directory resolved from env/Docker. Each file has YAML frontmatter (id, type, tags, priority, includes) and a markdown body. Edit them directly or via MCP tools.
           </div>
         </div>
 
@@ -5800,7 +5800,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
             <div class="info-row"><span class="info-label">URL</span><span class="info-value">http://127.0.0.1:8093/sse</span></div>
             <div class="info-row"><span class="info-label">Storage</span><span class="info-value">~/.savant/savant.db (sqlite-vec)</span></div>
             <div class="info-row"><span class="info-label">Model</span><span class="info-value">stsb-distilbert-base (768-dim)</span></div>
-            <div class="info-row" style="margin-top:8px;"><span class="info-label">Setup</span><span class="info-value" style="color:#aaa;">Auto-configured by Savant on launch into<br>~/.copilot/config.json, Claude Desktop, and ~/.codex/config.toml</span></div>
+            <div class="info-row" style="margin-top:8px;"><span class="info-label">Setup</span><span class="info-value" style="color:#aaa;">Server-owned storage resolved from env and Docker runtime</span></div>
             <div class="mcp-test-row">
               <button class="mcp-test-btn" onclick="testMcpConnection('context', 8093, this)">⚡ TEST CONNECTION</button>
               <button class="mcp-test-btn" style="border-color:var(--orange);color:var(--orange);" onclick="restartMcpServer('context', 8093, this)">🔄 RESTART SERVER</button>
@@ -5915,7 +5915,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
             <div class="info-row"><span class="info-label">Port</span><span class="info-value">8094</span></div>
             <div class="info-row"><span class="info-label">URL</span><span class="info-value">http://127.0.0.1:8094/sse</span></div>
             <div class="info-row"><span class="info-label">Storage</span><span class="info-value">~/.savant/savant.db (kg_nodes + kg_edges)</span></div>
-            <div class="info-row" style="margin-top:8px;"><span class="info-label">Setup</span><span class="info-value" style="color:#aaa;">Auto-configured by Savant on launch into<br>~/.copilot/config.json, Claude Desktop, and ~/.codex/config.toml</span></div>
+            <div class="info-row" style="margin-top:8px;"><span class="info-label">Setup</span><span class="info-value" style="color:#aaa;">Server-owned storage resolved from env and Docker runtime</span></div>
             <div class="mcp-test-row">
               <button class="mcp-test-btn" onclick="testMcpConnection('knowledge', 8094, this)">⚡ TEST CONNECTION</button>
               <button class="mcp-test-btn" style="border-color:var(--orange);color:var(--orange);" onclick="restartMcpServer('knowledge', 8094, this)">🔄 RESTART SERVER</button>
