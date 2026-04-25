@@ -5816,7 +5816,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
           </div>
 
           <div class="tutorial-tip">
-            <strong>💡 TIP:</strong> The <code>savant-context</code> MCP server provides semantic code search and memory bank access across all your indexed repositories. AI agents use this to find relevant code, documentation, and project context without manual file browsing.
+            <strong>💡 TIP:</strong> The <code>savant-context</code> MCP server provides semantic code search, AST lookup, deterministic class/file analysis, and memory bank access across all your indexed repositories. AI agents use this to find relevant code, measure refactor impact, and gather project context without manual file browsing.
           </div>
 
           <div class="tutorial-section" style="margin-top:16px;">
@@ -5839,7 +5839,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
               <span class="tutorial-tool-icon">🧪</span>
               <div class="tutorial-tool-info">
                 <div class="tutorial-tool-name">analyze_code</div>
-                <div class="tutorial-tool-desc">Deterministic code analysis for a class or file. Pass a <code>name</code> plus <code>path</code> or <code>uri</code>, and optionally a unified <code>diff</code> or replacement <code>code</code>. Returns before/after complexity, findings, and deltas so agents can evaluate refactors before applying them.</div>
+                <div class="tutorial-tool-desc">Deterministic code analysis for a class or file. Pass a <code>name</code> plus <code>path</code> or <code>uri</code>, and optionally a unified <code>diff</code> or replacement <code>code</code>. Returns <code>before</code>, <code>after</code>, and <code>summary</code> fields with complexity, findings, and deltas so agents can evaluate refactors before applying them. New code naturally reports <code>before=0</code> and <code>after=current</code>.</div>
               </div>
             </div>
             <div class="tutorial-tool">

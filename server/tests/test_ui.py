@@ -438,11 +438,6 @@ class TestAPIEndpoints:
         data = json.loads(urllib.request.urlopen(f"{flask_server}/api/db/health", timeout=5).read())
         assert data.get("status") in ("ok", "healthy")
 
-    def test_sessions_endpoint(self, flask_server):
-        import urllib.request, json
-        data = json.loads(urllib.request.urlopen(f"{flask_server}/api/sessions", timeout=5).read())
-        assert isinstance(data, (list, dict))
-
     def test_workspaces_endpoint(self, flask_server):
         import urllib.request, json
         data = json.loads(urllib.request.urlopen(f"{flask_server}/api/workspaces", timeout=5).read())

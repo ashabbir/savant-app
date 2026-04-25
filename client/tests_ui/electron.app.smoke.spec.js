@@ -31,6 +31,34 @@ test.describe("Electron UI Smoke", () => {
     }
   });
 
+  test("shows abilities bootstrap control when server reports zero assets", async () => {
+    const h = await launchWithMock();
+    try {
+      await h.page.evaluate(() => {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = async (input, init) => {
+          const url = String(input);
+          if (url.includes("/api/system/info")) {
+            return new Response(JSON.stringify({
+              abilities: { asset_count: 0, bootstrap_available: true, seed_path: "/tmp/savant-abilities-seed/abilities" },
+              directories: { abilities_dir: "/tmp/savant-data/abilities" },
+            }), { status: 200, headers: { "content-type": "application/json" } });
+          }
+          if (url.includes("/api/abilities/stats")) {
+            return new Response(JSON.stringify({ personas: 0, rules: 0, policies: 0, styles: 0, repos: 0 }), { status: 200, headers: { "content-type": "application/json" } });
+          }
+          return originalFetch(input, init);
+        };
+        return refreshAbilitiesGuideStatus();
+      });
+      await expect(h.page.locator("#abilities-guide-bootstrap")).toContainText("Bootstrap Abilities", { timeout: 10000 });
+      const bootstrapHtml = await h.page.locator("#abilities-guide-bootstrap").innerHTML();
+      expect(bootstrapHtml).toContain("bootstrapAbilitiesFromGuide");
+    } finally {
+      await h.close();
+    }
+  });
+
   test("navigates to detail page via main-process IPC without file root fallback", async () => {
     const h = await launchWithMock();
     try {

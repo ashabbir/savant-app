@@ -7,18 +7,31 @@ let _abTreeExpanded = {};  // track expanded state: { 'type:persona': true, 'fol
 
 async function abMcpTestConnection() { return _mcpTestConnection('abilities', 8092, 'ab-mcp-dot', 'ab-mcp-status-text'); }
 
+async function _readJsonResponse(res) {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    const preview = text.trim().slice(0, 120);
+    throw new Error(`Non-JSON response from ${res.url || 'API'} (${res.status}): ${preview}`);
+  }
+}
+
 async function fetchAbilities() {
   abMcpTestConnection();
   try {
+    if (window._savantStartupPhase) window._savantStartupPhase('Loading MCP abilities...', 84, 'bootstrap assets');
     const [assetsRes, statsRes] = await Promise.all([
       fetch('/api/abilities/assets'),
       fetch('/api/abilities/stats')
     ]);
     if (!assetsRes.ok || !statsRes.ok) throw new Error('API error');
-    _abAssets = await assetsRes.json();
-    const stats = await statsRes.json();
+    _abAssets = await _readJsonResponse(assetsRes);
+    const stats = await _readJsonResponse(statsRes);
     renderAbTree();
     renderAbStats(stats);
+    if (window._savantStartupPhase) window._savantStartupPhase('Abilities ready', 90, 'bootstrap assets');
     const total = Object.values(stats).reduce((a, b) => a + b, 0);
     const countEl = document.getElementById('mode-abilities-count');
     if (countEl) countEl.textContent = total || '';
@@ -130,7 +143,7 @@ async function openAbEditor(assetId) {
   try {
     const res = await fetch('/api/abilities/assets/' + encodeURIComponent(assetId));
     if (!res.ok) throw new Error('Not found');
-    const asset = await res.json();
+    const asset = await _readJsonResponse(res);
     _abCurrentId = assetId;
     _abDirty = false;
     document.getElementById('ab-dirty-dot').style.display = 'none';
@@ -230,7 +243,7 @@ async function abSave() {
     const res = await fetch('/api/abilities/assets/' + encodeURIComponent(_abCurrentId), {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     });
-    if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Save failed'); }
+    if (!res.ok) { const err = await _readJsonResponse(res).catch(() => ({})); throw new Error(err.error || 'Save failed'); }
     _abDirty = false;
     showAbDirty();
     showToast('success', 'Saved ' + _abCurrentId);
@@ -246,7 +259,10 @@ async function abDeleteCurrent() {
   if (!confirm('Delete ' + _abCurrentId + '? This cannot be undone.')) return;
   try {
     const res = await fetch('/api/abilities/assets/' + encodeURIComponent(_abCurrentId), { method: 'DELETE' });
-    if (!res.ok) throw new Error('Delete failed');
+    if (!res.ok) {
+      const err = await _readJsonResponse(res).catch(() => ({}));
+      throw new Error(err.error || 'Delete failed');
+    }
     showToast('success', 'Deleted ' + _abCurrentId);
     _abCurrentId = null;
     _abDirty = false;
@@ -290,7 +306,7 @@ async function abCreateNew() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, type, priority, tags, body: '# ' + id.split('.').pop() + '\n\nContent here...\n' })
     });
-    if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Create failed'); }
+    if (!res.ok) { const err = await _readJsonResponse(res).catch(() => ({})); throw new Error(err.error || 'Create failed'); }
     showToast('success', 'Created ' + id);
     closeAbNewModal();
     await fetchAbilities();
@@ -303,7 +319,7 @@ async function abCreateNew() {
 async function loadAbBuilderDropdowns() {
   try {
     const res = await fetch('/api/abilities/assets');
-    const data = await res.json();
+    const data = await _readJsonResponse(res);
     const personaSel = document.getElementById('ab-build-persona');
     const repoSel = document.getElementById('ab-build-repo');
     personaSel.innerHTML = (data.persona || []).map(p =>
@@ -372,4 +388,3 @@ function abCopyPrompt() {
   if (!prompt) return;
   navigator.clipboard.writeText(prompt).then(() => showToast('success', 'Prompt copied to clipboard'));
 }
-

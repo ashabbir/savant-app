@@ -172,6 +172,39 @@ class TestTaskApiUpdate:
         assert resp.status_code == 404
 
 
+class TestTaskApiDependencies:
+    """POST/DELETE /api/tasks/<id>/deps must persist dependency links."""
+
+    def test_add_dependency(self, client, ws):
+        parent = _create_task(client, ws, title="Test2").get_json()
+        dep = _create_task(client, ws, title="Test1").get_json()
+
+        resp = client.post(f"/api/tasks/{parent['task_id']}/deps", json={"depends_on": dep["task_id"]})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert dep["task_id"] in data["depends_on"]
+
+    def test_add_dependency_missing_task_404(self, client, ws):
+        task = _create_task(client, ws, title="Test2").get_json()
+        resp = client.post(f"/api/tasks/{task['task_id']}/deps", json={"depends_on": "missing"})
+        assert resp.status_code == 404
+
+    def test_remove_dependency(self, client, ws):
+        parent = _create_task(client, ws, title="Test2").get_json()
+        dep = _create_task(client, ws, title="Test1").get_json()
+        client.post(f"/api/tasks/{parent['task_id']}/deps", json={"depends_on": dep["task_id"]})
+
+        resp = client.delete(f"/api/tasks/{parent['task_id']}/deps/{dep['task_id']}")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert dep["task_id"] not in data["depends_on"]
+
+    def test_remove_dependency_missing_404(self, client, ws):
+        task = _create_task(client, ws, title="Test2").get_json()
+        resp = client.delete(f"/api/tasks/{task['task_id']}/deps/missing")
+        assert resp.status_code == 404
+
+
 class TestTaskApiDelete:
     """DELETE /api/tasks/<id> must remove the task."""
 
@@ -186,6 +219,87 @@ class TestTaskApiDelete:
     def test_delete_nonexistent(self, client):
         resp = client.delete("/api/tasks/fake-id")
         assert resp.status_code in (404, 200)
+
+
+class TestTaskApiEndDay:
+    """End-day endpoints must exist and return JSON."""
+
+    def test_list_ended_days_defaults_empty(self, client):
+        resp = client.get("/api/tasks/ended-days")
+        assert resp.status_code == 200
+        assert resp.get_json() == []
+
+    def test_end_day_marks_day_as_ended(self, client, ws):
+        _create_task(client, ws, title="Carry over", date="2026-04-24")
+        resp = client.post("/api/tasks/end-day", json={"date": "2026-04-24"})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["from"] == "2026-04-24"
+        assert data["to"] == "2026-04-25"
+        ended = client.get("/api/tasks/ended-days").get_json()
+        assert "2026-04-24" in ended
+
+    def test_unend_day_removes_day(self, client, ws):
+        client.post("/api/tasks/end-day", json={"date": "2026-04-24"})
+        resp = client.post("/api/tasks/unend-day", json={"date": "2026-04-24"})
+        assert resp.status_code == 200
+        ended = client.get("/api/tasks/ended-days").get_json()
+        assert "2026-04-24" not in ended
+
+
+class TestTaskApiJira:
+    """Workspace Jira tab needs a dedicated JSON endpoint."""
+
+    def test_jira_workspace_endpoint_returns_json(self, client, ws):
+        from db.jira_tickets import JiraTicketDB
+
+        JiraTicketDB.create({
+            "ticket_id": "jira-task-api-1",
+            "workspace_id": ws,
+            "ticket_key": "TASK-1",
+            "title": "Task Jira",
+            "status": "todo",
+            "priority": "medium",
+            "reporter": "Tester",
+            "assignee": "Owner",
+        })
+
+        resp = client.get(f"/api/tasks/jira?workspace_id={ws}")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["ticket_key"] == "TASK-1"
+
+    def test_jira_workspace_endpoint_requires_workspace_id(self, client):
+        resp = client.get("/api/tasks/jira")
+        assert resp.status_code == 400
+
+
+class TestMergeRequestApi:
+    """Workspace merge-request tab needs a dedicated JSON endpoint."""
+
+    def test_merge_request_workspace_endpoint_returns_json(self, client, ws):
+        from db.merge_requests import MergeRequestDB
+
+        MergeRequestDB.create({
+            "mr_id": "mr-task-api-1",
+            "workspace_id": ws,
+            "url": "https://gitlab.com/team/repo/-/merge_requests/101",
+            "status": "open",
+            "author": "Tester",
+            "jira": "TASK-1",
+        })
+
+        resp = client.get(f"/api/merge-requests?workspace_id={ws}")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["url"].endswith("/101")
+
+    def test_merge_request_workspace_endpoint_requires_workspace_id(self, client):
+        resp = client.get("/api/merge-requests")
+        assert resp.status_code == 400
 
 
 class TestSearchTaskRegression:
@@ -206,3 +320,23 @@ class TestSearchTaskRegression:
         tasks = data.get("tasks", [])
         assert len(tasks) == 1
         assert tasks[0].get("seq") is not None, "Search result missing seq"
+
+
+class TestTaskApiGraph:
+    """GET /api/tasks/graph must return nodes and dependency edges."""
+
+    def test_graph_returns_workspace_tasks(self, client, ws):
+        parent = _create_task(client, ws, title="Parent", priority="high").get_json()
+        child = _create_task(client, ws, title="Child", priority="low").get_json()
+        client.post(f"/api/tasks/{parent['task_id']}/deps", json={"depends_on": child["task_id"]})
+
+        resp = client.get(f"/api/tasks/graph?workspace_id={ws}")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["workspace_id"] == ws
+        assert {n["id"] for n in data["nodes"]} == {parent["task_id"], child["task_id"]}
+        assert {"from": parent["task_id"], "to": child["task_id"]} in data["edges"]
+
+    def test_graph_requires_workspace_id(self, client):
+        resp = client.get("/api/tasks/graph")
+        assert resp.status_code == 400

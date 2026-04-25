@@ -158,4 +158,30 @@ test.describe("Electron Context UI", () => {
       await h.close();
     }
   });
+
+  test("workspace task graph renders from the graph endpoint", async () => {
+    const h = await launchWithMock({
+      mockState: {
+        workspaces: [{ id: "ws-graph", name: "Graph WS", status: "open" }],
+        tasks: [
+          { id: "task-parent", task_id: "task-parent", title: "Parent", workspace_id: "ws-graph", status: "todo", priority: "high", depends_on: ["task-child"] },
+          { id: "task-child", task_id: "task-child", title: "Child", workspace_id: "ws-graph", status: "todo", priority: "medium", depends_on: [] },
+        ],
+      },
+    });
+    try {
+      await h.page.evaluate(() => {
+        currentTab = "tasks";
+        currentMode = "tasks";
+        _currentWsId = "ws-graph";
+        _wsGraphMode = true;
+      });
+      await h.page.evaluate(() => loadWsGraph("ws-graph"));
+      await expect(h.page.locator("#dep-graph-svg .dep-node")).toHaveCount(2);
+      await expect(h.page.locator("#ws-detail-tasks")).toContainText("☰ LIST");
+      await expect(h.page.locator("#ws-graph-toggle")).toHaveText("☰ LIST");
+    } finally {
+      await h.close();
+    }
+  });
 });

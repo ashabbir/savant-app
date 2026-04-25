@@ -117,3 +117,20 @@ def test_abilities_bootstrap_endpoint_is_hidden_after_assets_exist(monkeypatch, 
     abilities = info.get_json()["abilities"]
     assert abilities["asset_count"] == 1
     assert abilities["bootstrap_available"] is False
+
+
+def test_abilities_stats_include_styles(monkeypatch, tmp_path):
+    data_dir = tmp_path / "data"
+    styles_file = data_dir / "abilities" / "styles" / "style" / "concise.md"
+    styles_file.parent.mkdir(parents=True, exist_ok=True)
+    styles_file.write_text(
+        "---\nid: policy.style.concise\ntype: style\ntags: [style]\npriority: 60\n---\nbody\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SAVANT_SERVER_DATA_DIR", str(data_dir))
+
+    c = _client()
+    r = c.get("/api/abilities/stats")
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["styles"] == 1

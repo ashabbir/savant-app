@@ -20,8 +20,14 @@ function tickStatusBarRefresh() {
 }
 
 function updateStatusBarMcp() {
-  fetch('/api/mcp/health', { signal: AbortSignal.timeout(2000) })
-    .then(r => r.json())
+  fetch('/api/mcp/health/workspace', { signal: AbortSignal.timeout(2000) })
+    .then(async r => {
+      const contentType = (r.headers.get('content-type') || '').toLowerCase();
+      if (!r.ok || !contentType.includes('application/json')) {
+        throw new Error(`MCP health returned ${r.status} ${r.statusText}`);
+      }
+      return r.json();
+    })
     .then(data => {
       const dot = document.getElementById('status-bar-mcp-dot');
       const txt = document.getElementById('status-bar-mcp-text');
@@ -40,7 +46,10 @@ function updateBreadcrumb() {
   if (!el) return;
   const tab = typeof currentTab !== 'undefined' ? currentTab : 'sessions';
   const tabLabel = tab.charAt(0).toUpperCase() + tab.slice(1);
-  const parts = [tabLabel];
+  const userName = (typeof _prefs !== 'undefined' && _prefs && String(_prefs.name || '').trim()) || '';
+  const parts = [];
+  if (userName) parts.push(userName);
+  parts.push(tabLabel);
 
   if (tab === 'workspaces' && typeof _currentWsId !== 'undefined' && _currentWsId) {
     const wsName = window._currentWsName || _currentWsId;

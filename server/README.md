@@ -79,7 +79,7 @@ The Context MCP server now exposes:
 - `repos_list`
 - `repo_status`
 
-`analyze_code` accepts a class/file target plus optional unified diff or replacement code so agents can compare before/after complexity and findings before deciding whether to refactor.
+`analyze_code` accepts a class/file target plus optional unified diff or replacement code. A diff-only payload is valid, so agents can compare before/after complexity and findings before deciding whether to refactor.
 
 ## Client Connection
 

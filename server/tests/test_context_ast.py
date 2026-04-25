@@ -301,6 +301,35 @@ class Service:
     assert analysis["delta"]["complexity"] >= 0
 
 
+def test_context_analysis_emits_frontend_style_categories():
+    from context.analysis import AnalysisTarget, analyze_code
+
+    content = """
+def sample(a, b, c, d, e, f):
+    secret = "TOKEN=abcdef123456"
+    df.append(1)
+    if True:
+        if True:
+            if True:
+                if True:
+                    if True:
+                        return 1
+    print("after return")
+""".strip()
+
+    analysis = analyze_code(
+        content_before=content,
+        target=AnalysisTarget(path="sample.py", name="sample", node_type="function"),
+    )
+
+    categories = {f["category"] for f in analysis["after"]["findings"]}
+    assert "structural" in categories
+    assert "security" in categories
+    assert "modernization" in categories
+    assert "style" in categories
+    assert "dead_code" in categories
+
+
 def test_context_analysis_api_and_mcp_proxy(monkeypatch, client, tmp_path):
     from context.db import ContextDB, init_context_schema
     from context.indexer import Indexer
@@ -342,3 +371,21 @@ def test_context_analysis_api_and_mcp_proxy(monkeypatch, client, tmp_path):
     assert out == {"ok": True}
     assert captured["path"] == "/api/context/analysis"
     assert captured["json"]["name"] == "Service"
+
+
+def test_context_analysis_accepts_diff_only_payload(client):
+    resp = client.post("/api/context/analysis", json={
+        "diff": """\
+@@ -1,3 +1,5 @@
+ class Service:
+     def run(self):
+-        return 1
++        if True:
++            return 2
+""",
+    })
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["target"]["path"] == ""
+    assert data["summary"]["status"] in {"new", "updated"}

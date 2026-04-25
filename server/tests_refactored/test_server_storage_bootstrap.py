@@ -163,6 +163,20 @@ def test_bootstrap_status_reports_store_empty_when_target_missing(monkeypatch, t
     assert status["bootstrap_available"] is True
 
 
+def test_bootstrap_status_reports_available_when_target_has_only_empty_dirs(monkeypatch, tmp_path):
+    data_dir = tmp_path / "data-status-empty-dirs"
+    target_root = data_dir / "abilities"
+    for dirname in ("personas", "rules", "policies", "repos", "styles"):
+        (target_root / dirname).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("SAVANT_SERVER_DATA_DIR", str(data_dir))
+
+    status = abilities_bootstrap_status()
+    assert status["asset_count"] == 0
+    assert status["store_has_files"] is False
+    assert status["bootstrap_available"] is True
+
+
 def test_seed_when_target_exists_but_empty(monkeypatch, tmp_path):
     data_dir = tmp_path / "data-empty"
     target_root = data_dir / "abilities"
@@ -251,3 +265,36 @@ def test_no_seed_when_target_has_any_existing_file(monkeypatch, tmp_path):
     result = seed_abilities_if_missing()
     assert result["seeded"] is False
     assert result["reason"] == "already-populated"
+
+
+def test_seed_bundle_includes_expected_structure(monkeypatch, tmp_path):
+    data_dir = tmp_path / "data-structure"
+    seed_dir = tmp_path / "seed-structure"
+    abilities_root = seed_dir / "abilities"
+    for rel in (
+        "personas/engineer.md",
+        "personas/architect.md",
+        "rules/boundaries.md",
+        "rules/delivery.md",
+        "policies/style/concise.md",
+    ):
+        file_path = abilities_root / rel
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(
+            "---\nid: test.asset\ntype: persona\ntags: [test]\npriority: 1\n---\nbody\n",
+            encoding="utf-8",
+        )
+
+    monkeypatch.setenv("SAVANT_SERVER_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("SAVANT_ABILITIES_SEED_DIR", str(seed_dir))
+
+    result = seed_abilities_if_missing()
+    assert result["seeded"] is True
+    for rel in (
+        "personas/engineer.md",
+        "personas/architect.md",
+        "rules/boundaries.md",
+        "rules/delivery.md",
+        "policies/style/concise.md",
+    ):
+        assert (data_dir / "abilities" / rel).exists()

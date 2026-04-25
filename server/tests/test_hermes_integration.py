@@ -142,6 +142,41 @@ def test_workspace_notes_includes_hermes(integration_client):
     assert g["notes"][0]["text"] == "Deployed to staging"
 
 
+def test_session_note_post_appears_in_workspace_notes(client, _isolated_db, tmp_path, monkeypatch):
+    """Session notes should be written with workspace_id so workspace notes can aggregate them."""
+    import app as app_mod
+    from db.workspaces import WorkspaceDB
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    sid = "session-notes-1"
+    sdir = session_dir / sid
+    sdir.mkdir()
+    (sdir / ".copilot-meta.json").write_text(json.dumps({"workspace": "ws-note-1"}))
+    (sdir / "workspace.yaml").write_text("workspace_id: ws-note-1\n")
+
+    monkeypatch.setattr(app_mod, "SESSION_DIR", str(session_dir))
+    WorkspaceDB.create({
+        "workspace_id": "ws-note-1",
+        "name": "Notes WS",
+        "description": "",
+        "priority": "medium",
+    })
+
+    resp = client.post(f"/api/session/{sid}/notes", json={"text": "Workspace visible note"})
+    assert resp.status_code == 200
+    assert resp.get_json()["workspace_id"] == "ws-note-1"
+
+    ws_notes = client.get("/api/workspaces/ws-note-1/notes")
+    assert ws_notes.status_code == 200
+    data = ws_notes.get_json()
+    groups = data["groups"]
+    assert len(groups) == 1
+    assert groups[0]["session_id"] == sid
+    assert groups[0]["note_count"] == 1
+    assert groups[0]["notes"][0]["text"] == "Workspace visible note"
+
+
 # ── 3. Workspace search finds hermes sessions and notes ───────────────────
 
 def test_workspace_search_finds_hermes_sessions(integration_client):

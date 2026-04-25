@@ -60,7 +60,7 @@ class AbilityStore:
         self.ids_by_type.clear()
         self.include_edges.clear()
 
-        categories = ["personas", "rules", "policies", "repos"]
+        categories = ["personas", "rules", "policies", "styles", "repos"]
         for cat in categories:
             base = root / cat
             if not base.exists():

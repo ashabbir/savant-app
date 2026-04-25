@@ -28,7 +28,8 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'Inter', sans-serif;
+  line-height: 1.5;
   overflow: hidden;
 }
 
@@ -88,7 +89,7 @@ html, body {
   padding: 4px 10px;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.65rem;
+  font-size: 0.75rem; /* Updated */
   color: var(--text-dim);
   white-space: nowrap;
   transition: background var(--transition-fast), color var(--transition-fast);
@@ -216,7 +217,7 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.65rem;
+  font-size: 0.75rem; /* Updated */
   padding: 2px 0;
   gap: 12px;
 }
@@ -224,8 +225,8 @@ html, body {
   background: rgba(255,255,255,0.06);
   padding: 1px 6px;
   border-radius: 3px;
-  font-family: monospace;
-  font-size: 0.6rem;
+  font-family: 'JetBrains Mono', monospace; /* Updated */
+  font-size: 0.75rem; /* Updated */
   color: var(--text-dim);
   white-space: nowrap;
 }
@@ -243,26 +244,28 @@ html, body {
   <div class="term-header">
     <div class="term-tabs" id="term-tabs"></div>
     <!-- Header actions removed — user prefers keyboard shortcuts from the action bar -->
-    <div class="term-header-actions" style="display:none">
+    <div class="term-header-actions">
       <button class="term-header-btn" id="btn-split-h"></button>
       <button class="term-header-btn" id="btn-split-v"></button>
       <button class="term-header-btn" id="term-expand-btn"></button>
-      <button class="term-header-btn" id="btn-help"></button>
-      <div class="term-help-popup" id="term-help-popup">
-        <div class="term-help-title">Terminal Shortcuts</div>
-        <div class="term-help-row"><kbd>⌘ T</kbd><span>New tab</span></div>
-        <div class="term-help-row"><kbd>⌘ D</kbd><span>Split vertical</span></div>
-        <div class="term-help-row"><kbd>⌘ ⇧ D</kbd><span>Split horizontal</span></div>
-        <div class="term-help-row"><kbd>⌘ K</kbd><span>Clear scrollback</span></div>
-        <div class="term-help-row"><kbd>⌘ [</kbd><span>Previous pane</span></div>
-        <div class="term-help-row"><kbd>⌘ ]</kbd><span>Next pane</span></div>
-        <div class="term-help-row"><kbd>⌘ {</kbd><span>Previous tab</span></div>
-        <div class="term-help-row"><kbd>⌘ }</kbd><span>Next tab</span></div>
-        <div class="term-help-row"><kbd>⌘ `</kbd><span>Toggle terminal</span></div>
-        <div class="term-help-section">Zoom</div>
-        <div class="term-help-row"><kbd>⌘ =</kbd><span>Zoom in</span></div>
-        <div class="term-help-row"><kbd>⌘ -</kbd><span>Zoom out</span></div>
-        <div class="term-help-row"><kbd>⌘ 0</kbd><span>Reset zoom</span></div>
+      <div class="term-help-wrap">
+        <button class="term-header-btn" id="btn-help" onclick="toggleHelp()" title="Terminal shortcuts" aria-label="Terminal shortcuts">?</button>
+        <div class="term-help-popup" id="term-help-popup">
+          <div class="term-help-title">Terminal Shortcuts</div>
+          <div class="term-help-row"><kbd>⌘ T</kbd><span>New tab</span></div>
+          <div class="term-help-row"><kbd>⌘ D</kbd><span>Split vertical</span></div>
+          <div class="term-help-row"><kbd>⌘ ⇧ D</kbd><span>Split horizontal</span></div>
+          <div class="term-help-row"><kbd>⌘ K</kbd><span>Clear scrollback</span></div>
+          <div class="term-help-row"><kbd>⌘ [</kbd><span>Previous pane</span></div>
+          <div class="term-help-row"><kbd>⌘ ]</kbd><span>Next pane</span></div>
+          <div class="term-help-row"><kbd>⌘ {</kbd><span>Previous tab</span></div>
+          <div class="term-help-row"><kbd>⌘ }</kbd><span>Next tab</span></div>
+          <div class="term-help-row"><kbd>⌘ `</kbd><span>Toggle terminal</span></div>
+          <div class="term-help-section">Zoom</div>
+          <div class="term-help-row"><kbd>⌘ =</kbd><span>Zoom in</span></div>
+          <div class="term-help-row"><kbd>⌘ -</kbd><span>Zoom out</span></div>
+          <div class="term-help-row"><kbd>⌘ 0</kbd><span>Reset zoom</span></div>
+        </div>
       </div>
     </div>
   </div>
@@ -288,7 +291,7 @@ const NORMAL_WIDTH_PCT  = 60;
 const EXPAND_WIDTH_PCT  = 98;
 
 /** Keys that bypass xterm and bubble up to the app-level keydown handler. */
-const APP_PASSTHROUGH_KEYS = ['`', 't', 'T', 'w', 'W', 'd', 'D', '=', '+', '-', '0', 'E'];
+const APP_PASSTHROUGH_KEYS = ['`', 't', 'T', 'w', 'W', 'd', 'D', '=', '+', '-', '0'];
 
 const TERM_THEME = {
   background:                   '#1a1b26',
@@ -637,6 +640,7 @@ function _createXterm(Terminal, fitAddon, webLinksAddon) {
   if (webLinksAddon) xterm.loadAddon(webLinksAddon);
 
   xterm.attachCustomKeyEventHandler((e) => {
+    if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) { toggleHelp(); return false; }
     if (!(e.metaKey || e.ctrlKey)) return true;
     if (APP_PASSTHROUGH_KEYS.includes(e.key)) return false;
     if (e.shiftKey && (e.key === '[' || e.key === ']')) return false;
@@ -944,8 +948,7 @@ function _removeLeafFromTree(leafId) {
 
 /**
  * Split the currently focused pane in the given direction.
- * If no split exists, creates one. If already split in that direction at the
- * focused leaf, closes the focused pane (toggle behavior).
+ * Never closes panes from keyboard shortcuts.
  */
 async function termToggleSplit(direction) {
   if (!_focusedLeafId || !_treeRoot) {
@@ -956,14 +959,7 @@ async function termToggleSplit(direction) {
   const leaf = _findLeaf(_focusedLeafId);
   if (!leaf) return;
 
-  // Check if the focused leaf's parent is a split in the same direction
-  const parentResult = _findParent(leaf.id);
-  if (parentResult && parentResult.parent.direction === direction) {
-    // Toggle: close the focused pane
-    _closeFocusedPane();
-  } else {
-    await _splitFocusedPane(direction);
-  }
+  await _splitFocusedPane(direction);
 }
 
 /**
@@ -1264,6 +1260,7 @@ async function _reconnect() {
 function _initKeyboardShortcuts() {
   document.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
+    if (!mod && e.key === '?' && !e.altKey) { e.preventDefault(); toggleHelp(); return; }
     if (!mod) return;
 
     // Toggle terminal
@@ -1271,14 +1268,13 @@ function _initKeyboardShortcuts() {
 
     // Tab management
     if (!e.shiftKey && (e.key === 't' || e.key === 'T')) { e.preventDefault(); termAddTab(); return; }
-    if (!e.shiftKey && (e.key === 'w' || e.key === 'W')) { e.preventDefault(); _closeActiveTab(); return; }
+    if (!e.shiftKey && (e.key === 'w' || e.key === 'W')) { e.preventDefault(); return; }
 
     // Split
     if (!e.shiftKey && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); termToggleSplit('h'); return; }
     if (e.shiftKey && (e.key === 'd' || e.key === 'D'))  { e.preventDefault(); termToggleSplit('v'); return; }
 
     // Expand
-    if (e.shiftKey && e.key === 'E') { e.preventDefault(); termToggleExpand(); return; }
 
     // Tab cycling
     if (e.shiftKey && e.key === '[') { e.preventDefault(); _cycleTabs(-1); return; }

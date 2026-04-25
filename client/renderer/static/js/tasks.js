@@ -11,6 +11,19 @@ function _localDateStr(d) {
 let _taskDate = _localDateStr();
 let _endedDays = new Set();
 
+async function _readJsonResponse(res, label) {
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${label} failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+  if (!contentType.includes('application/json')) {
+    const text = await res.text();
+    throw new Error(`${label} returned non-JSON (${res.status}): ${text.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
 function formatTaskDate(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   const today = _localDateStr();
@@ -30,7 +43,7 @@ function _isDayEnded() { return _endedDays.has(_taskDate); }
 async function _fetchEndedDays() {
   try {
     const res = await fetch(`/api/tasks/ended-days?today=${_localDateStr()}&_=${Date.now()}`);
-    const days = await res.json();
+    const days = await _readJsonResponse(res, 'Fetch ended days');
     _endedDays = new Set(days);
   } catch(e) { console.error('Failed to fetch ended days', e); }
 }
@@ -76,9 +89,11 @@ function taskGoToday() {
 async function fetchTasks() {
   document.getElementById('task-date-label').textContent = formatTaskDate(_taskDate);
   try {
+    if (window._savantStartupPhase) window._savantStartupPhase('Loading tasks...', 45, 'task board');
     if (!_endedDays.size && !_endedDays._loaded) { await _fetchEndedDays(); _endedDays._loaded = true; }
     const res = await fetch(`/api/tasks?date=${_taskDate}&today=${_localDateStr()}&_=${Date.now()}`);
-    _allTasks = (await res.json()).map(_normalizeTask);
+    _allTasks = (await _readJsonResponse(res, 'Fetch tasks')).map(_normalizeTask);
+    if (window._savantStartupPhase) window._savantStartupPhase('Tasks ready', 60, 'task board');
     renderKanban();
     updateTaskCount();
     _populateTaskFilterDropdowns();
@@ -291,7 +306,7 @@ function renderKanban() {
     <div class="task-stat-card">
       <div class="ts-label">Total Tasks</div>
       <div class="ts-value" style="color:var(--cyan);">${total}</div>
-      <div class="ts-sub">${todoCount} todo · ${inProgressCount} active</div>
+      <div class="ts-sub">${todoCount} todo · ${inProgressCount} active · ${doneCount} done · ${blockedCount} blocked</div>
     </div>
     <div class="task-stat-card">
       <div class="ts-label">Completed</div>
@@ -876,6 +891,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+if (window.savantAfterStartup) window.savantAfterStartup(() => {
+  if (currentTab === 'tasks') fetchTasks();
+});
+
 // ── Dependency Graph (toggle inside workspace tasks view) ──────
 let _wsGraphMode = false;
 
@@ -898,8 +917,10 @@ async function loadWsGraph(wsId) {
   if (!container) return;
   try {
     const res = await fetch(`/api/tasks/graph?workspace_id=${wsId}&_=${Date.now()}`);
-    const data = await res.json();
-    const { nodes, edges } = data;
+    if (!res.ok) throw new Error(`Graph API error (${res.status})`);
+    const data = await _readJsonResponse(res, 'Load task graph');
+    const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+    const edges = Array.isArray(data.edges) ? data.edges : [];
     if (!nodes.length) {
       container.innerHTML = `<div style="margin-bottom:12px;">
         <button class="task-day-btn add" onclick="openWsTaskModal()" style="font-size:0.6rem;padding:5px 14px;">+ ADD TASK</button>
@@ -1133,7 +1154,7 @@ async function deleteTask(taskId) {
 async function endDay() {
   try {
     const res = await fetch('/api/tasks/end-day', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({date: _taskDate}) });
-    const data = await res.json();
+    const data = await _readJsonResponse(res, 'End day');
     _endedDays.add(_taskDate);
     _taskDate = data.to || _localDateStr();
     await _fetchEndedDays();
@@ -1144,7 +1165,7 @@ async function endDay() {
 async function reopenDay() {
   if (!confirm(`Reopen ${formatTaskDate(_taskDate)}? You'll be able to add and move tasks again.`)) return;
   try {
-    await fetch('/api/tasks/unend-day', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({date: _taskDate}) });
+    await _readJsonResponse(await fetch('/api/tasks/unend-day', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({date: _taskDate}) }), 'Reopen day');
     _endedDays.delete(_taskDate);
     await fetchTasks();
   } catch(e) { alert('Failed: ' + e.message); }
@@ -1341,7 +1362,7 @@ async function openAllMrsModal() {
   body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-dim);font-size:0.6rem;">Loading merge requests…</div>';
   try {
     const res = await fetch(`/api/all-mrs?filter=${_mrsFilter}&_=${Date.now()}`);
-    const mrs = await res.json();
+    const mrs = await _readJsonResponse(res, 'Load merge requests');
     if (!mrs.length) {
       const label = _mrsFilter === 'open' ? 'open' : 'closed';
       body.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text-dim);font-size:0.7rem;">No ${label} merge requests found</div>`;
@@ -1422,7 +1443,7 @@ async function loadAllJiraTickets() {
     if (status) url += `&status=${encodeURIComponent(status)}`;
 
     const res = await fetch(url);
-    const tickets = await res.json();
+    const tickets = await _readJsonResponse(res, 'Load Jira tickets');
 
     if (!tickets.length) {
       const label = status || (_mrsFilter === 'open' ? 'open' : 'done');

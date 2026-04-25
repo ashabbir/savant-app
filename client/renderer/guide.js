@@ -52,10 +52,18 @@ const _guideTree = [
       <p>Savant bridges the gap between local development and AI-assisted workflows. It provides a central hub to track session history, manage project-specific tasks, and build a persistent knowledge graph of your engineering domain.</p>
 
       <h3>Who can use it?</h3>
+      <p>Savant works best when different roles use it for different parts of the delivery loop.</p>
+      ${_gFlow([
+        { icon: '🗺️', title: 'Plan', desc: 'Product managers and tech leads shape ideas, scope the work, and groom requirements.', color: 'var(--cyan)' },
+        { icon: '⚙️', title: 'Execute', desc: 'Tech leads and developers implement, coordinate, and ship the work.', color: 'var(--green)' },
+        { icon: '✅', title: 'Verify', desc: 'QA teams validate scenarios, edge cases, and regression coverage.', color: 'var(--yellow)' },
+        { icon: '🛟', title: 'Support', desc: 'Support agents use it as a runbook, escalation aid, and issue context source.', color: 'var(--magenta)' },
+      ])}
       ${_gStats([
-        { icon: '👥', value: 'Teams', label: 'Engineering Orgs', color: 'var(--cyan)' },
-        { icon: '💻', value: 'Devs', label: 'Individual Contributors', color: 'var(--green)' },
-        { icon: '🏛️', value: 'Leads', label: 'Tech Leads & Architects', color: 'var(--magenta)' },
+        { icon: '🧭', value: 'Plan', label: 'Product & Leads', color: 'var(--cyan)' },
+        { icon: '🛠️', value: 'Execute', label: 'Tech Leads & Devs', color: 'var(--green)' },
+        { icon: '🧪', value: 'Verify', label: 'QA', color: 'var(--yellow)' },
+        { icon: '🛟', value: 'Support', label: 'Support Agents', color: 'var(--magenta)' },
       ])}
 
       <h3>How to use it?</h3>
@@ -1035,7 +1043,7 @@ content: |
     id: 'comp-context', title: 'Context (Semantic Search & AST)', _sub: true, children: [],
     content: `
       <h2>Context — Semantic Search & AST Explorer</h2>
-      <p>Index repositories and search code using natural language and structural tree-sitter queries. Powered by <code>sqlite-vec</code> vector embeddings and AST parsing.</p>
+      <p>Index repositories and search code using natural language, structural tree-sitter queries, and deterministic before/after class analysis. Powered by <code>sqlite-vec</code> vector embeddings and AST parsing.</p>
 
       <h3>Indexing Pipeline</h3>
       ${_gSteps([
@@ -1054,7 +1062,7 @@ content: |
         <tr><th>Tool</th><th>Purpose</th></tr>
         <tr><td><code>code_search(query, repo)</code></td><td>Semantic search across repo source code</td></tr>
         <tr><td><code>structure_search(query, repo)</code></td><td>AST search for classes, functions, and symbols</td></tr>
-        <tr><td><code>analyze_code(name, repo, path, node_type, diff, code)</code></td><td>Deterministic before/after class or file analysis for refactor decisions</td></tr>
+        <tr><td><code>analyze_code(name, repo, path, node_type, diff, code)</code></td><td>Deterministic before/after class or file analysis. Returns before/after/summary with complexity, findings, and deltas.</td></tr>
         <tr><td><code>memory_bank_search(query, repo)</code></td><td>Search within memory bank markdown files</td></tr>
         <tr><td><code>repos_list()</code></td><td>List all indexed repos with README excerpts</td></tr>
         <tr><td><code>repo_status()</code></td><td>Index health: chunk count, last indexed, errors</td></tr>
@@ -1642,27 +1650,40 @@ args = ["/path/to/server/mcp/stdio.py", "workspace"]</pre>
     id: 'agent-env-vars', title: 'Environment Variables', _sub: true, children: [],
     content: `
       <h2>Environment Variables</h2>
-      <p>No credentials are stored in agent config files. Agents inherit authentication tokens from shell environment variables. Set these in your shell profile (<code>~/.zshrc</code>, <code>~/.bashrc</code>, etc.):</p>
+      <p>Savant has two kinds of configuration:</p>
+      <ul>
+        <li><strong>Server-side variables</strong> live on <code>savant-server</code> and control shared source ingestion and server runtime behavior.</li>
+        <li><strong>Client-side variables</strong> live in the desktop app and control per-install routing, local preferences, and UI state.</li>
+      </ul>
 
-      <h3>GitLab</h3>
+      <h3>Server-side variables</h3>
       <table class="guide-table">
-        <tr><th>Variable</th><th>Description</th><th>Example</th></tr>
-        <tr><td><code>GITLAB_TOKEN</code></td><td>Personal access token with API scope</td><td><code>glpat-xxxxxxxxxxxx</code></td></tr>
+        <tr><th>Variable</th><th>Description</th><th>Scope</th><th>Example</th></tr>
+        <tr><td><code>GITHUB_TOKEN</code></td><td>GitHub token used for source ingestion</td><td>Server</td><td><code>ghp_xxxxxxxxxxxx</code></td></tr>
+        <tr><td><code>GITLAB_TOKEN</code></td><td>GitLab personal access token with API scope</td><td>Server</td><td><code>glpat-xxxxxxxxxxxx</code></td></tr>
+        <tr><td><code>BASE_CODE_DIR</code></td><td>Root directory used for directory-based project ingestion</td><td>Server</td><td><code>/Users/you/code</code></td></tr>
+        <tr><td><code>SAVANT_DB</code></td><td>SQLite database path for savant-server</td><td>Server</td><td><code>/var/lib/savant/savant.db</code></td></tr>
+        <tr><td><code>SAVANT_API_ONLY</code></td><td>Restrict the server to API routes only</td><td>Server</td><td><code>1</code></td></tr>
       </table>
 
-      <h3>Atlassian (Jira + Confluence)</h3>
+      <h3>Client-side variables</h3>
       <table class="guide-table">
-        <tr><th>Variable</th><th>Description</th><th>Example</th></tr>
-        <tr><td><code>JIRA_URL</code></td><td>Jira instance URL</td><td><code>https://your-org.atlassian.net</code></td></tr>
-        <tr><td><code>JIRA_USERNAME</code></td><td>Email for Jira auth</td><td><code>you@company.com</code></td></tr>
-        <tr><td><code>JIRA_API_TOKEN</code></td><td>Atlassian API token</td><td><code>xxxxx</code></td></tr>
-        <tr><td><code>CONFLUENCE_URL</code></td><td>Confluence wiki URL</td><td><code>https://your-org.atlassian.net/wiki</code></td></tr>
-        <tr><td><code>CONFLUENCE_USERNAME</code></td><td>Email for Confluence auth</td><td><code>you@company.com</code></td></tr>
-        <tr><td><code>CONFLUENCE_API_TOKEN</code></td><td>Atlassian API token</td><td><code>xxxxx</code></td></tr>
+        <tr><th>Variable</th><th>Description</th><th>Scope</th><th>Example</th></tr>
+        <tr><td><code>SAVANT_SERVER_URL</code></td><td>One-server-per-install API base URL</td><td>Client</td><td><code>http://127.0.0.1:8090</code></td></tr>
+        <tr><td><code>wf-mode</code></td><td>Saved provider mode used by the UI</td><td>Client</td><td><code>hermes</code></td></tr>
+        <tr><td><code>Preferences → Your Name</code></td><td>Display name shown in the UI breadcrumb and guide context</td><td>Client</td><td><code>Ada</code></td></tr>
+        <tr><td><code>Preferences → Selected Provider</code></td><td>Active AI provider shown in provider-aware UI surfaces</td><td>Client</td><td><code>codex</code></td></tr>
+        <tr><td><code>JIRA_URL</code></td><td>Jira instance URL</td><td>Client</td><td><code>https://your-org.atlassian.net</code></td></tr>
+        <tr><td><code>JIRA_USERNAME</code></td><td>Email for Jira auth</td><td>Client</td><td><code>you@company.com</code></td></tr>
+        <tr><td><code>JIRA_API_TOKEN</code></td><td>Atlassian API token</td><td>Client</td><td><code>xxxxx</code></td></tr>
+        <tr><td><code>CONFLUENCE_URL</code></td><td>Confluence wiki URL</td><td>Client</td><td><code>https://your-org.atlassian.net/wiki</code></td></tr>
+        <tr><td><code>CONFLUENCE_USERNAME</code></td><td>Email for Confluence auth</td><td>Client</td><td><code>you@company.com</code></td></tr>
+        <tr><td><code>CONFLUENCE_API_TOKEN</code></td><td>Atlassian API token</td><td>Client</td><td><code>xxxxx</code></td></tr>
       </table>
 
       <h3>Verifying Setup</h3>
-      <p>Use MCP System Info in the app to verify provider config status. Savant reads these states from local client config files via Electron IPC and displays per-provider status.</p>
+      <p>Use MCP System Info in the app to verify both sides. Savant reads server-side source variables from <code>/api/system/info</code> and client-side settings from the desktop app via Electron IPC.</p>
+      <p>The System Info screen separates them into <strong>Context Sources</strong> for server-owned values and <strong>Client Settings</strong> for desktop-owned values.</p>
       <p>In the MCP tab, health cards still show real-time connectivity status for each Savant MCP server.</p>
     `
   },

@@ -190,8 +190,8 @@ def analyze():
         else:
             path = uri
 
-    if not path and not code_text:
-        return jsonify({"error": "path, uri, or code required"}), 400
+    if not path and not code_text and not diff_text:
+        return jsonify({"error": "path, uri, code, or diff required"}), 400
 
     from .analysis import AnalysisTarget, analyze_code
     from .db import ContextDB

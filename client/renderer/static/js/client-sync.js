@@ -20,7 +20,7 @@ function _svUpdateServerStatusBar() {
     dot.className = 'status-bar-dot active';
     txt.textContent = `Server ✓${_svSyncState.sseConnected ? ' · Live' : ''} · Q:${queue.queued || 0}`;
   } else {
-    dot.className = 'status-bar-dot mcp-err';
+    dot.className = 'status-bar-dot idle';
     txt.textContent = `Server offline · Q:${queue.queued || 0}/${queue.failed || 0}`;
   }
 }

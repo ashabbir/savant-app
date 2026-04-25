@@ -21,6 +21,15 @@ priority: 100
 You are Savant's default engineering persona.
 Focus on correctness, practical implementation, and clear explanations.
 """,
+    "personas/architect.md": """---
+id: persona.architect
+type: persona
+tags: [architecture, systems]
+priority: 100
+---
+You are Savant's architecture persona.
+Focus on explicit boundaries, predictable operations, and safe evolution.
+""",
     "personas/product.md": """---
 id: persona.product
 type: persona
@@ -29,6 +38,14 @@ priority: 80
 ---
 You are Savant's product persona.
 Focus on user value, workflows, and simple defaults.
+""",
+    "rules/boundaries.md": """---
+id: rule.boundaries
+type: rule
+tags: [architecture, boundaries]
+priority: 90
+---
+Keep ownership boundaries explicit between client and server modules.
 """,
     "rules/backend_api.md": """---
 id: rule.backend.api
@@ -39,6 +56,14 @@ priority: 90
 Keep server APIs explicit, validated, and secure.
 Prefer small endpoints and clear error messages.
 """,
+    "rules/delivery.md": """---
+id: rule.delivery
+type: rule
+tags: [delivery, engineering]
+priority: 80
+---
+Ship in small, testable increments with clear acceptance criteria.
+""",
     "rules/frontend_ui.md": """---
 id: rule.frontend.ui
 type: rule
@@ -47,6 +72,14 @@ priority: 90
 ---
 Keep the client UI simple, responsive, and stateful only where needed.
 Preserve clear loading and error states.
+""",
+    "policies/style/concise.md": """---
+id: policy.style.concise
+type: style
+tags: [style, communication]
+priority: 60
+---
+Use concise, direct communication with explicit assumptions and actionable steps.
 """,
     "policies/savant_standard.md": """---
 id: policy.savant.standard
@@ -150,7 +183,7 @@ def abilities_bootstrap_status() -> dict:
     has_files = _target_has_any_files(_target_root())
     return {
         "asset_count": count,
-        "bootstrap_available": not has_files,
+        "bootstrap_available": count == 0,
         "seed_path": str(seed_root),
         "seed_exists": seed_exists,
         "store_has_files": has_files,
@@ -168,8 +201,13 @@ def seed_abilities_if_missing() -> dict:
         return {"seeded": False, "reason": "seed-missing", "seed_path": str(seed_root)}
 
     if _target_has_any_files(target_root):
-        shutil.rmtree(target_root)
-        target_root.mkdir(parents=True, exist_ok=True)
+        return {
+            "seeded": False,
+            "reason": "already-populated",
+            "seed_path": str(seed_root),
+            "target_path": str(target_root),
+            "count": abilities_asset_count(),
+        }
 
     copied = 0
     for src in seed_root.rglob("*.md"):

@@ -151,10 +151,25 @@ class TestStagingLifecycle:
         graph_ids = [n["node_id"] for n in graph["nodes"]]
         assert node["node_id"] in graph_ids
 
-    def test_uncommit_route_removed(self, client):
-        """Uncommit route should no longer exist."""
-        r = client.post('/api/knowledge/nodes/uncommit', json={'node_ids': ['fake']})
-        assert r.status_code in (404, 405)
+    def test_uncommit_nodes_moves_committed_back_to_staged(self, client):
+        """Uncommit should move committed nodes back out of the main graph."""
+        node = _create_node(client, title="uncommit-me")
+        KnowledgeGraphDB.commit_nodes([node["node_id"]])
+
+        r = client.post("/api/knowledge/nodes/uncommit", json={"node_ids": [node["node_id"]]})
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["uncommitted"] is True
+        assert data["count"] == 1
+        assert node["node_id"] in data["node_ids"]
+
+        graph = client.get("/api/knowledge/graph").get_json()
+        graph_ids = [n["node_id"] for n in graph["nodes"]]
+        assert node["node_id"] not in graph_ids
+
+        staged_graph = client.get("/api/knowledge/graph?include_staged=true").get_json()
+        staged_ids = [n["node_id"] for n in staged_graph["nodes"]]
+        assert node["node_id"] in staged_ids
 
     def test_commit_empty_payload_returns_400(self, client):
         """7. Commit with neither workspace_id nor node_ids returns 400."""

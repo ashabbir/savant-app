@@ -744,6 +744,11 @@ function _startServerProbe() {
 
 async function _initServerConfig() {
   const store = _ensureClientStore();
+  if (process.env.SAVANT_SERVER_URL) {
+    serverBaseUrl = _normalizeServerUrl(process.env.SAVANT_SERVER_URL);
+    store.setPref("server_url", serverBaseUrl);
+    return serverBaseUrl;
+  }
   const saved = store.getPref("server_url", null);
   serverBaseUrl = _normalizeServerUrl(saved || DEFAULT_SERVER_URL);
   store.setPref("server_url", serverBaseUrl);
@@ -864,7 +869,7 @@ let _termPrefs = {
   shell: process.env.SHELL || "/bin/zsh",
   externalTerminal: "auto",
   customCommand: "",
-  fontSize: 13,
+  fontSize: 16,
   cursorStyle: "block",
   scrollback: 5000,
 };
@@ -1032,7 +1037,7 @@ function setStatus(msg, level = 'step') {
     const esc = (s) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, ' ');
     // Update current-step banner
     mainWindow.webContents.executeJavaScript(
-      `document.getElementById('status').textContent='${esc(msg)}'`
+      `(()=>{const el=document.getElementById('status'); if (el) el.textContent='${esc(msg)}';})()`
     ).catch(() => {});
     // Append to log panel
     mainWindow.webContents.executeJavaScript(

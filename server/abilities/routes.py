@@ -23,15 +23,15 @@ abilities_bp = Blueprint("abilities", __name__)
 
 # ── Singleton store + resolver ────────────────────────────────────────────────
 
-_BASE_DIR = str(get_server_abilities_base_dir())
 _store: Optional[AbilityStore] = None
 _resolver: Optional[Resolver] = None
 
 
 def _get_store() -> AbilityStore:
     global _store
-    if _store is None:
-        _store = AbilityStore(Path(_BASE_DIR))
+    base_dir = Path(str(get_server_abilities_base_dir()))
+    if _store is None or _store.base_path != base_dir:
+        _store = AbilityStore(base_dir)
     # Reload on every request to pick up file changes
     _store.load()
     return _store

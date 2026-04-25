@@ -47,6 +47,8 @@ async function ctxInit() {
   }
   if (pendingRefreshState && pendingRefreshState.ctx) {
     await _ctxRestoreRefreshState(pendingRefreshState.ctx);
+  } else if (!_ctxGetActivePanel || _ctxGetActivePanel() === 'ast') {
+    switchCtxPanel('ast');
   }
 }
 
@@ -1035,6 +1037,19 @@ async function ctxDoSearch() {
     }).join('');
   } catch (e) {
     container.innerHTML = '<div class="ctx-welcome" style="padding:30px;color:#ef4444;">Search failed: ' + _escHtml(e.message) + '</div>';
+  }
+}
+
+function ctxClearSearch() {
+  const input = document.getElementById('ctx-search-input');
+  const container = document.getElementById('ctx-search-results');
+  if (input) input.value = '';
+  if (container) {
+    container.innerHTML = `<div class="ctx-welcome">
+      <div style="font-size:2rem;margin-bottom:12px;">🔍</div>
+      <div>Search across all indexed projects</div>
+      <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Semantic vector search powered by sqlite-vec</div>
+    </div>`;
   }
 }
 

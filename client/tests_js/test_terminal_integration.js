@@ -58,6 +58,65 @@ test("client terminal uses local renderer xterm modules", () => {
   assert.ok(html.includes("import('./renderer/static/xterm-addon-fit.mjs')"));
 });
 
+test("client terminal exposes a visible help button and popup wiring", () => {
+  const html = fs.readFileSync(path.join(CLIENT, "terminal.html"), "utf-8");
+  assert.ok(html.includes('id="btn-help"'));
+  assert.ok(html.includes('onclick="toggleHelp()"'));
+  assert.ok(html.includes('aria-label="Terminal shortcuts"'));
+  assert.ok(html.includes('id="term-help-popup"'));
+  assert.ok(!html.includes('term-header-actions" style="display:none"'));
+});
+
+test("client terminal captures '?' key and opens shortcuts popup", () => {
+  const html = fs.readFileSync(path.join(CLIENT, "terminal.html"), "utf-8");
+  assert.ok(
+    html.includes("if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) { toggleHelp(); return false; }")
+  );
+});
+
+test("client terminal never closes tabs/panes via keyboard shortcuts", () => {
+  const html = fs.readFileSync(path.join(CLIENT, "terminal.html"), "utf-8");
+  assert.ok(
+    html.includes("if (!e.shiftKey && (e.key === 'w' || e.key === 'W')) { e.preventDefault(); return; }")
+  );
+  assert.ok(
+    !html.includes("if (parentResult && parentResult.parent.direction === direction) {")
+  );
+  assert.ok(
+    html.includes("await _splitFocusedPane(direction);")
+  );
+});
+
+test("client terminal no longer binds Cmd/Ctrl+Shift+E", () => {
+  const html = fs.readFileSync(path.join(CLIENT, "terminal.html"), "utf-8");
+  assert.ok(!html.includes("if (e.shiftKey && e.key === 'E') { e.preventDefault(); termToggleExpand(); return; }"));
+  assert.ok(!html.includes("'0', 'E']"));
+});
+
+test("client terminal binds remaining non-zoom shortcuts", () => {
+  const html = fs.readFileSync(path.join(CLIENT, "terminal.html"), "utf-8");
+  const requiredSnippets = [
+    "if (!mod && e.key === '?' && !e.altKey) { e.preventDefault(); toggleHelp(); return; }",
+    "if (e.key === '`') { e.preventDefault(); termHide(); return; }",
+    "if (!e.shiftKey && (e.key === 't' || e.key === 'T')) { e.preventDefault(); termAddTab(); return; }",
+    "if (!e.shiftKey && (e.key === 'w' || e.key === 'W')) { e.preventDefault(); return; }",
+    "if (!e.shiftKey && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); termToggleSplit('h'); return; }",
+    "if (e.shiftKey && (e.key === 'd' || e.key === 'D'))  { e.preventDefault(); termToggleSplit('v'); return; }",
+    "if (e.shiftKey && e.key === '[') { e.preventDefault(); _cycleTabs(-1); return; }",
+    "if (e.shiftKey && e.key === ']') { e.preventDefault(); _cycleTabs(1); return; }",
+    "if (e.shiftKey && e.key === 'ArrowLeft')  { e.preventDefault(); _navigateLeaf('ArrowLeft'); return; }",
+    "if (e.shiftKey && e.key === 'ArrowRight') { e.preventDefault(); _navigateLeaf('ArrowRight'); return; }",
+    "if (e.shiftKey && e.key === 'ArrowUp')    { e.preventDefault(); _navigateLeaf('ArrowUp'); return; }",
+    "if (e.shiftKey && e.key === 'ArrowDown')  { e.preventDefault(); _navigateLeaf('ArrowDown'); return; }",
+    "if (!e.shiftKey && e.key === 'k') { xterm.clear(); return false; }",
+    "if (e.key === 'c' && xterm.hasSelection()) { document.execCommand('copy'); return false; }",
+  ];
+
+  for (const snippet of requiredSnippets) {
+    assert.ok(html.includes(snippet), `Missing shortcut binding snippet: ${snippet}`);
+  }
+});
+
 test("client main retains server base injection for API bridge", () => {
   const main = fs.readFileSync(path.join(CLIENT, "main.js"), "utf-8");
   assert.ok(main.includes("window.__SAVANT_SERVER_URL__"));

@@ -746,6 +746,69 @@ test('_renderAstInteractiveLegend keeps interactive search controls', () => {
   if (!html.includes("window._astLegClick('test-cid', 'repo')")) throw new Error('Legend click handler missing');
 });
 
+test('_showAstDrawer renders child navigation and Focus action', () => {
+  const drawer = {
+    innerHTML: '',
+    style: {},
+  };
+  const target = {
+    data: { name: 'Parent', type: 'class', line: 1, start_line: 1, end_line: 20 },
+    _id: 1,
+    children: [
+      {
+        data: { name: 'ChildA', type: 'function', line: 5, start_line: 5, end_line: 8 },
+        _id: 2,
+        children: [],
+        descendants() { return [this]; },
+      },
+      {
+        data: { name: 'ChildB', type: 'method', line: 9, start_line: 9, end_line: 12 },
+        _id: 3,
+        children: [],
+        descendants() { return [this]; },
+      },
+    ],
+    descendants() {
+      return [this, ...this.children, ...this.children.flatMap(c => c.children || [])];
+    },
+  };
+
+  astSandbox.document.getElementById = (id) => (id === 'drawer-1' ? drawer : null);
+  astSandbox._showAstDrawer(target, 'drawer-1', '', '');
+  if (!drawer.innerHTML.includes('Focus')) throw new Error('Focus action missing from drawer HTML');
+  if (!drawer.innerHTML.includes('Children')) throw new Error('Children section missing from drawer HTML');
+  if (!drawer.innerHTML.includes('ChildA')) throw new Error('Child navigation entry missing from drawer HTML');
+  if (!drawer.innerHTML.includes('window._astFocusNode')) throw new Error('Focus handler missing from drawer HTML');
+});
+
+test('_astFocusNode re-roots the active subtree without throwing', () => {
+  const drawer = { innerHTML: '', style: {} };
+  const child = {
+    data: { name: 'Child', type: 'function', line: 5, start_line: 5, end_line: 8 },
+    _id: 2,
+    children: [],
+    descendants() { return [this]; },
+  };
+  const root = {
+    data: { name: 'Parent', type: 'class', line: 1, start_line: 1, end_line: 20 },
+    _id: 1,
+    children: [child],
+    descendants() { return [this, child]; },
+  };
+  let drawCalls = 0;
+  astSandbox.document.getElementById = (id) => (id === 'drawer-2' ? drawer : null);
+  astSandbox.window._astActiveDrawMap = {
+    'drawer-2': {
+      root,
+      draw: () => { drawCalls++; },
+      closeName: '',
+      toggleName: '',
+    },
+  };
+  astSandbox.window._astFocusNode('drawer-2', 2);
+  if (drawCalls === 0) throw new Error('Expected focus to redraw the subtree');
+});
+
 test('_renderAstNoSearchResults keeps search available for recovery', () => {
   const area = { innerHTML: '' };
   astSandbox.astSetSearchQuery('redi');
@@ -754,6 +817,30 @@ test('_renderAstNoSearchResults keeps search available for recovery', () => {
   if (!area.innerHTML.includes('Depth filter:')) throw new Error('No-results state lost depth filters');
   if (!area.innerHTML.includes('onclick="astClearSearchQuery()"')) throw new Error('No-results state lost clear search action');
   astSandbox.astClearSearchQuery();
+});
+
+test('ctxClearSearch clears the context search input', () => {
+  const input = { value: 'hello world' };
+  const results = { innerHTML: 'old results' };
+  const ctxSandbox = makeSandbox({
+    document: {
+      getElementById(id) {
+        if (id === 'ctx-search-input') return input;
+        if (id === 'ctx-search-results') return results;
+        return null;
+      },
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      createElement: () => ({})
+    },
+  });
+  const ctxSource = fs.readFileSync(path.join(JS_DIR, 'context-core.js'), 'utf8');
+  vm.createContext(ctxSandbox);
+  vm.runInContext(ctxSource, ctxSandbox, { filename: 'context-core.js' });
+  if (typeof ctxSandbox.ctxClearSearch !== 'function') throw new Error('ctxClearSearch missing');
+  ctxSandbox.ctxClearSearch();
+  if (input.value !== '') throw new Error('Search input should be cleared');
+  if (!results.innerHTML.includes('Search across all indexed projects')) throw new Error('Search results should reset');
 });
 
 test('_filterAstNodesForSearch exact typeahead selection includes nested children only', () => {

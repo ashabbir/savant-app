@@ -213,6 +213,36 @@ def commit_nodes():
         return jsonify({"error": "workspace_id or node_ids required"}), 400
 
 
+@knowledge_bp.route("/api/knowledge/nodes/uncommit", methods=["POST"])
+def uncommit_nodes():
+    """Move committed knowledge graph nodes back to staged so they leave the main graph.
+
+    Body:
+      - {node_ids: [...]} to uncommit specific nodes
+      - {workspace_id: "..."} to uncommit all committed nodes in a workspace
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    workspace_id = (data.get("workspace_id") or "").strip()
+    node_ids = data.get("node_ids", [])
+
+    if workspace_id:
+        all_nodes = KnowledgeGraphDB.list_nodes(include_staged=True, limit=10000)
+        committed_ids = [
+            n["node_id"] for n in all_nodes
+            if n.get("status") == "committed"
+            and workspace_id in ((n.get("metadata") or {}).get("workspaces", []))
+        ]
+        if not committed_ids:
+            return jsonify({"uncommitted": True, "count": 0, "workspace_id": workspace_id, "node_ids": []})
+        count = KnowledgeGraphDB.uncommit_nodes(committed_ids)
+        return jsonify({"uncommitted": True, "count": count, "workspace_id": workspace_id, "node_ids": committed_ids})
+    elif node_ids and isinstance(node_ids, list):
+        count = KnowledgeGraphDB.uncommit_nodes(node_ids)
+        return jsonify({"uncommitted": True, "count": count, "node_ids": node_ids})
+    else:
+        return jsonify({"error": "workspace_id or node_ids required"}), 400
+
+
 @knowledge_bp.route("/api/knowledge/nodes/merge", methods=["POST"])
 def merge_nodes():
     """Merge multiple nodes into one.

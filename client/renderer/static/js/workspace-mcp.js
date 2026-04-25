@@ -79,6 +79,19 @@ const _wsMcpTools = [
 
 let _wsMcpActiveTool = null;
 
+async function _readJsonResponse(res, label) {
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${label} failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+  if (!contentType.includes('application/json')) {
+    const text = await res.text();
+    throw new Error(`${label} returned non-JSON (${res.status}): ${text.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
 function wsMcpInit() {
   wsMcpTestConnection();
   wsMcpRenderTools();
@@ -90,7 +103,7 @@ function wsMcpRenderTools() {
   const container = document.getElementById('ws-mcp-tools');
   container.innerHTML = _wsMcpTools.map(t =>
     `<div class="ws-mcp-tool-card${_wsMcpActiveTool === t.name ? ' active' : ''}" onclick="wsMcpSelectTool('${t.name}')">
-      <div class="ws-mcp-tool-name">${t.icon} ${t.name}</div>
+      <div class="ws-mcp-tool-name" style="font-size: 0.75rem;">${t.icon} ${t.name}</div>
       <div class="ws-mcp-tool-desc">${t.desc}</div>
     </div>`
   ).join('');
@@ -195,7 +208,7 @@ async function wsMcpRun() {
       opts.body = JSON.stringify(spec.body);
     }
     const res = await fetch(url, opts);
-    const data = await res.json();
+    const data = await _readJsonResponse(res, `Workspace MCP ${_wsMcpActiveTool}`);
     resultDiv.textContent = JSON.stringify(data, null, 2);
     if (!res.ok) resultDiv.textContent = '❌ ' + res.status + '\n' + resultDiv.textContent;
     else resultDiv.textContent = '✅ ' + res.status + '\n' + resultDiv.textContent;
@@ -208,4 +221,3 @@ function _escHtml(s) {
   if (!s) return '';
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-

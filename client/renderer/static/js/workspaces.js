@@ -60,6 +60,20 @@ function _elapsedSince(dateStr) {
   return `${months} months`;
 }
 
+async function _readJsonResponse(res, label) {
+  const contentType = (res.headers?.get?.('content-type') || '').toLowerCase();
+  const readText = async () => (typeof res.text === 'function' ? await res.text() : '');
+  if (!res.ok) {
+    const text = await readText();
+    throw new Error(`${label} failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+  if (!contentType.includes('application/json')) {
+    const text = await readText();
+    throw new Error(`${label} returned non-JSON (${res.status}): ${text.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
 async function _toggleWsStatus(e, wsId) {
   e.stopPropagation();
   const ws = _workspaces.find(w => w.id === wsId);
@@ -74,8 +88,11 @@ async function _toggleWsStatus(e, wsId) {
 
 async function fetchWorkspaces() {
   try {
+    if (window._savantStartupPhase) window._savantStartupPhase('Loading workspaces...', 18, 'workspace list');
     const res = await fetch(`/api/workspaces?_=${Date.now()}`);
-    _workspaces = await res.json();
+    _workspaces = await _readJsonResponse(res, 'Load workspaces');
+    if (window._savantStartupPhase) window._savantStartupPhase(`Loaded ${_workspaces.length} workspaces`, 35, 'workspace list');
+    _wsLoadError = '';
     renderWorkspaces();
     updateWsCount();
     populateWsFilter();
@@ -84,7 +101,11 @@ async function fetchWorkspaces() {
     if (typeof allSessions !== 'undefined' && allSessions.length && typeof renderSessions === 'function') {
       renderSessions(allSessions);
     }
-  } catch(e) { console.error('Failed to fetch workspaces', e); }
+  } catch(e) {
+    _wsLoadError = e.message || 'Failed to fetch workspaces';
+    console.error('Failed to fetch workspaces', e);
+    renderWorkspaces();
+  }
 }
 
 function updateWsCount() {
@@ -121,10 +142,21 @@ function _findSuggestedRepoForWorkspace() {
 
 function _getEnabledSessionProviders() {
   const defaults = ['hermes', 'copilot', 'claude', 'codex', 'gemini'];
-  const raw = (_prefs && Array.isArray(_prefs.enabled_providers) && _prefs.enabled_providers.length)
+  const raw = (typeof _prefs !== 'undefined' && _prefs && Array.isArray(_prefs.enabled_providers) && _prefs.enabled_providers.length)
     ? _prefs.enabled_providers
     : defaults;
   return raw.filter(p => defaults.includes(p));
+}
+
+function _getSelectedSessionProvider() {
+  const candidate = (
+    (typeof _prefs !== 'undefined' && _prefs && (_prefs.selected_provider || _prefs.active_provider)) ||
+    (typeof currentMode !== 'undefined' && currentMode) ||
+    (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.getItem === 'function' ? localStorage.getItem('wf-mode') : '') ||
+    'hermes'
+  );
+  const normalized = String(candidate || '').trim().toLowerCase();
+  return ({ copilot:'copilot', claude:'claude', codex:'codex', gemini:'gemini', hermes:'hermes' })[normalized] || 'hermes';
 }
 
 function _providerIcon(provider) {
@@ -392,6 +424,25 @@ function _mrStatusChips(statusCounts) {
   return html;
 }
 
+function _jiraStatusSummary(statusCounts) {
+  const order = [
+    ['todo', 'Todo'],
+    ['in-progress', 'In Progress'],
+    ['in-review', 'In Review'],
+    ['done', 'Done'],
+    ['blocked', 'Blocked'],
+  ];
+  const parts = [];
+  for (const [key, label] of order) {
+    const count = statusCounts[key] || 0;
+    if (count) parts.push(`${count} ${label}`);
+  }
+  for (const [key, count] of Object.entries(statusCounts)) {
+    if (!order.some(([known]) => known === key) && count) parts.push(`${count} ${key}`);
+  }
+  return parts.join(' · ') || 'none';
+}
+
 function renderWorkspaces() {
   const grid = document.getElementById('ws-grid');
   const dash = document.getElementById('ws-dashboard');
@@ -402,6 +453,8 @@ function renderWorkspaces() {
     const totalWs = _workspaces.length;
     let totalSessions = 0, totalCopilot = 0, totalCline = 0, totalClaude = 0, totalCodex = 0, totalGemini = 0, totalHermes = 0;
     let totalTasks = 0, tasksDone = 0, tasksActive = 0, tasksBlocked = 0;
+    let totalJira = 0;
+    const globalJiraStatusCounts = {};
     let totalMRs = 0;
     let totalKgNodes = 0;
     const globalMrStatusCounts = {};
@@ -419,6 +472,11 @@ function renderWorkspaces() {
       tasksDone += ts.done || 0;
       tasksActive += ts.in_progress || 0;
       tasksBlocked += ts.blocked || 0;
+      const js = ws.jira_status_counts || {};
+      totalJira += ws.jira_count || ws.jira_total || ws.jira_tickets_count || 0;
+      for (const [st, cnt] of Object.entries(js)) {
+        globalJiraStatusCounts[st] = (globalJiraStatusCounts[st] || 0) + cnt;
+      }
       totalMRs += ws.mr_count || 0;
       totalKgNodes += (ws.kg_stats || {}).total_nodes || 0;
       const msc = ws.mr_status_counts || {};
@@ -441,15 +499,15 @@ function renderWorkspaces() {
       <div class="ws-dash-card accent-yellow">
         <div class="ws-dash-label">TASKS</div>
         <div class="ws-dash-value" style="color:var(--yellow);">${totalTasks}</div>
-        <div class="ws-dash-sub">${tasksActive} active · ${tasksBlocked} blocked</div>
+        <div class="ws-dash-sub">${pct}% complete · ${tasksDone} of ${totalTasks} done · ${tasksActive} active · ${tasksBlocked} blocked</div>
+        ${totalTasks ? `<div style="margin-top:6px;height:4px;background:var(--border);border-radius:999px;overflow:hidden;">
+          <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,var(--yellow),var(--green));border-radius:999px;"></div>
+        </div>` : ''}
       </div>
       <div class="ws-dash-card accent-green">
-        <div class="ws-dash-label">COMPLETION</div>
-        <div class="ws-dash-value" style="color:var(--green);">${pct}%</div>
-        <div class="ws-dash-sub">${tasksDone} of ${totalTasks} done</div>
-        ${totalTasks ? `<div style="margin-top:6px;height:3px;background:var(--border);border-radius:2px;overflow:hidden;">
-          <div style="width:${pct}%;height:100%;background:var(--green);border-radius:2px;"></div>
-        </div>` : ''}
+        <div class="ws-dash-label">JIRA</div>
+        <div class="ws-dash-value" style="color:var(--green);">${totalJira}</div>
+        <div class="ws-dash-sub">${_jiraStatusSummary(globalJiraStatusCounts)}</div>
       </div>
       <div class="ws-dash-card" style="border-color:rgba(168,85,247,0.3);">
         <div class="ws-dash-label">MERGE REQUESTS</div>
@@ -466,8 +524,15 @@ function renderWorkspaces() {
   }
 
   if (!_workspaces.length) {
-    grid.innerHTML = `<div style="text-align:center;padding:60px;color:var(--text-dim);font-family:var(--font-mono);font-size:0.75rem;">
-      No workspaces yet. Create one to group sessions across providers.</div>`;
+    grid.innerHTML = _wsLoadError
+      ? `<div style="text-align:center;padding:60px;color:var(--text-dim);font-family:var(--font-mono);font-size:0.75rem;max-width:520px;margin:0 auto;">
+        <div style="color:var(--cyan);margin-bottom:10px;">WORKSPACES OFFLINE</div>
+        <div style="line-height:1.7;">Could not load workspaces from the server. You can keep using the app while the backend comes back online.</div>
+        <div style="margin-top:14px;color:var(--red);font-size:0.65rem;">${escapeHtml(_wsLoadError)}</div>
+        <button onclick="fetchWorkspaces()" style="margin-top:16px;padding:6px 14px;border:1px solid var(--border);background:var(--bg-card);color:var(--cyan);border-radius:6px;font-family:var(--font-mono);font-size:0.65rem;cursor:pointer;">RETRY</button>
+      </div>`
+      : `<div style="text-align:center;padding:60px;color:var(--text-dim);font-family:var(--font-mono);font-size:0.75rem;">
+        No workspaces yet. Create one to group sessions across providers.</div>`;
     return;
   }
   const filtered = _filteredWorkspaces();
@@ -507,6 +572,7 @@ function renderWorkspaces() {
       ${kgTypeChips}
       ${kgStagedChip}
     </div>` : '';
+    const idLine = `<span style="font-size:0.5rem;color:var(--text-dim);font-family:var(--font-mono);">ID ${escapeHtml(ws.id)}</span>`;
     const mrCount = ws.mr_count || 0;
     const mrStatusHtml = _mrStatusChips(ws.mr_status_counts || {});
     const mrLine = mrCount ? `<div class="ws-provider-row" style="margin-top:4px;">
@@ -555,6 +621,7 @@ function renderWorkspaces() {
         ${kgLine}
         <div class="ws-card-footer">
           <span class="ws-total">${c.total || 0} sessions</span>
+          ${idLine}
           <span>Created ${timeAgo(ws.created_at)}</span>
         </div>
       </div>`;
@@ -1067,7 +1134,7 @@ function loadWsMergeRequests() {
 
   // Fetch from registry API for this workspace
   fetch(`/api/merge-requests?workspace_id=${_currentWsId}&_=${Date.now()}`)
-    .then(r => r.json())
+    .then(r => _readJsonResponse(r, 'Load merge requests'))
     .then(registryMrs => {
       const regById = {};
       for (const m of registryMrs) regById[m.id] = m;
@@ -1177,8 +1244,8 @@ function loadWsJiraTickets() {
   if (el.dataset.loaded) return;
   el.dataset.loaded = '1';
 
-  fetch(`/api/jira-tickets?workspace_id=${_currentWsId}&_=${Date.now()}`)
-    .then(r => r.json())
+  fetch(`/api/tasks/jira?workspace_id=${_currentWsId}&_=${Date.now()}`)
+    .then(r => _readJsonResponse(r, 'Load Jira tickets'))
     .then(tickets => {
       if (!tickets.length) {
         el.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-dim);font-family:var(--font-mono);font-size:0.75rem;">
@@ -1813,4 +1880,5 @@ async function kbPurgeWorkspaceConfirm(wsId) {
 }
 
 // Fetch workspaces on load for the filter dropdown
-fetchWorkspaces();
+if (window.savantAfterStartup) window.savantAfterStartup(() => fetchWorkspaces());
+else fetchWorkspaces();

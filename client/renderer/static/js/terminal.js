@@ -629,12 +629,12 @@ function _updateTermIndicator() {
 let _xtermModule = null, _fitModule = null;
 async function _loadXterm() {
   if (_xtermModule) return _xtermModule;
-  _xtermModule = await import('/static/xterm.mjs');
+  _xtermModule = await import('../xterm.mjs');
   return _xtermModule;
 }
 async function _loadFitAddon() {
   if (_fitModule) return _fitModule;
-  _fitModule = await import('/static/xterm-addon-fit.mjs');
+  _fitModule = await import('../xterm-addon-fit.mjs');
   return _fitModule;
 }
 

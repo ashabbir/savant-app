@@ -260,6 +260,7 @@ function kbSelectNode(d) {
   const date = nodeData.created_at ? new Date(nodeData.created_at).toLocaleString('en-US', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
 
   const edges = _kbGraphData.edges.filter(e => e.source_id === d.node_id || e.target_id === d.node_id);
+  const childEdges = _kbGraphData.edges.filter(e => e.source_id === d.node_id);
 
   // Group edges by type, sort by connected node title within each group
   const edgeGroups = {};
@@ -276,6 +277,32 @@ function kbSelectNode(d) {
   sortedTypes.forEach(type => {
     edgeGroups[type].sort((a, b) => (a.other.title || '').localeCompare(b.other.title || ''));
   });
+
+  const childItems = childEdges
+    .map(edge => {
+      const child = _kbGraphData.nodes.find(n => n.node_id === edge.target_id);
+      if (!child) return null;
+      return {
+        edge,
+        child,
+        icon: KB_NODE_ICONS[child.node_type] || '❓',
+        color: KB_NODE_COLORS[child.node_type] || '#6b7280'
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.child.title || '').localeCompare(b.child.title || ''));
+
+  let childrenHtml = '';
+  if (childItems.length) {
+    childrenHtml = childItems.map(({ edge, child, icon, color }) => {
+      const badge = edge.edge_type ? edge.edge_type.replace(/_/g, ' ') : 'child';
+      return `<div class="kb-edge-item" onclick="kbSelectNodeById('${child.node_id}')">
+        <span>${icon}</span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(child.title)}</span>
+        <span class="kb-edge-badge" style="background:${color}22;color:${color};">${escapeHtml(badge)}</span>
+      </div>`;
+    }).join('');
+  }
 
   let edgesHtml = '';
   sortedTypes.forEach(type => {
@@ -327,6 +354,10 @@ function kbSelectNode(d) {
     ${metaHtml ? `<div class="kb-detail-section"><h5>Metadata</h5>${metaHtml}</div>` : ''}
     ${wsChipsHtml}
     <div class="kb-detail-section">
+      <h5>Children (${childItems.length})</h5>
+      ${childrenHtml || '<div style="font-size:0.55rem;color:var(--text-dim);padding:8px;">No child nodes</div>'}
+    </div>
+    <div class="kb-detail-section">
       <h5>Connections (${edges.length})</h5>
       ${edgesHtml || '<div style="font-size:0.55rem;color:var(--text-dim);padding:8px;">No connections</div>'}
     </div>
@@ -335,6 +366,7 @@ function kbSelectNode(d) {
       <button class="ctx-btn-sm" onclick="kbConnectModal('${nodeData.node_id}')" style="font-size:0.5rem;">🔗 Connect</button>
       <button class="ctx-btn-sm" onclick="kbExploreNode('${nodeData.node_id}')" style="font-size:0.5rem;border-color:rgba(0,230,200,0.3);color:var(--cyan);">🔍 Explore</button>
       <button class="ctx-btn-sm" onclick="kbLinkWorkspaceModal('${nodeData.node_id}')" style="font-size:0.5rem;">🗂️ Link WS</button>
+      ${_kbWsId ? `<button class="ctx-btn-sm" onclick="kbToggleNodeCommitStatus('${nodeData.node_id}','${nodeData.status === 'staged' ? 'commit' : 'uncommit'}','${_kbWsId}')" style="font-size:0.5rem;border-color:${nodeData.status === 'staged' ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)'};color:${nodeData.status === 'staged' ? '#10b981' : '#f59e0b'};">${nodeData.status === 'staged' ? '✓ Commit' : '↺ Uncommit'}</button>` : ''}
       <button class="ctx-btn-sm" onclick="kbEditNode('${nodeData.node_id}')" style="font-size:0.5rem;border-color:rgba(0,255,255,0.3);color:var(--cyan);">✏️ Edit</button>
       <button class="ctx-btn-sm" onclick="kbDeleteNode('${nodeData.node_id}')" style="font-size:0.5rem;border-color:rgba(239,68,68,0.3);color:var(--red);">✕ Delete</button>
     </div>
@@ -385,6 +417,27 @@ function kbReselectNode() {
 function kbZoomIn() { if (_kbZoom && _kbSvgRef) _kbSvgRef.transition().duration(300).call(_kbZoom.scaleBy, 1.4); }
 function kbZoomOut() { if (_kbZoom && _kbSvgRef) _kbSvgRef.transition().duration(300).call(_kbZoom.scaleBy, 0.7); }
 function kbZoomReset() { if (_kbZoom && _kbSvgRef) _kbSvgRef.transition().duration(300).call(_kbZoom.transform, d3.zoomIdentity); }
+
+async function kbToggleNodeCommitStatus(nodeId, action, wsId) {
+  const isCommit = action === 'commit';
+  const confirmText = isCommit
+    ? 'Commit this node to the main knowledge graph?'
+    : 'Uncommit this node from the main knowledge graph? It will stay in the workspace, but hide from the default graph.';
+  if (!confirm(confirmText)) return;
+
+  try {
+    const res = await fetch(`/api/knowledge/nodes/${isCommit ? 'commit' : 'uncommit'}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ node_ids: [nodeId] })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await res.json();
+    await loadWsKnowledge(wsId);
+  } catch (e) {
+    alert(`${isCommit ? 'Commit' : 'Uncommit'} failed: ${e.message}`);
+  }
+}
 
 function kbToggleDetailPanel() {
   const panel = document.getElementById('kb-detail-panel');

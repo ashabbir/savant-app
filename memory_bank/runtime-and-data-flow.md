@@ -62,7 +62,7 @@ Client communicates with server through HTTP APIs and optional SSE status stream
 
 1. AI agent calls Context MCP `analyze_code` with a class/file target, or with a diff/replacement body.
 2. MCP server forwards the request to `POST /api/context/analysis`.
-3. Server resolves the current source, isolates the requested class or symbol when named, and computes deterministic before/after complexity plus findings.
+3. Server accepts `path`, `uri`, `code`, or diff-only payloads, resolves the current source when available, isolates the requested class or symbol when named, and computes deterministic before/after complexity plus findings.
 4. If the target is new, before-state complexity is reported as zero and after-state reflects the new code surface.
 5. The agent uses the structured delta to decide whether to accept the refactor, split it, or further reduce complexity.
 

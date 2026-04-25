@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 contextBridge.exposeInMainWorld("savantClient", {
   getServerConfig: () => ipcRenderer.invoke("savant:get-server-config"),
   setServerUrl: (url) => ipcRenderer.invoke("savant:set-server-url", url),
+  setupMcpAgentConfigs: (payload) => ipcRenderer.invoke("savant:setup-mcp-agent-configs", payload || {}),
   listLocalSessions: (opts) => ipcRenderer.invoke("savant:list-local-sessions", opts || {}),
   getLocalSession: (opts) => ipcRenderer.invoke("savant:get-local-session", opts || {}),
   renameLocalSession: (opts) => ipcRenderer.invoke("savant:rename-local-session", opts || {}),

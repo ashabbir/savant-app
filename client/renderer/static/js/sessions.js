@@ -171,7 +171,7 @@ function buildCardHtml(s, providerOverride) {
     const cardStatsHtml = `<span class="meta-label">STATS</span><span class="meta-value" style="font-size:0.55rem;color:var(--text-dim)">${s.message_count||0} msgs · ${s.turn_count||0} turns · ${(s.tools_used||[]).length} tools</span>`;
 
     return `
-      <div class="session-card${s.archived ? ' archived' : ''}" data-status="${s.status}" data-id="${s.id}" onclick="navigateToSession(event, '${s.id}', ${navProvider})">
+      <div class="session-card${s.archived ? ' archived' : ''}" data-status="${s.status}" data-id="${s.id}" data-provider="${escapeHtml(s.provider || providerOverride || currentMode || 'copilot')}" onclick="navigateToSession(event, '${s.id}', ${navProvider})">
         <input type="checkbox" class="bulk-check" data-id="${s.id}" data-size="${s.disk_size||0}" onclick="event.stopPropagation(); updateBulkCount()">
         <div class="card-header">
           <div class="card-row1">
@@ -198,9 +198,8 @@ function buildCardHtml(s, providerOverride) {
 <b>Status:</b> ${s.status}</div>
               </span>
               <button class="export-btn" onclick="event.stopPropagation(); resumeInTerminal('${escapeHtml(s.resume_command)}', '${escapeHtml(s.cwd || s.git_root || '')}')" title="Resume in terminal">▶</button>
-              <button class="export-btn" onclick="event.stopPropagation(); copyText('${escapeHtml(s.resume_command)}', this)" title="Copy resume command">📋</button>
               <button class="star-btn ${s.starred ? 'starred' : ''}" onclick="event.stopPropagation(); toggleStar('${s.id}', this)" title="Star session">${s.starred ? '★' : '☆'}</button>
-              <button class="delete-btn" onclick="event.stopPropagation(); confirmDelete('${s.id}', '${escapeHtml(s.summary || s.project || s.id)}')" title="Delete session">🗑</button>
+              <button class="delete-btn" onclick="event.stopPropagation(); confirmDelete('${s.id}', '${escapeHtml(s.provider || navProvider)}', '${escapeHtml(s.summary || s.project || s.id)}')" title="Delete session">🗑</button>
             </div>
           </div>
           <div class="card-row-title">
@@ -358,6 +357,8 @@ function renderGridView(container, filtered) {
         const tmp = document.createElement('div');
         tmp.innerHTML = buildCardHtml(s);
         const newCard = tmp.firstElementChild;
+        const newCb = newCard.querySelector('.bulk-check');
+        if (newCb) newCb.checked = _bulkSelectedIds.has(s.id);
         grid.replaceChild(newCard, existing);
         existingCards[s.id] = newCard;
       } else {
@@ -405,6 +406,8 @@ function renderGridView(container, filtered) {
       const tmp = document.createElement('div');
       tmp.innerHTML = buildCardHtml(s);
       const newCard = tmp.firstElementChild;
+      const newCb = newCard.querySelector('.bulk-check');
+      if (newCb) newCb.checked = _bulkSelectedIds.has(s.id);
       // Restore expanded state if it was expanded before a filter change
       if (expandedIds.has(s.id)) {
         newCard.classList.add('expanded');
@@ -569,6 +572,10 @@ async function fetchUsage() {
     const gen = fetchGeneration;
     const res = await fetch(getUsageEndpoint());
     if (gen !== fetchGeneration) return;
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (!res.ok || !contentType.includes('application/json')) {
+      throw new Error(`Usage endpoint returned ${res.status} ${res.statusText}`);
+    }
     const data = await res.json();
     if (gen !== fetchGeneration) return;
     if (data.loading) {
@@ -852,26 +859,63 @@ function showUnifiedSearchResults(cardMatches, chatResults, query, noteResults) 
 
 // --- Bulk Cleanup ---
 let bulkMode = false;
+let _bulkSelectedIds = new Set();
+
+function exitBulkMode() {
+  bulkMode = false;
+  document.body.classList.remove('bulk-mode');
+  const bulkBar = document.getElementById('bulk-bar');
+  if (bulkBar) bulkBar.classList.remove('active');
+  const purgeBtn = document.getElementById('purge-btn');
+  if (purgeBtn) {
+    purgeBtn.style.borderColor = '';
+    purgeBtn.style.color = '';
+  }
+  clearBulkSelection();
+}
 
 function toggleBulkMode() {
-  bulkMode = !bulkMode;
-  document.body.classList.toggle('bulk-mode', bulkMode);
-  document.getElementById('bulk-bar').classList.toggle('active', bulkMode);
-  document.getElementById('purge-btn').style.borderColor = bulkMode ? 'var(--red)' : '';
-  document.getElementById('purge-btn').style.color = bulkMode ? 'var(--red)' : '';
-  if (!bulkMode) clearBulkSelection();
+  if (bulkMode) {
+    exitBulkMode();
+  } else {
+    bulkMode = true;
+    document.body.classList.add('bulk-mode');
+    document.getElementById('bulk-bar').classList.add('active');
+    document.getElementById('purge-btn').style.borderColor = 'var(--red)';
+    document.getElementById('purge-btn').style.color = 'var(--red)';
+    updateBulkCount();
+  }
   updateBulkCount();
 }
 
 function clearBulkSelection() {
+  _bulkSelectedIds.clear();
   document.querySelectorAll('.bulk-check').forEach(cb => cb.checked = false);
   updateBulkCount();
 }
 
-function selectAllDormant() {
-  document.querySelectorAll('.session-card').forEach(card => {
+function _getVisibleBulkCards() {
+  return Array.from(document.querySelectorAll('.session-card')).filter(card => {
     const cb = card.querySelector('.bulk-check');
-    if (cb && card.dataset.status === 'DORMANT') cb.checked = true;
+    if (!cb) return false;
+    return card.offsetParent !== null;
+  });
+}
+
+function toggleAllFilteredSelection() {
+  const cards = _getVisibleBulkCards();
+  if (!cards.length) return;
+  const shouldSelect = cards.some(card => {
+    const cb = card.querySelector('.bulk-check');
+    return cb && !cb.checked;
+  });
+  cards.forEach(card => {
+    const cb = card.querySelector('.bulk-check');
+    if (cb) {
+      cb.checked = shouldSelect;
+      if (shouldSelect) _bulkSelectedIds.add(cb.dataset.id);
+      else _bulkSelectedIds.delete(cb.dataset.id);
+    }
   });
   updateBulkCount();
 }
@@ -884,22 +928,46 @@ function updateBulkCount() {
   document.getElementById('bulk-size').textContent = checked.length ? `(${formatSize(totalSize)} to reclaim)` : '';
 }
 
+function _syncBulkSelectionFromDom() {
+  _bulkSelectedIds.clear();
+  document.querySelectorAll('.bulk-check:checked').forEach(cb => {
+    _bulkSelectedIds.add(cb.dataset.id);
+  });
+}
+
 async function bulkDelete() {
+  const selectedIds = [..._bulkSelectedIds];
+  if (!selectedIds.length) return;
   const checked = document.querySelectorAll('.bulk-check:checked');
-  if (!checked.length) return;
-  const ids = Array.from(checked).map(cb => cb.dataset.id);
-  if (!confirm(`Delete ${ids.length} sessions? This cannot be undone.`)) return;
+  const items = Array.from(checked).map(cb => {
+    const card = cb.closest('.session-card');
+    return {
+      id: cb.dataset.id,
+      provider: card?.dataset.provider || _resolveProvider(cb.dataset.id),
+    };
+  });
+  if (!confirm(`Delete ${selectedIds.length} sessions? This cannot be undone.`)) return;
   try {
-    const res = await fetch(getBulkDeleteEndpoint(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids })
-    });
-    const data = await res.json();
-    const deleted = new Set(data.deleted || []);
+    let deleted = new Set();
+    const errors = [];
+    if (window.savantClient && typeof window.savantClient.deleteLocalSession === 'function') {
+      for (const item of items) {
+        const resp = await window.savantClient.deleteLocalSession({ provider: item.provider, sessionId: item.id });
+        if (resp && resp.ok) deleted.add(item.id);
+        else errors.push({ id: item.id, error: resp && resp.error ? resp.error : 'delete_failed' });
+      }
+    } else {
+      for (const item of items) {
+        const res = await fetch(_deleteEndpointFor(item.provider, item.id), { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && !data.error) deleted.add(item.id);
+        else errors.push({ id: item.id, error: data.error || `delete_failed_${res.status}` });
+      }
+    }
     allSessions = allSessions.filter(s => !deleted.has(s.id));
-    if (data.errors && data.errors.length) {
-      alert(`Deleted ${deleted.size} sessions. ${data.errors.length} failed: ${data.errors.map(e => e.error).join(', ')}`);
+    deleted.forEach(id => _bulkSelectedIds.delete(id));
+    if (errors.length) {
+      alert(`Deleted ${deleted.size} sessions. ${errors.length} failed: ${errors.map(e => e.error).join(', ')}`);
     }
     renderSessions(allSessions);
     updateBulkCount();
@@ -1023,6 +1091,7 @@ requestNotificationPermission();
 
 async function fetchSessions(append = false) {
   try {
+    if (window._savantStartupPhase && !append) window._savantStartupPhase('Loading sessions...', 65, 'local session cache');
     const gen = fetchGeneration;
     const offset = append ? allSessions.length : 0;
     const provider = currentMode === 'claude' || currentMode === 'codex' || currentMode === 'gemini' || currentMode === 'hermes'
@@ -1056,6 +1125,7 @@ async function fetchSessions(append = false) {
       if (container && !append) {
       const modeLabel = currentMode === 'claude' ? 'CLAUDE' : currentMode === 'codex' ? 'CODEX' : currentMode === 'gemini' ? 'GEMINI' : currentMode === 'hermes' ? 'HERMES' : 'COPILOT';
       container.innerHTML = `<div class="loading"><div class="loading-spinner"></div><div style="color: var(--text-dim); font-size: 0.8rem;">BUILDING ${modeLabel} CACHE...</div></div>`;      }
+      if (window._savantStartupPhase && !append) window._savantStartupPhase('Session cache still warming up...', 72, 'retrying soon');
       setTimeout(() => fetchSessions(false), 3000);
       return;
     }
@@ -1063,6 +1133,7 @@ async function fetchSessions(append = false) {
     const newSessions = data.sessions || [];
     hasMore = !!data.has_more;
     totalCount = data.total || 0;
+    if (window._savantStartupPhase && !append) window._savantStartupPhase(`Loaded ${totalCount || newSessions.length} sessions`, 78, 'local session cache');
 
     if (append) {
       allSessions = allSessions.concat(newSessions);
@@ -1399,8 +1470,15 @@ function renderWsSearchPopup(overlay, data, query) {
     }
   } catch(e) {}
 })();
-if (currentTab === 'sessions') {
+if (window.savantAfterStartup) window.savantAfterStartup(() => {
+  if (currentTab === 'sessions') {
+    fetchSessions();
+    fetchMcp();
+  }
+});
+else if (currentTab === 'sessions') {
   fetchSessions();
+  fetchMcp();
 }
 setInterval(() => { if (currentTab === 'sessions') fetchSessions(); }, 30000);
 if (window.savantClient && typeof window.savantClient.onSessionsUpdated === 'function') {
@@ -1419,6 +1497,10 @@ async function fetchMcp() {
     if (mcpPanel) mcpPanel.style.display = '';
     try {
       const res = await fetch(getUsageEndpoint());
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      if (!res.ok || !contentType.includes('application/json')) {
+        throw new Error(`MCP usage endpoint returned ${res.status} ${res.statusText}`);
+      }
       const data = await res.json();
       const tools = data.tools || [];
       // Extract MCP servers from tool names:
@@ -1478,6 +1560,10 @@ async function fetchMcp() {
   if (mcpPanel) mcpPanel.style.display = '';
   try {
     const res = await fetch('/api/mcp');
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (!res.ok || !contentType.includes('application/json')) {
+      throw new Error(`MCP endpoint returned ${res.status} ${res.statusText}`);
+    }
     const data = await res.json();
     const content = document.getElementById('mcp-bar-content');
     const servers = data.servers || [];
@@ -1516,11 +1602,20 @@ async function fetchMcp() {
     console.error('MCP fetch error:', e);
   }
 }
-if (currentTab === 'sessions') fetchMcp();
+// Initial MCP fetch is gated above so startup can finish loading first.
 
 // --- Card expand + lazy load files ---
 function navigateToSession(event, sessionId, provider) {
   if (event.target.closest('.copy-btn, .delete-btn, .star-btn, .rename-btn, .rename-input, .export-btn, .bulk-check, .card-info-icon')) return;
+  if (bulkMode || document.body.classList.contains('bulk-mode')) {
+    const card = event.currentTarget || event.target.closest('.session-card');
+    const cb = card && card.querySelector('.bulk-check');
+    if (cb) {
+      cb.checked = !cb.checked;
+      updateBulkCount();
+    }
+    return;
+  }
   // Build a return-to descriptor for the current page state
   _pushNavState();
   const mode = provider || 'copilot';
@@ -2066,9 +2161,11 @@ function renameSession(sessionId, btn) {
 
 // --- Delete session ---
 let pendingDeleteId = null;
+let pendingDeleteProvider = null;
 
-function confirmDelete(sessionId, label) {
+function confirmDelete(sessionId, provider, label) {
   pendingDeleteId = sessionId;
+  pendingDeleteProvider = provider || null;
   document.getElementById('confirm-text').textContent = `Delete session "${label}"? This cannot be undone.`;
   document.getElementById('confirm-modal').classList.add('active');
 }
@@ -2076,6 +2173,7 @@ function confirmDelete(sessionId, label) {
 function closeConfirm() {
   document.getElementById('confirm-modal').classList.remove('active');
   pendingDeleteId = null;
+  pendingDeleteProvider = null;
 }
 
 document.getElementById('confirm-modal').addEventListener('click', (e) => {
@@ -2085,7 +2183,7 @@ document.getElementById('confirm-modal').addEventListener('click', (e) => {
 document.getElementById('confirm-delete-btn').addEventListener('click', async () => {
   if (!pendingDeleteId) return;
   const id = pendingDeleteId;
-  const prov = _resolveProvider(id);
+  const prov = pendingDeleteProvider || _resolveProvider(id);
   closeConfirm();
   try {
     let data;

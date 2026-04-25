@@ -45,6 +45,7 @@ mcp = FastMCP(
         "Use repos_list() to see all indexed repos with README excerpts; repo_status() for index health. "
         "Use structure_search(query) to find classes, functions, or language elements via substring AST matching. "
         "Use analyze_code(name, repo, path, node_type, diff, code) to get before/after complexity and findings for a class or file. "
+        "The response includes a recommendation to refactor with TDD: write failing tests first, implement the smallest fix, then re-run analysis. "
         "All tools accept an optional repo filter (string name or list of names)."
     ),
     host=_args.host,

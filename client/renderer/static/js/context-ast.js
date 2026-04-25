@@ -813,6 +813,31 @@ function _showAstDrawer(d, drawerId, onCloseName = '', onToggleName = '') {
   const typeIcon = { repo: '📦', dir: '📁', file: '📄', class: '🏛️', function: 'λ', method: '◆' }[d.data.type] || '❓';
   const hasKids  = !!(d.children || d._children);
   const isExpanded = !!d.children;
+  const hasFocusAction = !!window._astFocusNode;
+  const childNodes = (d.children || d._children || []).slice().sort((a, b) => {
+    const an = (a.data && a.data.name) || '';
+    const bn = (b.data && b.data.name) || '';
+    return an.localeCompare(bn);
+  });
+
+  let childrenHtml = '';
+  if (childNodes.length) {
+    childrenHtml = childNodes.map(child => {
+      const childType = child.data.type || 'node';
+      const childIcon = _astNodeIcon(childType);
+      const childColor = _astNodeColor(childType);
+      const childLine = child.data.line || child.data.start_line ? `L${child.data.start_line || child.data.line}${child.data.end_line ? `–${child.data.end_line}` : ''}` : '';
+      return `<button onclick="window._astClusterJumpToNode && window._astClusterJumpToNode('${drawerId}', ${child._id})"
+        style="width:100%;display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg-main);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;text-align:left;"
+        onmouseover="this.style.borderColor='${childColor}'" onmouseout="this.style.borderColor='var(--border)'">
+        <span style="font-size:0.75rem;flex-shrink:0;">${childIcon}</span>
+        <span style="flex:1;min-width:0;">
+          <span style="display:block;font-size:0.55rem;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(child.data.name)}</span>
+          <span style="display:block;font-size:0.42rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;">${_escHtml(childType)}${childLine ? ` · ${_escHtml(childLine)}` : ''}</span>
+        </span>
+      </button>`;
+    }).join('');
+  }
 
   drawer.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;margin:-16px -16px 14px;border-bottom:1px solid var(--border);position:sticky;top:-16px;background:var(--bg-card);z-index:5;">
@@ -852,9 +877,23 @@ function _showAstDrawer(d, drawerId, onCloseName = '', onToggleName = '') {
       </div>
     </div>` : ''}
 
+    ${hasFocusAction ? `
+    <div class="kb-detail-section">
+      <h5>Actions</h5>
+      <button onclick="window._astFocusNode('${drawerId}', ${d._id})"
+        style="width:100%;padding:7px 10px;background:rgba(0,230,200,0.12);border:1px solid rgba(0,230,200,0.35);border-radius:4px;color:var(--cyan);cursor:pointer;font-family:var(--font-mono);font-size:0.55rem;text-align:left;">
+        Focus
+      </button>
+    </div>` : ''}
+
     <div class="kb-detail-section">
        <h5>Descendants</h5>
        <div style="font-size:0.55rem;color:var(--text-dim);">${d.descendants().length - 1} nested child nodes</div>
+    </div>
+
+    <div class="kb-detail-section">
+      <h5>Children</h5>
+      ${childrenHtml || '<div style="font-size:0.55rem;color:var(--text-dim);">No child nodes</div>'}
     </div>
   `;
 }
@@ -948,6 +987,39 @@ window._astLegClick = function(cid, type) {
   const meta = window._astActiveDrawMap[cid];
   if (meta) _expandToType(meta.root, type, meta.draw);
 };
+window._astJumpToNode = function(drawerId, nodeId) {
+  const cid = drawerId.replace(/-drawer$/, '');
+  const meta = window._astActiveDrawMap[cid];
+  if (!meta || !meta.root) return;
+  const target = meta.root.descendants().find(n => n._id === nodeId);
+  if (!target) return;
+  _showAstDrawer(target, drawerId, meta.closeName || '', meta.toggleName || '');
+};
+window._astFocusNode = function(drawerId, nodeId) {
+  const cid = drawerId.replace(/-drawer$/, '');
+  const meta = window._astActiveDrawMap[cid];
+  if (!meta || !meta.root) return;
+  const target = meta.root.descendants().find(n => n._id === nodeId);
+  if (!target) return;
+
+  // Keep the selected node and its descendants visible, but remove everything else.
+  _astExpandSubtree(target);
+
+  // Re-root the visible scope at the selected node.
+  if (typeof meta.draw === 'function') meta.draw(target, true);
+  meta.root = target;
+  window._astClusterCloseDrawer = window._astClusterCloseDrawer || {};
+  window._astClusterCollapseNode = window._astClusterCollapseNode || {};
+  window._astClusterCollapseNode[cid] = () => {
+    if (target.children)      { target._children = target.children;  target.children  = null; }
+    else if (target._children){ target.children  = target._children; target._children = null; }
+    if (typeof meta.draw === 'function') meta.draw(target);
+    _showAstDrawer(target, drawerId, meta.closeName || '', meta.toggleName || '');
+  };
+  _showAstDrawer(target, drawerId, meta.closeName || '', meta.toggleName || '');
+};
+window._astClusterJumpToNode = window._astJumpToNode;
+window._astClusterFocusNode = window._astFocusNode;
 
 
 // ── Radial cluster tree ───────────────────────────────────────────────────────
@@ -1095,7 +1167,12 @@ function _renderRadialClusterTree(data, container) {
       draw(activeRoot || hierRoot);
     };
 
-    window._astActiveDrawMap[cid] = { root: hierRoot, draw: draw };
+    window._astActiveDrawMap[cid] = {
+      root: hierRoot,
+      draw: draw,
+      closeName: `window._astClusterCloseDrawer['${cid}']`,
+      toggleName: `window._astClusterCollapseNode['${cid}']`,
+    };
 
     // Collapse to 'class' by default for cluster
     _collapseAstToDepth(hierRoot, 'class');
@@ -1218,7 +1295,12 @@ function ctxRenderD3Tree(data, container, isTab = false, expandDepth = 1) {
       nodes.forEach(d => { d.x0 = d.x; d.y0 = d.y; });
     }
 
-    window._astActiveDrawMap[cid] = { root: hierRoot, draw: d => draw(hierRoot, hierRoot) };
+    window._astActiveDrawMap[cid] = {
+      root: hierRoot,
+      draw: draw,
+      closeName: `window._astTreeCloseDrawer['${cid}']`,
+      toggleName: `window._astTreeCollapseNode['${cid}']`,
+    };
 
     // Register label toggle
     window._astTreeToggleLabels = () => {

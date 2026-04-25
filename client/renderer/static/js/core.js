@@ -970,7 +970,7 @@ function renderMcpGuideLogs() {
       if (entry.level === 'ok') color = '#22c55e';
       if (entry.level === 'warn') color = '#f59e0b';
       if (entry.level === 'error') color = '#ff6b6b';
-      return `<div style="display:flex;gap:8px;align-items:flex-start;"><span style="color:#777;">${_mcpGuideEsc(entry.ts)}</span><span style="color:${color};word-break:break-word;">${_mcpGuideEsc(entry.message)}</span></div>`;
+      return `<div style="display:flex;gap:8px;align-items:flex-start;"><span style="color:#777;">${_mcpGuideEsc(entry.ts)}</span><span style="color:${color};word-break:break-word;font-size:0.75rem;">${_mcpGuideEsc(entry.message)}</span></div>`;
     })
     .join('');
   el.scrollTop = el.scrollHeight;
@@ -1073,19 +1073,27 @@ async function fetchSystemStatus() {
     const ctxSrc = d.context_sources || {};
     const srcEnabled = ctxSrc.enabled || {};
     const srcMissing = Array.isArray(ctxSrc.missing) ? ctxSrc.missing : [];
-    const sourceRows = ['GITHUB_TOKEN', 'GITLAB_TOKEN', 'BASE_CODE_DIR']
-      .map((k) => `<div class="sys-row"><span class="sys-label">${k}</span><span class="sys-val ${srcEnabled[k] ? 'ok' : 'err'}">${srcEnabled[k] ? 'Configured' : 'Missing'}</span></div>`)
+    const serverBase = (window.__SAVANT_SERVER_URL__ || location.origin || '').replace(/\/$/, '');
+    const serverSourceVars = [
+      { key: 'GITHUB_TOKEN', scope: 'server' },
+      { key: 'GITLAB_TOKEN', scope: 'server' },
+      { key: 'BASE_CODE_DIR', scope: 'server' },
+    ];
+    const clientSourceVars = [
+      { key: 'SAVANT_SERVER_URL', value: serverBase || '—', scope: 'client' },
+      { key: 'wf-mode', value: (typeof currentMode !== 'undefined' && currentMode) ? currentMode : (localStorage.getItem('wf-mode') || 'hermes'), scope: 'client' },
+      { key: 'prefs.name', value: (typeof _prefs !== 'undefined' && _prefs && _prefs.name) ? String(_prefs.name).trim() : '—', scope: 'client' },
+      { key: 'prefs.selected_provider', value: (typeof _prefs !== 'undefined' && _prefs && (_prefs.selected_provider || _prefs.active_provider)) ? String(_prefs.selected_provider || _prefs.active_provider) : '—', scope: 'client' },
+    ];
+    const sourceRows = serverSourceVars
+      .map((item) => `<div class="sys-row"><span class="sys-label">${item.key}</span><span class="sys-val ${srcEnabled[item.key] ? 'ok' : 'err'}">${srcEnabled[item.key] ? 'Configured' : 'Missing'}</span></div>`)
       .join('');
+    const clientRows = clientSourceVars.map((item) => {
+      const val = item.value || '—';
+      return `<div class="sys-row"><span class="sys-label">${item.key}</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${escapeHtml(val)}</span></div>`;
+    }).join('');
     const sourceWarning = !ctxSrc.any_enabled
-      ? `<div style="margin-top:8px;padding:8px 10px;border:1px solid rgba(239,68,68,0.5);border-radius:6px;background:rgba(239,68,68,0.08);font-size:0.52rem;line-height:1.5;color:#fecaca;white-space:pre-line;">No project sources are configured.
-
-Please configure at least one of the following:
-
-* GITHUB_TOKEN
-* GITLAB_TOKEN
-* BASE_CODE_DIR
-
-This must be configured on savant-server (not in the desktop client).</div>`
+      ? `<div style="margin-top:8px;padding:8px 10px;border:1px solid rgba(239,68,68,0.5);border-radius:6px;background:rgba(239,68,68,0.08);font-size:0.52rem;line-height:1.5;color:#fecaca;">Server env missing: GITHUB_TOKEN, GITLAB_TOKEN, or BASE_CODE_DIR. Configure these on savant-server, not in the desktop client.</div>`
       : '';
     const abilities = d.abilities || {};
     const abilitiesCount = Number(abilities.asset_count || 0);
@@ -1096,14 +1104,18 @@ This must be configured on savant-server (not in the desktop client).</div>`
       ? `<button class="mcp-setup-btn" onclick="bootstrapAbilities(this)" title="Seed default abilities into the server abilities directory">Bootstrap Abilities</button>`
       : `<span class="sys-val ok">Configured</span>`;
 
-    const serverBase = (window.__SAVANT_SERVER_URL__ || location.origin || '').replace(/\/$/, '');
     el.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;">
         ${versionLine}
         <button class="mcp-setup-btn" onclick="refreshSystemStatus()" title="Refresh system status">↻ Refresh</button>
       </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;font-size:0.45rem;color:var(--text-dim);">
+        <span style="padding:2px 8px;border-radius:999px;border:1px solid rgba(125,125,125,0.25);background:rgba(125,125,125,0.08);">Legend</span>
+        <span style="padding:2px 8px;border-radius:999px;border:1px solid rgba(88,166,255,0.35);background:rgba(88,166,255,0.12);color:var(--text);">Server-owned</span>
+        <span style="padding:2px 8px;border-radius:999px;border:1px solid rgba(56,139,253,0.35);background:rgba(56,139,253,0.12);color:var(--text);">Client-owned</span>
+      </div>
       <div class="sys-status-grid">
-        <div class="sys-status-card full-width">
+        <div class="sys-status-card">
           <h5>Architecture Mode</h5>
           <div class="sys-row"><span class="sys-label">Topology</span><span class="sys-val ok">Client-Server</span></div>
           <div class="sys-row"><span class="sys-label">Client</span><span class="sys-val">savant-app (Electron desktop)</span></div>
@@ -1117,10 +1129,21 @@ This must be configured on savant-server (not in the desktop client).</div>`
           <div class="sys-row"><span class="sys-label">PID</span><span class="sys-val">${d.flask?.pid ?? 'n/a'}</span></div>
         </div>
         <div class="sys-status-card">
-          <h5>Context Sources</h5>
+          <h5 style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span>Context Sources</span>
+            <span style="padding:2px 8px;border-radius:999px;border:1px solid rgba(88,166,255,0.35);background:rgba(88,166,255,0.12);color:var(--text);font-size:0.42rem;">Server-owned</span>
+          </h5>
           ${sourceRows}
           ${sourceWarning}
           ${ctxSrc.any_enabled ? '<div style="margin-top:8px;color:var(--text-dim);font-size:0.5rem;">Configured on server: ' + (srcMissing.length ? ('missing ' + srcMissing.join(', ')) : 'all source env vars present') + '</div>' : ''}
+        </div>
+        <div class="sys-status-card">
+          <h5 style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span>Client Settings</span>
+            <span style="padding:2px 8px;border-radius:999px;border:1px solid rgba(56,139,253,0.35);background:rgba(56,139,253,0.12);color:var(--text);font-size:0.42rem;">Client-owned</span>
+          </h5>
+          <div style="color:var(--text-dim);font-size:0.5rem;line-height:1.5;margin-bottom:8px;">These are set on the desktop client, not on savant-server.</div>
+          ${clientRows}
         </div>
         <div class="sys-status-card">
           <h5>Abilities</h5>
@@ -1135,11 +1158,11 @@ This must be configured on savant-server (not in the desktop client).</div>`
           <div class="sys-row"><span class="sys-label">Size</span><span class="sys-val">${_fmtBytes(d.database?.size_bytes)}</span></div>
           <div class="sys-row"><span class="sys-label">Path</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${d.database?.path || 'n/a'}</span></div>
         </div>
-        <div class="sys-status-card full-width">
+        <div class="sys-status-card">
           <h5>MCP Servers</h5>
           ${mcpRows}
         </div>
-        <div class="sys-status-card full-width">
+        <div class="sys-status-card">
           <h5>AI Agent MCP Config</h5>
           ${agentConfigRows}
         </div>

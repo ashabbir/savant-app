@@ -50,4 +50,3 @@ services:
 
 volumes:
   savant-server-data:
-

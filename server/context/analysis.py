@@ -29,16 +29,175 @@ def _line_count(text: str) -> int:
     return text.count("\n") + 1
 
 
+def _push_finding(findings: list[dict[str, Any]], *, severity: str = "medium", category: str = "structural",
+                  rule_id: str = "rule", path: str = "", line: int = 1, title: str = "Finding",
+                  detail: str = "") -> None:
+    findings.append({
+        "severity": severity,
+        "category": category,
+        "rule_id": rule_id,
+        "path": path,
+        "line": line,
+        "title": title,
+        "detail": detail,
+    })
+
+
+def _detect_structural(lines: list[str], target_lines: list[str], path: str, findings: list[dict[str, Any]]) -> None:
+    brace_depth = 0
+    max_depth = 0
+    max_depth_line = 1
+    py_stack: list[int] = []
+    for idx, raw in enumerate(lines, start=1):
+        line = raw or ""
+        trimmed = line.strip()
+        if not trimmed or trimmed.startswith("#") or trimmed.startswith("//"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        while py_stack and indent <= py_stack[-1]:
+            py_stack.pop()
+        is_control = re.match(r"^(if|elif|for|while|try|except|catch|switch)\b", trimmed)
+        if is_control:
+            if trimmed.endswith(":"):
+                py_stack.append(indent)
+            depth = len(py_stack) + max(0, brace_depth)
+            if depth > max_depth:
+                max_depth = depth
+                max_depth_line = idx
+        opens = trimmed.count("{")
+        closes = trimmed.count("}")
+        brace_depth = max(0, brace_depth + opens - closes)
+    if max_depth > 4:
+        _push_finding(
+            findings,
+            severity="high",
+            category="structural",
+            rule_id="deep_nesting",
+            path=path,
+            line=max_depth_line,
+            title="Deep control nesting",
+            detail=f"Detected nesting depth {max_depth} (threshold: 4).",
+        )
+
+    file_nodes = []
+    for line in target_lines:
+        m = re.match(r"^\s*(class|def|function)\s+([A-Za-z_$][\w$]*)", line)
+        if m:
+            file_nodes.append((m.group(1), m.group(2), line))
+        else:
+            js_arrow = re.match(r"^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\(", line)
+            if js_arrow:
+                file_nodes.append(("function", js_arrow.group(1), line))
+
+    for node_type, name, line in file_nodes:
+        span = 1
+        child_count = sum(1 for other_type, other_name, other_line in file_nodes if other_line != line and other_line.strip())
+        is_class = node_type == "class"
+        span_threshold = 220 if is_class else 120
+        child_threshold = 12 if is_class else 8
+        if span >= span_threshold or child_count >= child_threshold:
+            _push_finding(
+                findings,
+                severity="high" if span >= span_threshold * 1.5 else "medium",
+                category="structural",
+                rule_id="large_block_bloat",
+                path=path,
+                line=1,
+                title=f"{'Large class' if is_class else 'Large function'} bloat",
+                detail=f"{name} spans {span} lines with {child_count} nested typed blocks.",
+            )
+
+    for idx, raw in enumerate(target_lines, start=1):
+        line = raw or ""
+        py = re.match(r"^\s*def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:", line)
+        js_fn = re.match(r"^\s*function\s+([A-Za-z_$][\w$]*)?\s*\(([^)]*)\)", line)
+        js_arrow = re.match(r"^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\(([^)]*)\)\s*=>", line)
+        hit = py or js_fn or js_arrow
+        if not hit:
+            continue
+        params = [p.strip() for p in (hit.group(2) or "").split(",") if p.strip()]
+        if len(params) > 5:
+            _push_finding(
+                findings,
+                severity="medium" if len(params) <= 8 else "high",
+                category="structural",
+                rule_id="parameter_overload",
+                path=path,
+                line=idx,
+                title="Parameter overload",
+                detail=f"{hit.group(1) or 'Function'} has {len(params)} parameters.",
+            )
+
+    for idx, raw in enumerate(target_lines, start=1):
+        line = (raw or "").strip()
+        if not line:
+            continue
+        if re.search(r"(if|for|while|try|catch)\s*\([^)]*\)\s*\{\s*\}", line):
+            _push_finding(findings, severity="low", category="structural", rule_id="empty_block", path=path, line=idx, title="Empty block", detail="Control block has an empty body.")
+        if re.search(r"^(if|for|while|try|except)\b.*:\s*$", line):
+            _push_finding(findings, severity="low", category="structural", rule_id="empty_block", path=path, line=idx, title="Empty block", detail="Python block appears empty/pass-only.")
+
+
+def _detect_security(lines: list[str], path: str, findings: list[dict[str, Any]]) -> None:
+    for idx, raw in enumerate(lines, start=1):
+        line = (raw or "").strip()
+        if not line or line.startswith("#") or line.startswith("//"):
+            continue
+        if re.search(r"\b(API[_-]?KEY|PASSWORD|SECRET|TOKEN)\b\s*[:=]\s*['\"][^'\"]{6,}['\"]", line, re.I):
+            _push_finding(findings, severity="high", category="security", rule_id="hardcoded_secret", path=path, line=idx, title="Hardcoded secret", detail="Literal secret-like value assigned in source.")
+        if re.search(r"\b(eval|exec|os\.system)\s*\(", line):
+            _push_finding(findings, severity="high", category="security", rule_id="insecure_call", path=path, line=idx, title="Insecure function call", detail="Use of eval/exec/os.system detected.")
+        if re.search(r"\b(execute|query)\s*\(", line, re.I) and re.search(r'(f["\']|%|\.format\(|\+.*["\'])', line):
+            _push_finding(findings, severity="high", category="security", rule_id="sql_injection_pattern", path=path, line=idx, title="Potential SQL injection pattern", detail="Query call appears to use string interpolation/concatenation.")
+
+
+def _detect_modernization(lines: list[str], path: str, findings: list[dict[str, Any]]) -> None:
+    for idx, raw in enumerate(lines, start=1):
+        line = (raw or "").strip()
+        if not line:
+            continue
+        if re.search(r"\b\w+\.append\(", line) and re.search(r"\bpd\b|\bpandas\b|dataframe|\bdf\.", line, re.I):
+            _push_finding(findings, severity="low", category="modernization", rule_id="deprecated_append_api", path=path, line=idx, title="Deprecated append-style API usage", detail="Consider replacing append-style flows with concat-style batching.")
+
+
+def _detect_style(lines: list[str], path: str, findings: list[dict[str, Any]]) -> None:
+    for idx, raw in enumerate(lines, start=1):
+        line = raw or ""
+        if len(line.strip()) > 140:
+            _push_finding(findings, severity="low", category="style", rule_id="long_line", path=path, line=idx, title="Long line", detail="Line exceeds 140 characters.")
+        m = re.match(r"^\s*def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:", line)
+        if m and not re.search(r"->\s*[^:]+:", line):
+            _push_finding(findings, severity="low", category="style", rule_id="missing_return_type_hint", path=path, line=idx, title="Missing return type hint", detail=f"{m.group(1)} has no return type annotation.")
+
+
+def _detect_dead_code(lines: list[str], path: str, findings: list[dict[str, Any]]) -> None:
+    for i in range(len(lines) - 1):
+        curr = (lines[i] or "").strip()
+        if not re.match(r"^(return|break|raise|throw)\b", curr):
+            continue
+        for j in range(i + 1, min(len(lines), i + 5)):
+            nxt = (lines[j] or "").strip()
+            if not nxt or nxt.startswith("#") or nxt.startswith("//") or nxt == "}":
+                continue
+            _push_finding(findings, severity="medium", category="dead_code", rule_id="unreachable_code", path=path, line=j + 1, title="Potential unreachable code", detail="Code appears after an early exit statement in the same block.")
+            break
+
+
 def _score_text(text: str) -> dict[str, Any]:
     if not text.strip():
         return {"complexity": 0, "findings": [], "line_count": 0}
     lines = text.splitlines()
     complexity = 1
     findings: list[dict[str, Any]] = []
+    _detect_structural(lines, lines, "", findings)
+    _detect_security(lines, "", findings)
+    _detect_modernization(lines, "", findings)
+    _detect_style(lines, "", findings)
+    _detect_dead_code(lines, "", findings)
     max_depth = 0
     depth = 0
-    for idx, raw in enumerate(lines, start=1):
-        line = raw.rstrip()
+    for raw in lines:
+        line = (raw or "").rstrip()
         stripped = line.strip()
         if not stripped:
             continue
@@ -46,42 +205,6 @@ def _score_text(text: str) -> dict[str, Any]:
         max_depth = max(max_depth, depth)
         depth -= stripped.count("}")
         depth = max(depth, 0)
-        if len(stripped) > 140:
-            findings.append({
-                "severity": "low",
-                "category": "style",
-                "rule_id": "long_line",
-                "line": idx,
-                "title": "Long line",
-                "detail": "Line exceeds 140 characters.",
-            })
-
-    if max_depth > 4:
-        findings.append({
-            "severity": "medium",
-            "category": "structural",
-            "rule_id": "deep_nesting",
-            "line": 1,
-            "title": "Deep nesting",
-            "detail": f"Detected nested block depth {max_depth}.",
-        })
-        complexity += max_depth - 4
-
-    param_hits = 0
-    for line in lines:
-        if _PY_DEF_RE.match(line) or _JS_CLASS_RE.match(line) or _JS_FN_RE.match(line):
-            params = line[line.find("(") + 1: line.rfind(")") if ")" in line else len(line)]
-            param_hits = max(param_hits, len([p for p in params.split(",") if p.strip()]))
-    if param_hits > 5:
-        findings.append({
-            "severity": "low" if param_hits < 8 else "medium",
-            "category": "structural",
-            "rule_id": "parameter_overload",
-            "line": 1,
-            "title": "Parameter overload",
-            "detail": f"Detected {param_hits} parameters.",
-        })
-
     complexity += _clamp(_line_count(text) // 25, 0, 8)
     return {
         "complexity": complexity,
@@ -185,9 +308,29 @@ def analyze_code(
     if target_missing_is_new and not before.strip() and not after_pick["target_found"]:
         before_pick = {"text": "", "target_found": False}
 
+    before_lines = before_pick["text"].splitlines()
+    after_lines = after_pick["text"].splitlines()
     before_score = _score_text(before_pick["text"])
     after_score = _score_text(after_pick["text"])
     delta = after_score["complexity"] - before_score["complexity"]
+
+    if before_pick["text"].strip():
+        before_score["findings"] = []
+        _detect_structural(before_lines, before_lines, target.path if target else "", before_score["findings"])
+        _detect_security(before_lines, target.path if target else "", before_score["findings"])
+        _detect_modernization(before_lines, target.path if target else "", before_score["findings"])
+        _detect_style(before_lines, target.path if target else "", before_score["findings"])
+        _detect_dead_code(before_lines, target.path if target else "", before_score["findings"])
+        before_score["line_count"] = _line_count(before_pick["text"])
+
+    if after_pick["text"].strip():
+        after_score["findings"] = []
+        _detect_structural(after_lines, after_lines, target.path if target else "", after_score["findings"])
+        _detect_security(after_lines, target.path if target else "", after_score["findings"])
+        _detect_modernization(after_lines, target.path if target else "", after_score["findings"])
+        _detect_style(after_lines, target.path if target else "", after_score["findings"])
+        _detect_dead_code(after_lines, target.path if target else "", after_score["findings"])
+        after_score["line_count"] = _line_count(after_pick["text"])
 
     return {
         "target": {
@@ -203,6 +346,14 @@ def analyze_code(
             "complexity": delta,
             "findings": len(after_score["findings"]) - len(before_score["findings"]),
             "line_count": after_score["line_count"] - before_score["line_count"],
+        },
+        "recommendation": {
+            "summary": "If you have to refactor, be safe and go TDD.",
+            "workflow": [
+                "Write or update failing tests for the target behavior first.",
+                "Make the safest minimal code change needed to satisfy the tests.",
+                "Re-run analysis and tests before expanding the refactor.",
+            ],
         },
         "summary": {
             "before_complexity": before_score["complexity"],
