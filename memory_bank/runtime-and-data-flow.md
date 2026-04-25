@@ -58,6 +58,14 @@ Client communicates with server through HTTP APIs and optional SSE status stream
 4. Server clones/updates or resolves directory under `BASE_CODE_DIR`.
 5. Existing indexing/AST pipelines run against the resulting project path.
 
+### Context Analysis Flow (Server-Owned)
+
+1. AI agent calls Context MCP `analyze_code` with a class/file target, or with a diff/replacement body.
+2. MCP server forwards the request to `POST /api/context/analysis`.
+3. Server resolves the current source, isolates the requested class or symbol when named, and computes deterministic before/after complexity plus findings.
+4. If the target is new, before-state complexity is reported as zero and after-state reflects the new code surface.
+5. The agent uses the structured delta to decide whether to accept the refactor, split it, or further reduce complexity.
+
 ## 5) Offline Behavior
 
 When server is unavailable:
@@ -82,6 +90,8 @@ MCP servers are server-side.
 4. Results returned to calling tool.
 
 Client does not host business MCP servers in the v8 split.
+
+Context MCP now includes `analyze_code` in addition to search-oriented tools. It is still server-side and deterministic; the client only renders the guide and release notes.
 
 ## 7) AI Agent MCP Config Flow (Client-Owned)
 

@@ -1,5 +1,7 @@
 # Savant Server
 
+License Owned by Project X. This repository is private and proprietary.
+
 `savant-server` is the centralized backend service for enterprise deployments.
 
 ## Phase 1 Status
@@ -63,6 +65,21 @@ When deployed via `./deploy-server.sh` (docker mode), MCP SSE ports are also exp
 - abilities: `8092`
 - context: `8093`
 - knowledge: `8094`
+
+### Context MCP Tools
+
+The Context MCP server now exposes:
+
+- `code_search`
+- `structure_search`
+- `analyze_code`
+- `memory_bank_search`
+- `memory_resources_list`
+- `memory_resources_read`
+- `repos_list`
+- `repo_status`
+
+`analyze_code` accepts a class/file target plus optional unified diff or replacement code so agents can compare before/after complexity and findings before deciding whether to refactor.
 
 ## Client Connection
 

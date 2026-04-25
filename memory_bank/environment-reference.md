@@ -22,6 +22,11 @@ This file lists the key env vars used in current client/server architecture.
 - Defaults: `8091`, `8092`, `8093`, `8094`
 - Purpose: MCP config defaults and compatibility routing.
 
+### Context analysis contract
+
+- Used by: `server/context/routes.py`, `server/mcp/context_server.py`
+- Purpose: `analyze_code` accepts a class/file target plus optional diff or replacement code and returns before/after complexity and findings for refactor decisions.
+
 ### `SESSION_DIR` / `CLAUDE_DIR` / `CODEX_DIR` / `GEMINI_DIR` / `HERMES_DIR`
 
 - Used by: `client/session_service.js`

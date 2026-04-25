@@ -1,4 +1,4 @@
-# Savant Architecture Overview (v8 Client/Server)
+# Savant Architecture Overview (v8.2 Client/Server)
 
 ## 1) Product Shape
 
@@ -27,6 +27,7 @@ They communicate over HTTP/SSE contracts.
 - MCP servers (`server/mcp/*.py`)
 - Central shared persistence (server DB and server data root)
 - Context project ingestion orchestration (GitHub/GitLab/Directory) under `BASE_CODE_DIR`
+- Deterministic Context analysis contract exposed to MCP consumers (`analyze_code`) for class/file before-after scoring
 
 ## 3) Session Architecture (Current)
 
@@ -86,3 +87,4 @@ This keeps session lifecycle responsive even when server connectivity is down.
 - Keep provider-specific session logic modular for easy future providers
 - Keep client/server concerns strict so two teams can work independently
 - Keep credentials and provider configs local to client machine; avoid server-side assumptions about desktop config files
+- Keep analysis tooling deterministic so agents can compare refactor impact before and after a patch without depending on a generated summary

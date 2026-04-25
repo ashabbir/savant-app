@@ -94,11 +94,66 @@ test.describe("Electron Context UI", () => {
     }
   });
 
+  test("AST cluster drawer shows children and Focus action", async () => {
+    const h = await launchWithMock({
+      mockState: {
+        repos: [
+          { name: "ast-repo", path: "/repo/ast-repo", status: "indexed", file_count: 4, chunk_count: 8, ast_node_count: 3 },
+        ],
+      },
+    });
+    try {
+      await openContext(h.page);
+      const html = await h.page.evaluate(() => {
+        const drawer = document.createElement("div");
+        drawer.id = "e2e-ast-drawer";
+        drawer.style = {};
+        document.body.appendChild(drawer);
+        const node = {
+          data: { name: "Parent", type: "class", line: 1, start_line: 1, end_line: 20 },
+          _id: 1,
+          children: [
+            { data: { name: "Child", type: "function", line: 5, start_line: 5, end_line: 8 }, _id: 2, children: [], descendants() { return [this]; } },
+          ],
+          descendants() { return [this, ...this.children]; },
+        };
+        window._astActiveDrawMap = {
+          "e2e-ast-drawer": {
+            root: node,
+            draw: () => {},
+            closeName: "",
+            toggleName: "",
+          },
+        };
+        _showAstDrawer(node, "e2e-ast-drawer", "", "");
+        return drawer.innerHTML;
+      });
+      expect(html).toContain("Focus");
+      expect(html).toContain("Children");
+      expect(html).toContain("Child");
+    } finally {
+      await h.close();
+    }
+  });
+
   test("left rail does not expose open-in-browser action", async () => {
     const h = await launchWithMock();
     try {
       await expect(h.page.locator("#left-tab-browser")).toHaveCount(0);
       await expect(h.page.locator("#left-tab-bar")).not.toContainText("Open in browser");
+    } finally {
+      await h.close();
+    }
+  });
+
+  test("guide context section documents analyze_code", async () => {
+    const h = await launchWithMock();
+    try {
+      await h.page.evaluate(() => window.openGuide && window.openGuide());
+      await expect(h.page.locator("#guide-overlay")).toBeVisible({ timeout: 10000 });
+      await h.page.evaluate(() => window.guideNavigate && window.guideNavigate('comp-context'));
+      await expect(h.page.locator("#guide-content")).toContainText("analyze_code", { timeout: 10000 });
+      await expect(h.page.locator("#guide-content")).toContainText("before/after class or file analysis");
     } finally {
       await h.close();
     }

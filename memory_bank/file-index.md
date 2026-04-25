@@ -41,8 +41,9 @@ Focused map of the current split codebase.
 - `app.py` -> primary API server.
 - `sqlite_client.py` and `db/*` -> persistence layer.
 - `abilities/*` -> abilities APIs.
-- `context/*` -> context indexing and semantic search.
+- `context/*` -> context indexing, semantic search, and deterministic analysis helpers.
 - `context/ingestion.py` -> source-based project ingestion (github/gitlab/directory).
+- `context/analysis.py` -> class/file before-after analysis helpers for MCP and API consumers.
 - `knowledge/*` -> knowledge graph APIs.
 - `mcp/*.py` -> MCP bridge servers.
 - `Dockerfile`, `docker-entrypoint.sh` -> container runtime files.

@@ -138,7 +138,7 @@ const _guideTree = [
         <tr><td>2026-04-21</td><td>6</td><td>Removed remaining reindex actions from context module surface. Context actions are now constrained to Index, AST, Purge, Delete, and conditional Stop.</td></tr>
         <tr><td>2026-04-21</td><td>7</td><td>Migrated server-side Pydantic model configuration to v2-native <code>ConfigDict</code> for cleaner runtime and future-proofing.</td></tr>
         <tr><td>2026-04-21</td><td>8</td><td>Added a CI contract test that enforces monorepo integration tests remain part of the standard <code>run-all-tests.sh</code> flow.</td></tr>
-        <tr><td>2026-04-21</td><td>9</td><td>Aligned server build metadata with release <code>8.0.0</code> and added integration validation for system-info version reporting.</td></tr>
+        <tr><td>2026-04-21</td><td>9</td><td>Aligned server build metadata with release <code>8.1.4</code> and added integration validation for system-info version reporting.</td></tr>
         <tr><td>2026-04-21</td><td>10</td><td>Added repo hygiene tests to enforce database artifact ignore patterns and keep deployment branches free of local state files.</td></tr>
       </table>
     `
@@ -450,12 +450,17 @@ list_workspaces(status="open")</code></pre>
       <h3>Keyboard Shortcuts</h3>
       <table class="guide-table">
         <tr><th>Key</th><th>Action</th></tr>
-        <tr><td><kbd>⌘T</kbd></td><td>New tab</td></tr>
-        <tr><td><kbd>⌘W</kbd></td><td>Close current tab/pane</td></tr>
-        <tr><td><kbd>⌘D</kbd></td><td>Split pane vertically (right)</td></tr>
-        <tr><td><kbd>⌘⇧D</kbd></td><td>Split pane horizontally (down)</td></tr>
-        <tr><td><kbd>⌘[</kbd> / <kbd>⌘]</kbd></td><td>Previous / next pane</td></tr>
-        <tr><td><kbd>⌘{</kbd> / <kbd>⌘}</kbd></td><td>Previous / next tab</td></tr>
+        <tr><td><kbd>?</kbd></td><td>Show terminal shortcuts popup</td></tr>
+        <tr><td><kbd>⌘/Ctrl + &#96;</kbd></td><td>Hide terminal</td></tr>
+        <tr><td><kbd>⌘/Ctrl + T</kbd></td><td>New terminal tab</td></tr>
+        <tr><td><kbd>⌘/Ctrl + D</kbd></td><td>Split pane vertically</td></tr>
+        <tr><td><kbd>⌘/Ctrl + ⇧ + D</kbd></td><td>Split pane horizontally</td></tr>
+        <tr><td><kbd>⌘/Ctrl + ⇧ + [</kbd> / <kbd>⌘/Ctrl + ⇧ + ]</kbd></td><td>Previous / next tab</td></tr>
+        <tr><td><kbd>⌘/Ctrl + ⇧ + ← ↑ → ↓</kbd></td><td>Move focus between panes</td></tr>
+        <tr><td><kbd>⌘/Ctrl + K</kbd></td><td>Clear scrollback</td></tr>
+        <tr><td><kbd>⌘/Ctrl + C</kbd> (with selection)</td><td>Copy selected text</td></tr>
+        <tr><td><kbd>⌘/Ctrl + =</kbd> / <kbd>⌘/Ctrl + -</kbd> / <kbd>⌘/Ctrl + 0</kbd></td><td>Zoom in / out / reset</td></tr>
+        <tr><td><kbd>⌘/Ctrl + W</kbd></td><td>Disabled in terminal view (no close via shortcut)</td></tr>
       </table>
 
       <h3>Session Resume</h3>
@@ -931,7 +936,7 @@ class WorkspaceDB:
         <tr><th>Server</th><th>Port</th><th>File</th><th>Tools</th></tr>
         <tr><td style="color:var(--cyan);">savant-workspace</td><td>8091</td><td><code>mcp/server.py</code></td><td>~30 tools (workspace, task, note, MR, Jira CRUD)</td></tr>
         <tr><td style="color:var(--magenta);">savant-abilities</td><td>8092</td><td><code>mcp/abilities_server.py</code></td><td>~10 tools (persona/rule resolution, YAML assets)</td></tr>
-        <tr><td style="color:var(--green);">savant-context</td><td>8093</td><td><code>mcp/context_server.py</code></td><td>~7 tools (code search, AST structure, memory bank, repo status)</td></tr>
+        <tr><td style="color:var(--green);">savant-context</td><td>8093</td><td><code>mcp/context_server.py</code></td><td>~8 tools (code search, AST structure, analysis, memory bank, repo status)</td></tr>
         <tr><td style="color:var(--orange);">savant-knowledge</td><td>8094</td><td><code>mcp/knowledge_server.py</code></td><td>~15 tools (store, search, connect, commit, prune)</td></tr>
       </table>
 
@@ -1049,6 +1054,7 @@ content: |
         <tr><th>Tool</th><th>Purpose</th></tr>
         <tr><td><code>code_search(query, repo)</code></td><td>Semantic search across repo source code</td></tr>
         <tr><td><code>structure_search(query, repo)</code></td><td>AST search for classes, functions, and symbols</td></tr>
+        <tr><td><code>analyze_code(name, repo, path, node_type, diff, code)</code></td><td>Deterministic before/after class or file analysis for refactor decisions</td></tr>
         <tr><td><code>memory_bank_search(query, repo)</code></td><td>Search within memory bank markdown files</td></tr>
         <tr><td><code>repos_list()</code></td><td>List all indexed repos with README excerpts</td></tr>
         <tr><td><code>repo_status()</code></td><td>Index health: chunk count, last indexed, errors</td></tr>
@@ -1449,12 +1455,17 @@ def tool_name(param: str, optional: str = "default") -> dict:
       <h3>Terminal</h3>
       <table class="guide-table">
         <tr><th>Key</th><th>Action</th></tr>
-        <tr><td><kbd>⌘T</kbd></td><td>New terminal tab</td></tr>
-        <tr><td><kbd>⌘W</kbd></td><td>Close current tab/pane</td></tr>
-        <tr><td><kbd>⌘D</kbd></td><td>Split pane vertically (right)</td></tr>
-        <tr><td><kbd>⌘⇧D</kbd></td><td>Split pane horizontally (down)</td></tr>
-        <tr><td><kbd>⌘[</kbd> / <kbd>⌘]</kbd></td><td>Previous / next pane</td></tr>
-        <tr><td><kbd>⌘{</kbd> / <kbd>⌘}</kbd></td><td>Previous / next tab</td></tr>
+        <tr><td><kbd>?</kbd></td><td>Show terminal shortcuts popup</td></tr>
+        <tr><td><kbd>⌘/Ctrl + &#96;</kbd></td><td>Hide terminal</td></tr>
+        <tr><td><kbd>⌘/Ctrl + T</kbd></td><td>New terminal tab</td></tr>
+        <tr><td><kbd>⌘/Ctrl + D</kbd></td><td>Split pane vertically</td></tr>
+        <tr><td><kbd>⌘/Ctrl + ⇧ + D</kbd></td><td>Split pane horizontally</td></tr>
+        <tr><td><kbd>⌘/Ctrl + ⇧ + [</kbd> / <kbd>⌘/Ctrl + ⇧ + ]</kbd></td><td>Previous / next tab</td></tr>
+        <tr><td><kbd>⌘/Ctrl + ⇧ + ← ↑ → ↓</kbd></td><td>Move focus between panes</td></tr>
+        <tr><td><kbd>⌘/Ctrl + K</kbd></td><td>Clear scrollback</td></tr>
+        <tr><td><kbd>⌘/Ctrl + C</kbd> (with selection)</td><td>Copy selected text</td></tr>
+        <tr><td><kbd>⌘/Ctrl + =</kbd> / <kbd>⌘/Ctrl + -</kbd> / <kbd>⌘/Ctrl + 0</kbd></td><td>Zoom in / out / reset</td></tr>
+        <tr><td><kbd>⌘/Ctrl + W</kbd></td><td>Disabled in terminal view (no close via shortcut)</td></tr>
       </table>
     `
   },
@@ -1573,7 +1584,7 @@ args = ["/path/to/server/mcp/stdio.py", "workspace"]</pre>
         <tr><th>Server</th><th>Port</th><th>What It Does</th></tr>
         <tr><td style="color:var(--cyan);">savant-workspace</td><td>8091</td><td>Workspaces, tasks, Jira tickets, merge requests, session notes, session assignment</td></tr>
         <tr><td style="color:var(--magenta);">savant-abilities</td><td>8092</td><td>Personas, rules, policies, styles — prompt resolution and YAML asset management</td></tr>
-        <tr><td style="color:var(--green);">savant-context</td><td>8093</td><td>Semantic code search, AST structure exploration, memory bank search</td></tr>
+        <tr><td style="color:var(--green);">savant-context</td><td>8093</td><td>Semantic code search, AST structure exploration, deterministic analysis, memory bank search</td></tr>
         <tr><td style="color:var(--orange);">savant-knowledge</td><td>8094</td><td>Knowledge graph — store, search, traverse, and connect nodes (insights, services, domains, etc.)</td></tr>
       </table>
 
@@ -1738,8 +1749,9 @@ Hermes will:
 
 Hermes will:
   1. code_search(query="email notification send")
-  2. Analyze results across indexed repos
-  3. Summarize findings with file paths and line numbers</pre>
+  2. analyze_code(name="NotificationService", path="src/notifications.ts", node_type="class")
+  3. Analyze results across indexed repos
+  4. Summarize findings with file paths and line numbers</pre>
 
       <h4 style="color:var(--orange);">Knowledge Graph</h4>
       <pre style="background:var(--bg-main);color:var(--text);padding:8px;border-radius:6px;font-size:0.45rem;overflow-x:auto;">Ask Hermes: "Document what we learned about the caching architecture"

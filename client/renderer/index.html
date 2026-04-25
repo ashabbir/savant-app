@@ -186,6 +186,13 @@ window.__SAVANT_SERVER_URL__ = window.__SAVANT_SERVER_URL__ || 'http://127.0.0.1
   .ctx-progress-phase.ast { color:#a855f7; }
   .ctx-progress-label { font-family:var(--font-mono); font-size:0.5rem; color:var(--text-dim); margin-top:3px; }
   .ctx-progress-file { font-family:var(--font-mono); font-size:0.45rem; color:var(--text-dim); margin-top:2px; opacity:0.7; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .startup-overlay { position:fixed; inset:0; z-index:70000; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at 50% 30%, rgba(0,240,255,0.08), rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.96)); backdrop-filter: blur(10px); }
+  .startup-panel { width:min(420px, 82vw); padding:28px 26px 24px; border:1px solid rgba(0,240,255,0.18); border-radius:18px; background:linear-gradient(180deg, rgba(10,14,24,0.94), rgba(9,12,20,0.98)); box-shadow:0 22px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.02) inset; }
+  .startup-title { font-family:'Orbitron',sans-serif; letter-spacing:3px; color:var(--cyan); font-size:0.75rem; margin-bottom:10px; }
+  .startup-sub { font-family:var(--font-mono); color:var(--text-dim); font-size:0.65rem; line-height:1.6; margin-bottom:18px; }
+  .startup-bar { height:10px; border-radius:999px; background:rgba(255,255,255,0.06); overflow:hidden; border:1px solid rgba(0,240,255,0.14); }
+  .startup-fill { height:100%; width:0%; border-radius:999px; background:linear-gradient(90deg, #22d3ee, #3b82f6, #a855f7); box-shadow:0 0 18px rgba(34,211,238,0.45); transition: width 90ms linear; }
+  .startup-meta { display:flex; justify-content:space-between; margin-top:8px; font-family:var(--font-mono); font-size:0.55rem; color:var(--text-dim); letter-spacing:0.04em; }
   .ctx-memory-list { max-height:calc(100vh - 340px); overflow-y:auto; }
   .ctx-memory-item { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(0,0,0,0.15); border:1px solid var(--border); border-radius:6px; margin-bottom:4px; cursor:pointer; font-family:var(--font-mono); font-size:0.6rem; }
   .ctx-memory-item:hover { border-color:rgba(34,211,238,0.3); background:rgba(0,0,0,0.25); }
@@ -5062,7 +5069,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
 <script src="./static/js/utils.js"></script>
 <!-- Top Bar (logo only) -->
 <div id="top-bar">
-  <h1 id="header-title"><a href="./index.html">SAVANT</a> <span class="release-icon" onclick="toggleReleaseNotes()" title="Release Notes">🚀</span></h1>
+  <h1 id="header-title"><a href="./index.html"><svg class="savant-logo" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Savant logo"><defs><linearGradient id="top-logo-grd" x1="10" y1="10" x2="54" y2="54"><stop offset="0%" stop-color="#00e6c8"/><stop offset="100%" stop-color="#3b82f6"/></linearGradient></defs><path d="M18 18h28l10 14-10 14H18L8 32l10-14z" stroke="url(#top-logo-grd)" stroke-width="2.6" stroke-linejoin="round"/><path d="M22 24h20M18 32h28M22 40h20" stroke="url(#top-logo-grd)" stroke-width="1.6" stroke-linecap="round" opacity="0.8"/><circle cx="32" cy="32" r="5.8" fill="#0d0f18" stroke="url(#top-logo-grd)" stroke-width="2"/><circle cx="32" cy="32" r="2" fill="#00e6c8"/><circle cx="18" cy="18" r="2.2" fill="#00e6c8" opacity="0.9"/><circle cx="46" cy="18" r="2.2" fill="#3b82f6" opacity="0.9"/><circle cx="18" cy="46" r="2.2" fill="#3b82f6" opacity="0.9"/><circle cx="46" cy="46" r="2.2" fill="#00e6c8" opacity="0.9"/></svg> SAVANT</a> <span class="release-icon" onclick="toggleReleaseNotes()" title="Release Notes">🚀</span></h1>
 </div>
 <!-- Left Tab Bar -->
 <div id="left-tab-bar">
@@ -5829,6 +5836,13 @@ function showLoadingScreen(cb) { if (cb) cb(); }
               </div>
             </div>
             <div class="tutorial-tool">
+              <span class="tutorial-tool-icon">🧪</span>
+              <div class="tutorial-tool-info">
+                <div class="tutorial-tool-name">analyze_code</div>
+                <div class="tutorial-tool-desc">Deterministic code analysis for a class or file. Pass a <code>name</code> plus <code>path</code> or <code>uri</code>, and optionally a unified <code>diff</code> or replacement <code>code</code>. Returns before/after complexity, findings, and deltas so agents can evaluate refactors before applying them.</div>
+              </div>
+            </div>
+            <div class="tutorial-tool">
               <span class="tutorial-tool-icon">🧠</span>
               <div class="tutorial-tool-info">
                 <div class="tutorial-tool-name">memory_bank_search</div>
@@ -5884,16 +5898,22 @@ function showLoadingScreen(cb) { if (cb) cb(); }
 <span class="comment">// 3. Find structural components by name</span>
 <span class="highlight">structure_search</span>(q: "UserRepository")
 
-<span class="comment">// 4. Find relevant memory bank docs</span>
+<span class="comment">// 4. Analyze a class before refactoring</span>
+<span class="highlight">analyze_code</span>(repo: "savant-app", path: "src/auth.js", name: "AuthService", node_type: "class")
+
+<span class="comment">// 5. Compare a refactor diff before and after</span>
+<span class="highlight">analyze_code</span>(repo: "savant-app", path: "src/auth.js", name: "AuthService", node_type: "class", diff: "unified diff text")
+
+<span class="comment">// 6. Find relevant memory bank docs</span>
 <span class="highlight">memory_bank_search</span>(q: "deployment architecture")
 
-<span class="comment">// 5. List all memory bank resources</span>
+<span class="comment">// 7. List all memory bank resources</span>
 <span class="highlight">memory_resources_list</span>()
 
-<span class="comment">// 6. Read a specific memory doc</span>
+<span class="comment">// 8. Read a specific memory doc</span>
 <span class="highlight">memory_resources_read</span>(uri: "memory/architecture.md")
 
-<span class="comment">// 7. Check which repos are indexed</span>
+<span class="comment">// 9. Check which repos are indexed</span>
 <span class="highlight">repo_status</span>()</div>
           </div>
 
@@ -6601,40 +6621,19 @@ function showLoadingScreen(cb) { if (cb) cb(); }
 
     <!-- Inner tabs: Search / AST / Code / Memory Bank -->
     <div class="ctx-inner-tabs">
-      <button class="savant-subtab active" data-panel="search" onclick="switchCtxPanel('search', this)">🔍 Search</button>
-      <button class="savant-subtab" data-panel="ast" onclick="switchCtxPanel('ast', this)">🌳 AST</button>
+      <button class="savant-subtab active" data-panel="ast" onclick="switchCtxPanel('ast', this)">🌳 AST</button>
       <button class="savant-subtab" data-panel="code" onclick="switchCtxPanel('code', this)">📄 Code</button>
       <button class="savant-subtab" data-panel="memory" onclick="switchCtxPanel('memory', this)">🧠 Memory Bank</button>
+      <button class="savant-subtab" data-panel="search" onclick="switchCtxPanel('search', this)">🔍 Search</button>
     </div>
 
-    <!-- Search Panel -->
-    <div class="ctx-panel" id="ctx-panel-search">
-      <div class="ctx-search-bar">
-        <input type="text" id="ctx-search-input" placeholder="Search code and memory bank..." onkeydown="if(event.key==='Enter')ctxDoSearch()">
-        <select id="ctx-search-mode">
-          <option value="all">All</option>
-          <option value="code">Code Only</option>
-          <option value="memory">Memory Bank Only</option>
-        </select>
-        <select id="ctx-search-repo"><option value="">All Projects</option></select>
-        <button class="ctx-search-btn" onclick="ctxDoSearch()">Search</button>
-      </div>
-      <div id="ctx-search-results" class="ctx-results">
+    <!-- AST Panel -->
+    <div class="ctx-panel" id="ctx-panel-ast">
+      <div id="ctx-ast-list" class="ctx-memory-list">
         <div class="ctx-welcome">
-          <div style="font-size:2rem;margin-bottom:12px;">🔍</div>
-          <div>Search across all indexed projects</div>
-          <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Semantic vector search powered by sqlite-vec</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Memory Bank Panel -->
-    <div class="ctx-panel" id="ctx-panel-memory" style="display:none;">
-      <div id="ctx-memory-list" class="ctx-memory-list">
-        <div class="ctx-welcome">
-          <div style="font-size:2rem;margin-bottom:12px;">🧠</div>
-          <div>Memory bank documents</div>
-          <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Index a project with a memory/ directory to see docs here</div>
+          <div style="font-size:2rem;margin-bottom:12px;">🌳</div>
+          <div>Generated AST structures</div>
+          <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Generate AST for a project to browse its structure here</div>
         </div>
       </div>
     </div>
@@ -6650,13 +6649,35 @@ function showLoadingScreen(cb) { if (cb) cb(); }
       </div>
     </div>
 
-    <!-- AST Panel -->
-    <div class="ctx-panel" id="ctx-panel-ast" style="display:none;">
-      <div id="ctx-ast-list" class="ctx-memory-list">
+    <!-- Memory Bank Panel -->
+    <div class="ctx-panel" id="ctx-panel-memory" style="display:none;">
+      <div id="ctx-memory-list" class="ctx-memory-list">
         <div class="ctx-welcome">
-          <div style="font-size:2rem;margin-bottom:12px;">🌳</div>
-          <div>Generated AST structures</div>
-          <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Generate AST for a project to browse its structure here</div>
+          <div style="font-size:2rem;margin-bottom:12px;">🧠</div>
+          <div>Memory bank documents</div>
+          <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Index a project with a memory/ directory to see docs here</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search Panel -->
+    <div class="ctx-panel" id="ctx-panel-search" style="display:none;">
+      <div class="ctx-search-bar">
+        <input type="text" id="ctx-search-input" placeholder="Search code and memory bank..." onkeydown="if(event.key==='Enter')ctxDoSearch()">
+        <select id="ctx-search-mode">
+          <option value="all">All</option>
+          <option value="code">Code Only</option>
+          <option value="memory">Memory Bank Only</option>
+        </select>
+        <select id="ctx-search-repo"><option value="">All Projects</option></select>
+        <button class="ctx-search-btn" onclick="ctxDoSearch()">Search</button>
+        <button class="ctx-btn-sm" onclick="ctxClearSearch()" style="font-size:0.5rem;">Clear</button>
+      </div>
+      <div id="ctx-search-results" class="ctx-results">
+        <div class="ctx-welcome">
+          <div style="font-size:2rem;margin-bottom:12px;">🔍</div>
+          <div>Search across all indexed projects</div>
+          <div style="color:var(--text-dim);font-size:0.6rem;margin-top:6px;">Semantic vector search powered by sqlite-vec</div>
         </div>
       </div>
     </div>
@@ -6881,7 +6902,7 @@ function showLoadingScreen(cb) { if (cb) cb(); }
     <span class="bulk-bar-count" id="bulk-count">0 selected</span>
     <span class="bulk-bar-size" id="bulk-size"></span>
     <div class="bulk-bar-actions">
-      <button class="bulk-select-btn" onclick="selectAllDormant()">SELECT ALL DORMANT</button>
+      <button class="bulk-select-btn" onclick="toggleAllFilteredSelection()">TOGGLE ALL</button>
       <button class="bulk-select-btn" onclick="clearBulkSelection()">CLEAR</button>
       <button class="bulk-select-btn" onclick="toggleBulkMode()">✕ EXIT</button>
       <button class="bulk-delete-btn" onclick="bulkDelete()">🗑 DELETE SELECTED</button>
@@ -6952,10 +6973,19 @@ function showLoadingScreen(cb) { if (cb) cb(); }
   </div>
 
   <div id="sessions-container">
-    <div class="loading">
+  <div class="loading">
       <div class="loading-spinner"></div>
       <div style="color: var(--text-dim); font-size: 0.8rem;">INITIALIZING TELEMETRY...</div>
     </div>
+  </div>
+</div>
+
+<div class="startup-overlay" id="startup-overlay">
+  <div class="startup-panel">
+    <div class="startup-title">INITIALIZING SAVANT</div>
+    <div class="startup-sub" id="startup-sub">Loading local cache and server data...</div>
+    <div class="startup-bar"><div class="startup-fill" id="startup-fill"></div></div>
+    <div class="startup-meta"><span id="startup-meta-left">0%</span><span id="startup-meta-right">starting</span></div>
   </div>
 </div>
 
