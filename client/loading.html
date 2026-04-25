@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Savant</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+      height: 100vh;
+      background: #0d0d1a;
+      color: #e0e0e0;
+      font-family: 'Inter', sans-serif;
+      -webkit-app-region: drag;
+      overflow: hidden;
+      padding: 28px 0 0;
+    }
+
+    /* Header */
+    .header {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 18px;
+    }
+    .logo {
+      width: 40px; height: 40px;
+      background: linear-gradient(135deg, rgba(0,230,200,0.14), rgba(59,130,246,0.18));
+      border: 1px solid rgba(0,230,200,0.45);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.03) inset, 0 10px 24px rgba(0,0,0,0.22);
+      overflow: hidden;
+    }
+    .logo svg {
+      width: 28px; height: 28px;
+    }
+    .app-name {
+      font-size: 1.5rem; font-weight: 700; letter-spacing: 2px;
+      color: #fff; text-transform: uppercase;
+    }
+    .version-badge {
+      font-size: 0.5rem; color: #6c63ff; border: 1px solid #6c63ff;
+      padding: 1px 6px; border-radius: 3px; letter-spacing: 1px;
+    }
+
+    /* Current step banner */
+    .current-step {
+      font-size: 0.75rem; color: #00e6c8; letter-spacing: 1px;
+      text-transform: uppercase; margin-bottom: 12px;
+      min-height: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .spinner {
+      width: 10px; height: 10px;
+      border: 2px solid rgba(0,230,200,0.2);
+      border-top-color: #00e6c8;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    .spinner.done { border-color: #22c55e; border-top-color: #22c55e; animation: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Log panel */
+    .log-panel {
+      width: 640px; max-width: calc(100vw - 40px);
+      height: calc(100vh - 140px);
+      background: #0a0a14;
+      border: 1px solid #1e1e3a;
+      border-radius: 8px;
+      overflow-y: auto;
+      padding: 10px 0;
+      -webkit-app-region: no-drag;
+    }
+    .log-panel::-webkit-scrollbar { width: 4px; }
+    .log-panel::-webkit-scrollbar-thumb { background: #2a2a4a; border-radius: 2px; }
+
+    .log-line {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 2px 14px;
+      font-size: 0.75rem; line-height: 1.5;
+      border-left: 2px solid transparent;
+      transition: background 0.1s;
+    }
+    .log-line:hover { background: rgba(255,255,255,0.02); }
+    .log-line.info  { border-left-color: #1e1e3a; }
+    .log-line.ok    { border-left-color: #22c55e; }
+    .log-line.warn  { border-left-color: #f59e0b; }
+    .log-line.error { border-left-color: #ef4444; background: rgba(239,68,68,0.05); }
+    .log-line.step  { border-left-color: #6c63ff; background: rgba(108,99,255,0.05); }
+    .log-line.mcp   { border-left-color: #00e6c8; }
+
+    .log-ts   { color: #3a3a5a; flex-shrink: 0; width: 52px; }
+    .log-tag  { flex-shrink: 0; width: 56px; font-size: 0.5rem;
+                padding: 0 4px; border-radius: 2px; text-align: center;
+                text-transform: uppercase; letter-spacing: 0.5px; line-height: 1.8; }
+    .tag-info  { background: #1e1e3a; color: #6b7280; }
+    .tag-ok    { background: rgba(34,197,94,0.15); color: #22c55e; }
+    .tag-warn  { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .tag-error { background: rgba(239,68,68,0.2); color: #ef4444; }
+    .tag-step  { background: rgba(108,99,255,0.2); color: #a78bfa; }
+    .tag-mcp   { background: rgba(0,230,200,0.15); color: #00e6c8; }
+    .tag-flask { background: rgba(59,130,246,0.15); color: #60a5fa; }
+    .tag-sys   { background: rgba(156,163,175,0.1); color: #9ca3af; }
+
+    .log-msg  { flex: 1; color: #c0c0d0; word-break: break-all; }
+    .log-line.error .log-msg { color: #fca5a5; }
+    .log-line.ok .log-msg    { color: #86efac; }
+    .log-line.step .log-msg  { color: #ddd6fe; font-weight: 600; }
+
+    /* Bottom bar */
+    .bottom-bar {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: #0a0a14; border-top: 1px solid #1e1e3a;
+      padding: 6px 20px;
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 0.5rem; color: #3a3a5a;
+    }
+    .bottom-bar .ports { display: flex; gap: 12px; }
+    .port-item { color: #4a4a6a; }
+    .port-item span { color: #6c63ff; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo" aria-label="Savant logo">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="load-logo-grd" x1="10" y1="8" x2="54" y2="56">
+            <stop offset="0%" stop-color="#00e6c8"/>
+            <stop offset="100%" stop-color="#3b82f6"/>
+          </linearGradient>
+        </defs>
+        <path d="M18 18h28l10 14-10 14H18L8 32l10-14z" stroke="url(#load-logo-grd)" stroke-width="2.5" stroke-linejoin="round"/>
+        <path d="M22 24h20M18 32h28M22 40h20" stroke="url(#load-logo-grd)" stroke-width="1.6" stroke-linecap="round" opacity="0.75"/>
+        <circle cx="32" cy="32" r="5" fill="#0d0d1a" stroke="url(#load-logo-grd)" stroke-width="2"/>
+        <circle cx="32" cy="32" r="1.8" fill="#00e6c8"/>
+        <circle cx="18" cy="18" r="2" fill="#00e6c8" opacity="0.85"/>
+        <circle cx="46" cy="18" r="2" fill="#3b82f6" opacity="0.85"/>
+        <circle cx="18" cy="46" r="2" fill="#3b82f6" opacity="0.85"/>
+        <circle cx="46" cy="46" r="2" fill="#00e6c8" opacity="0.85"/>
+      </svg>
+    </div>
+    <div>
+      <div class="app-name">Savant</div>
+    </div>
+  </div>
+
+  <div class="current-step">
+    <div class="spinner" id="step-spinner"></div>
+    <span id="status">Initializing…</span>
+  </div>
+
+  <div class="log-panel" id="log-panel"></div>
+
+  <div class="bottom-bar">
+    <div class="ports" id="port-bar">
+      <span class="port-item">Flask <span id="pb-flask">—</span></span>
+      <span class="port-item">MCP <span id="pb-mcp">8091</span></span>
+      <span class="port-item">Abilities <span id="pb-ab">8092</span></span>
+      <span class="port-item">Context <span id="pb-ctx">8093</span></span>
+      <span class="port-item">Knowledge <span id="pb-kg">8094</span></span>
+    </div>
+    <div id="pb-elapsed">0s</div>
+  </div>
+
+  <script>
+    const _start = Date.now();
+    setInterval(() => {
+      const el = document.getElementById('pb-elapsed');
+      if (el) el.textContent = ((Date.now() - _start) / 1000).toFixed(1) + 's';
+    }, 200);
+
+    function addLog(msg, level) {
+      const panel = document.getElementById('log-panel');
+      if (!panel) return;
+      const now = new Date();
+      const ts = now.toTimeString().slice(0, 8);
+
+      const tagMap = {
+        info: ['INFO', 'tag-info'], ok: ['OK', 'tag-ok'],
+        warn: ['WARN', 'tag-warn'], error: ['ERR', 'tag-error'],
+        step: ['STEP', 'tag-step'], mcp: ['MCP', 'tag-mcp'],
+        flask: ['FLASK', 'tag-flask'], sys: ['SYS', 'tag-sys'],
+      };
+      const [tagText, tagClass] = tagMap[level] || tagMap.info;
+
+      const line = document.createElement('div');
+      line.className = `log-line ${level}`;
+      line.innerHTML = `
+        <span class="log-ts">${ts}</span>
+        <span class="log-tag ${tagClass}">${tagText}</span>
+        <span class="log-msg">${msg.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>
+      `;
+      panel.appendChild(line);
+      panel.scrollTop = panel.scrollHeight;
+    }
+
+    // Expose to main process via executeJavaScript
+    window._savantLog = addLog;
+    window._savantSetPort = function(key, val) {
+      const el = document.getElementById('pb-' + key);
+      if (el) el.textContent = val;
+    };
+    window._savantDone = function() {
+      const sp = document.getElementById('step-spinner');
+      if (sp) sp.className = 'spinner done';
+    };
+  </script>
+</body>
+</html>

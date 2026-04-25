@@ -1,0 +1,9 @@
+{
+  "name": "savant-server-frontend-tests",
+  "private": true,
+  "version": "8.0.0",
+  "description": "Server package metadata (API-only service)",
+  "scripts": {
+    "test:frontend": "echo \"frontend tests moved to client/tests_js\""
+  }
+}

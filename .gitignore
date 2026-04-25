@@ -4,6 +4,10 @@
 # Node/Electron
 node_modules/
 dist/
+client/test-results/
+client/playwright-report/
+client/blob-report/
+*.tmp
 
 # Python
 __pycache__/
@@ -21,3 +25,9 @@ savant/models/
 .copilot-plan.md
 arch-version*
 savant.db
+
+# Server local data (must never be committed)
+server/data/
+*.db
+*.db-shm
+*.db-wal

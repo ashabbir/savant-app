@@ -1,17 +1,31 @@
 # Savant Memory Bank
 
-This directory is the RAG-oriented architecture reference for the `savant-app` repository.
+This directory is the canonical architecture and runtime reference for this repo.
+
+Current product shape (v8.2 client/server split):
+
+- `savant-app` -> `client/` (Electron desktop runtime)
+- `savant-server` -> `server/` (API + MCP backend)
+
+Session ownership model:
+
+- Session list/detail/mutations are client-side and local filesystem driven.
+- Shared business data (workspaces/tasks/knowledge/context) is server-side.
+
+Branch updates captured in this memory bank:
+
+- Context ingestion is source-driven (GitHub/GitLab/Directory) with server-side `BASE_CODE_DIR` enforcement.
+- MCP guide diagnostics include recent action logs and abilities bootstrap visibility.
+- AI agent MCP config status/setup is client-owned via Electron IPC (local filesystem), with server endpoints kept as fallback.
+- Context MCP now includes deterministic `analyze_code` support for class/file before-after analysis and diff-aware refactor scoring.
 
 Contents:
 
-- `architecture-overview.md`: System boundaries, major subsystems, storage model, and startup behavior.
-- `runtime-and-data-flow.md`: End-to-end runtime flows for Electron, Flask, MCP, terminal, sessions, context indexing, and knowledge graph usage.
-- `environment-reference.md`: Indexed environment-variable reference for all runtime knobs found in the codebase.
-- `file-index.md`: Indexed file-by-file repository inventory with short descriptions for each relevant tracked file.
+- `architecture-overview.md`: system boundaries, ownership, storage split, and service contracts.
+- `runtime-and-data-flow.md`: startup and request flows, including local session sync/update behavior.
+- `environment-reference.md`: key environment variables for client, server, MCP, and provider paths.
+- `file-index.md`: key file map for both client and server codebases.
 
-RAG usage notes:
+Update rule:
 
-- Start with `architecture-overview.md` for system shape.
-- Use `runtime-and-data-flow.md` for request and process behavior.
-- Use `environment-reference.md` when an agent needs deployment or session-detection context.
-- Use `file-index.md` as the primary lookup table for where behavior lives.
+- Whenever architecture or ownership changes, update these files in the same change.
