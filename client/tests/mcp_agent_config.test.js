@@ -87,3 +87,40 @@ test("setup writes savant sections for codex TOML config", () => {
   assert.ok(raw.includes('[mcp_servers."savant-context"]'));
   assert.ok(raw.includes('[mcp_servers."savant-knowledge"]'));
 });
+
+test("skips unknown providers and missing config files", () => {
+  const home = mkHome();
+
+  const unknown = setupMcpAgentConfigProvider("not-a-provider", { homeDir: home });
+  assert.equal(unknown.status, "skipped");
+  assert.equal(unknown.reason, "unknown provider");
+
+  const missing = setupMcpAgentConfigProvider("gemini", { homeDir: home });
+  assert.equal(missing.status, "skipped");
+  assert.equal(missing.reason, "config file not found");
+  assert.match(missing.path, /\.gemini[\\/]+settings\.json$/);
+});
+
+test("setup writes savant entries for yaml configs and preserves existing servers", () => {
+  const home = mkHome();
+  const cfgPath = path.join(home, ".hermes", "config.yaml");
+  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+  fs.writeFileSync(
+    cfgPath,
+    "mcp_servers:\n  savant-workspace:\n    url: http://127.0.0.1:8091/sse\n    timeout: 120\n  existing:\n    url: http://127.0.0.1:9999/sse\n",
+    "utf8",
+  );
+
+  const result = setupMcpAgentConfigProvider("hermes", {
+    homeDir: home,
+    ports: { abilities: 8092, context: 8093, knowledge: 8094 },
+  });
+  assert.equal(result.status, "configured");
+
+  const raw = fs.readFileSync(cfgPath, "utf8");
+  assert.ok(raw.includes("savant-workspace"));
+  assert.ok(raw.includes("savant-abilities"));
+  assert.ok(raw.includes("savant-context"));
+  assert.ok(raw.includes("savant-knowledge"));
+  assert.ok(raw.includes("existing:"));
+});

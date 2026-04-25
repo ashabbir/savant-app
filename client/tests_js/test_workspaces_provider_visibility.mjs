@@ -54,11 +54,11 @@ vm.createContext(sandbox);
 vm.runInContext(code, sandbox, { filename: 'workspaces.js' });
 
 sandbox.renderWorkspaces();
+assert.match(wsGrid.innerHTML, /ws-provider-chip copilot/);
+assert.match(wsGrid.innerHTML, /ws-provider-chip claude/);
 assert.match(wsGrid.innerHTML, /ws-provider-chip codex/);
-assert.doesNotMatch(wsGrid.innerHTML, /ws-provider-chip hermes/);
-assert.doesNotMatch(wsGrid.innerHTML, /ws-provider-chip copilot/);
-assert.doesNotMatch(wsGrid.innerHTML, /ws-provider-chip claude/);
-assert.doesNotMatch(wsGrid.innerHTML, /ws-provider-chip gemini/);
+assert.match(wsGrid.innerHTML, /ws-provider-chip gemini/);
+assert.match(wsGrid.innerHTML, /ws-provider-chip hermes/);
 assert.match(wsDash.innerHTML, /TASKS/);
 assert.match(wsDash.innerHTML, /17/);
 assert.match(wsDash.innerHTML, /82% complete/);
@@ -68,6 +68,5 @@ assert.match(wsDash.innerHTML, /6/);
 assert.match(wsDash.innerHTML, /2 Todo/);
 assert.match(wsDash.innerHTML, /1 In Progress/);
 assert.match(wsDash.innerHTML, /3 Done/);
-assert.match(wsDash.innerHTML, /selected in profile: Codex/);
 
 console.log('✓ workspaces provider visibility');

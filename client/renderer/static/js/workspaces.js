@@ -1244,8 +1244,17 @@ function loadWsJiraTickets() {
   if (el.dataset.loaded) return;
   el.dataset.loaded = '1';
 
-  fetch(`/api/tasks/jira?workspace_id=${_currentWsId}&_=${Date.now()}`)
-    .then(r => _readJsonResponse(r, 'Load Jira tickets'))
+  const primaryUrl = `/api/tasks/jira?workspace_id=${_currentWsId}&_=${Date.now()}`;
+  const fallbackUrl = `/api/jira-tickets?workspace_id=${_currentWsId}&_=${Date.now()}`;
+  fetch(primaryUrl)
+    .then(async r => {
+      if (r.ok) return _readJsonResponse(r, 'Load Jira tickets');
+      if (r.status === 404) {
+        const fallback = await fetch(fallbackUrl);
+        return _readJsonResponse(fallback, 'Load Jira tickets');
+      }
+      return _readJsonResponse(r, 'Load Jira tickets');
+    })
     .then(tickets => {
       if (!tickets.length) {
         el.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-dim);font-family:var(--font-mono);font-size:0.75rem;">

@@ -141,6 +141,10 @@ def api_system_info():
 
     return jsonify({
         "version": build_info.get("version") or "unknown",
+        "flask": {
+            "status": "ok",
+            "port": int(os.environ.get("FLASK_PORT", "8090")),
+        },
         "build": {
             "version": build_info.get("version") or "unknown",
             "branch": build_info.get("branch") or "unknown",

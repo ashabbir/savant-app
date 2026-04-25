@@ -94,3 +94,86 @@ test("LocalSessionService keeps workspace hint in local metadata", () => {
   const meta = svc.readMeta("copilot", session);
   assert.equal(meta.workspace, "ws-local-hint");
 });
+
+test("LocalSessionService resolves provider roots and missing sessions across providers", () => {
+  const home = makeTempDir();
+  const svc = new LocalSessionService({ homeDir: home, cacheTtlMs: 1 });
+
+  assert.equal(svc.providerRoot("claude"), path.join(home, ".claude"));
+  assert.equal(svc.providerRoot("codex"), path.join(home, ".codex"));
+  assert.equal(svc.providerRoot("gemini"), path.join(home, ".gemini"));
+  assert.equal(svc.providerRoot("hermes"), path.join(home, ".hermes"));
+  assert.equal(svc.providerRoot("unknown"), "");
+  assert.equal(svc._providerName("claude"), "claude");
+  assert.equal(svc._providerName("unknown"), "copilot");
+  assert.equal(svc.getSession("copilot", "missing"), null);
+  assert.equal(svc.deleteSession("copilot", "missing").ok, false);
+});
+
+test("LocalSessionService collects claude, codex, gemini, and hermes sessions and builds trees", () => {
+  const home = makeTempDir();
+
+  const claudeProject = path.join(home, ".claude", "projects", "demo");
+  writeJson(path.join(claudeProject, "sessions-index.json"), [
+    {
+      sessionId: "55555555-5555-4555-8555-555555555555",
+      projectPath: "/tmp/claude-project",
+      summary: "Claude summary",
+      created: "2026-04-21T10:00:00.000Z",
+      modified: "2026-04-21T10:05:00.000Z",
+      messageCount: 7,
+    },
+  ]);
+
+  const codexFile = path.join(home, ".codex", "sessions", "aa", "66666666-6666-4666-8666-666666666666.jsonl");
+  fs.mkdirSync(path.dirname(codexFile), { recursive: true });
+  fs.writeFileSync(codexFile, '{"x":1}\n', "utf8");
+
+  const geminiFile = path.join(home, ".gemini", "tmp", "savant-app", "chats", "chat-1.json");
+  writeJson(geminiFile, {
+    startTime: "2026-04-21T11:00:00.000Z",
+    lastUpdated: "2026-04-21T11:05:00.000Z",
+    messages: [
+      { type: "user", content: "Gemini hello" },
+      { type: "model", content: "hi" },
+    ],
+  });
+
+  const hermesFile = path.join(home, ".hermes", "sessions", "hermes-1.json");
+  writeJson(hermesFile, {
+    session_id: "77777777-7777-4777-8777-777777777777",
+    session_start: "2026-04-21T12:00:00.000Z",
+    last_updated: "2026-04-21T12:05:00.000Z",
+    project_path: "/tmp/hermes-project",
+    messages: [
+      { role: "user", content: "Hermes hello" },
+      { role: "assistant", content: "hi" },
+    ],
+  });
+
+  const svc = new LocalSessionService({ homeDir: home, cacheTtlMs: 1 });
+
+  const claude = svc.listSessions("claude");
+  assert.equal(claude.total, 1);
+  assert.equal(claude.sessions[0].id, "55555555-5555-4555-8555-555555555555");
+  assert.equal(claude.sessions[0].project, "claude-project");
+
+  const codex = svc.listSessions("codex");
+  assert.equal(codex.total, 1);
+  assert.equal(codex.sessions[0].id, "66666666-6666-4666-8666-666666666666");
+
+  const gemini = svc.listSessions("gemini");
+  assert.equal(gemini.total, 1);
+  assert.equal(gemini.sessions[0].summary, "Gemini hello");
+  assert.equal(gemini.sessions[0].message_count, 2);
+  assert.equal(gemini.sessions[0].turn_count, 1);
+
+  const hermes = svc.listSessions("hermes");
+  assert.equal(hermes.total, 1);
+  assert.equal(hermes.sessions[0].id, "77777777-7777-4777-8777-777777777777");
+  assert.equal(hermes.sessions[0].project, "hermes-project");
+
+  const tree = svc._tree(path.dirname(codexFile));
+  assert.equal(Array.isArray(tree.files), true);
+  assert.equal(tree.files.length > 0, true);
+});
