@@ -41,11 +41,31 @@ function _peekNavState() {
 // Release notes
 const RELEASES = [
   {
-    version: 'v8.1.0',
+    version: 'v8.2.0',
+    date: '2026-04-25',
+    tag: 'major',
+    tagline: 'Context MCP analysis tools: class intelligence, diff-aware before/after scoring, and refactor guidance for agents.',
+    description: 'SAVANT v8.2.0 expands the Context MCP with deterministic code analysis tools that let AI agents inspect an existing class or file, compare before/after complexity around a diff, and understand how a new block changes the refactor surface. The MCP guide and docs now describe the new analysis contract, while the release history keeps the earlier v8.1.5 hero release intact.',
+    abilities: [
+      { icon: '🧠', name: 'Class Intelligence', desc: 'AI agents can ask Context MCP for analysis on an existing class, method, or file by name and get structured findings back.' },
+      { icon: '🧪', name: 'Diff-Aware Analysis', desc: 'Agents can submit a file diff or replacement body and receive before/after complexity and finding deltas.' },
+      { icon: '🆕', name: 'New Code Baseline', desc: 'Fresh code paths analyze as before=0 and after=current, so agents can measure the cost of new abstractions cleanly.' },
+      { icon: '📘', name: 'Updated MCP Guide', desc: 'Context MCP docs now explain the analysis tool contract for code review and refactor workflows.' },
+    ],
+    items: [
+      { type: 'feat', text: 'Added Context MCP analysis tool for class/file inspection with structured before/after output' },
+      { type: 'feat', text: 'Added diff-aware analysis input so agents can compare the refactor impact of changes before applying them' },
+      { type: 'feat', text: 'New code paths report before=0 and after=current so agents can quantify the starting complexity surface' },
+      { type: 'docs', text: 'Updated Context MCP guide and repo docs to describe class analysis and diff analysis tool contracts' },
+      { type: 'chore', text: 'Bumped release version to v8.2.0 while preserving previous hero release history in the app' },
+    ],
+  },
+  {
+    version: 'v8.1.5',
     date: '2026-04-22',
     tag: 'major',
     tagline: 'Complete phase-1 branch ship: v8 split, local session ownership, source ingestion, hardened runtime, MCP diagnostics, and full docs/test refresh.',
-    description: 'SAVANT v8.1.0 is the consolidated hero release for everything delivered across the full feat/phase1-client-server-split branch. It includes the v8 client/server ownership split, client-owned local session lifecycle with live update events, workspace-session linking contract, hardened server container/runtime flows, multi-source context ingestion (GitHub/GitLab/Directory), MCP and System Info diagnostics upgrades, abilities bootstrap seeding, client-local MCP config detection/setup, and expanded test/doc coverage across README, guide, PRDs, and memory bank architecture references.',
+    description: 'SAVANT v8.1.5 is the consolidated hero release for everything delivered across the full feat/phase1-client-server-split branch. It includes the v8 client/server ownership split, client-owned local session lifecycle with live update events, workspace-session linking contract, hardened server container/runtime flows, multi-source context ingestion (GitHub/GitLab/Directory), MCP and System Info diagnostics upgrades, abilities bootstrap seeding, client-local MCP config detection/setup, and expanded test/doc coverage across README, guide, PRDs, and memory bank architecture references.',
     abilities: [
       { icon: '🖥️', name: 'Client/Server Ownership Complete', desc: 'Client owns UI/runtime/local sessions; server owns APIs/MCP/shared business data with strict separation.' },
       { icon: '🔁', name: 'Local Session Lifecycle', desc: 'Session list/detail/update/delete moved to client service with immediate savant:sessions-updated refresh behavior.' },
@@ -968,6 +988,19 @@ function _fmtBytes(bytes) {
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
+async function _readSystemJsonResponse(res, label) {
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${label} failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+  if (!contentType.includes('application/json')) {
+    const text = await res.text();
+    throw new Error(`${label} returned non-JSON (${res.status}): ${text.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
 async function fetchSystemStatus() {
   const el = document.getElementById('sys-status-content');
   if (!el) return;
@@ -975,7 +1008,7 @@ async function fetchSystemStatus() {
   el.textContent = 'Loading system status…';
   try {
     const sysRes = await fetch('/api/system/info', { signal: AbortSignal.timeout(8000) });
-    const d = await sysRes.json();
+    const d = await _readSystemJsonResponse(sysRes, 'Load system info');
     let mcpCfg = null;
     if (window.electronAPI && typeof window.electronAPI.checkMcpAgentConfigs === 'function') {
       try {
@@ -986,15 +1019,18 @@ async function fetchSystemStatus() {
     }
     if (!mcpCfg || typeof mcpCfg !== 'object' || Array.isArray(mcpCfg)) {
       const mcpCfgRes = await fetch('/api/check-mcp', { signal: AbortSignal.timeout(8000) });
-      mcpCfg = await mcpCfgRes.json();
+      mcpCfg = await _readSystemJsonResponse(mcpCfgRes, 'Load MCP config');
     }
 
     // Build MCP server rows
     const mcpRows = Object.entries(d.mcp_servers || {}).map(([name, info]) => {
-      const ok = info.status === 'ok';
+      const details = info && typeof info === 'object' ? info : { url: String(info || ''), port: null, status: info ? 'ok' : 'offline' };
+      const ok = details.status === 'ok';
+      const port = details.port != null ? details.port : 'n/a';
+      const url = details.url || '—';
       return `<div class="sys-row">
         <span class="sys-label">savant-${name}</span>
-        <span class="sys-val ${ok ? 'ok' : 'err'}">${ok ? '● Online' : '○ Offline'} — port ${info.port}</span>
+        <span class="sys-val ${ok ? 'ok' : 'err'}">${ok ? '● Online' : '○ Offline'} — port ${port}${url && url !== '—' ? ` · ${escapeHtml(url)}` : ''}</span>
       </div>`;
     }).join('');
 
@@ -1028,7 +1064,7 @@ async function fetchSystemStatus() {
 
     el.className = '';
     // Build version/branch header
-    const ver = d.version || '?';
+    const ver = d.version || d.build?.version || '?';
     const branch = d.build?.branch || '?';
     const commit = d.build?.commit || '';
     const wt = d.build?.worktree;
@@ -1062,7 +1098,10 @@ This must be configured on savant-server (not in the desktop client).</div>`
 
     const serverBase = (window.__SAVANT_SERVER_URL__ || location.origin || '').replace(/\/$/, '');
     el.innerHTML = `
-      ${versionLine}
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;">
+        ${versionLine}
+        <button class="mcp-setup-btn" onclick="refreshSystemStatus()" title="Refresh system status">↻ Refresh</button>
+      </div>
       <div class="sys-status-grid">
         <div class="sys-status-card full-width">
           <h5>Architecture Mode</h5>
@@ -1074,8 +1113,8 @@ This must be configured on savant-server (not in the desktop client).</div>`
         <div class="sys-status-card">
           <h5>Server API</h5>
           <div class="sys-row"><span class="sys-label">Status</span><span class="sys-val ok">● Running</span></div>
-          <div class="sys-row"><span class="sys-label">Port</span><span class="sys-val port">${d.flask.port}</span></div>
-          <div class="sys-row"><span class="sys-label">PID</span><span class="sys-val">${d.flask.pid}</span></div>
+          <div class="sys-row"><span class="sys-label">Port</span><span class="sys-val port">${d.flask?.port ?? 'n/a'}</span></div>
+          <div class="sys-row"><span class="sys-label">PID</span><span class="sys-val">${d.flask?.pid ?? 'n/a'}</span></div>
         </div>
         <div class="sys-status-card">
           <h5>Context Sources</h5>
@@ -1092,9 +1131,9 @@ This must be configured on savant-server (not in the desktop client).</div>`
         </div>
         <div class="sys-status-card">
           <h5>Database</h5>
-          <div class="sys-row"><span class="sys-label">Status</span><span class="sys-val ${d.database.status === 'healthy' ? 'ok' : 'err'}">${d.database.status === 'healthy' ? '● Healthy' : '○ Unhealthy'}</span></div>
-          <div class="sys-row"><span class="sys-label">Size</span><span class="sys-val">${_fmtBytes(d.database.size_bytes)}</span></div>
-          <div class="sys-row"><span class="sys-label">Path</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${d.database.path}</span></div>
+          <div class="sys-row"><span class="sys-label">Status</span><span class="sys-val ${(d.database?.status === 'healthy') ? 'ok' : 'err'}">${(d.database?.status === 'healthy') ? '● Healthy' : '○ Unhealthy'}</span></div>
+          <div class="sys-row"><span class="sys-label">Size</span><span class="sys-val">${_fmtBytes(d.database?.size_bytes)}</span></div>
+          <div class="sys-row"><span class="sys-label">Path</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${d.database?.path || 'n/a'}</span></div>
         </div>
         <div class="sys-status-card full-width">
           <h5>MCP Servers</h5>
@@ -1111,8 +1150,8 @@ This must be configured on savant-server (not in the desktop client).</div>`
         </div>
         <div class="sys-status-card">
           <h5>Directories</h5>
-          <div class="sys-row"><span class="sys-label">App</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${d.directories.savant_app}</span></div>
-          <div class="sys-row"><span class="sys-label">Data</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${d.directories.data_dir}</span></div>
+          <div class="sys-row"><span class="sys-label">App</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${d.directories?.savant_app || 'n/a'}</span></div>
+          <div class="sys-row"><span class="sys-label">Data</span><span class="sys-val" style="font-size:0.48rem;word-break:break-all;">${d.directories?.data_dir || 'n/a'}</span></div>
         </div>
         <div class="sys-status-card full-width">
           <h5>Loaded Blueprints</h5>
@@ -1123,6 +1162,10 @@ This must be configured on savant-server (not in the desktop client).</div>`
     el.className = 'sys-status-loading';
     el.innerHTML = `<span style="color:#ff4466;">Failed to load system info: ${e.message}</span>`;
   }
+}
+
+async function refreshSystemStatus() {
+  await fetchSystemStatus();
 }
 
 function _abilitiesGuideSet(elId, value) {
@@ -1231,20 +1274,12 @@ async function setupMcpAgent(provider, btn) {
   btn.disabled = true;
   btn.textContent = '…';
   try {
-    let r = null;
-    if (window.electronAPI && typeof window.electronAPI.setupMcpAgentConfigs === 'function') {
-      logMcpGuide(`SETUP ${provider}: updating local agent config`, 'sys');
-      const data = await window.electronAPI.setupMcpAgentConfigs({ providers: [provider] });
-      r = (data && data.results && data.results[0]) ? data.results[0] : null;
-    } else {
-      const res = await fetch('/api/setup-mcp', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ providers: [provider], force: true })
-      });
-      const data = await res.json();
-      r = (data.results || [])[0];
+    if (!window.electronAPI || typeof window.electronAPI.setupMcpAgentConfigs !== 'function') {
+      throw new Error('Desktop config editing is unavailable in this runtime');
     }
+    logMcpGuide(`SETUP ${provider}: updating local agent config`, 'sys');
+    const data = await window.electronAPI.setupMcpAgentConfigs({ providers: [provider] });
+    const r = (data && data.results && data.results[0]) ? data.results[0] : null;
     if (r && (r.status === 'configured' || r.status === 'already_configured')) {
       logMcpGuide(`SETUP ${provider}: ${r.status}`, 'ok');
       if (r.status === 'already_configured') {
@@ -1276,6 +1311,10 @@ async function testMcpConnection(name, port, btn) {
   statusEl.textContent = '● Testing...';
   try {
     const res = await fetch('/api/mcp/health/' + name, { signal: AbortSignal.timeout(5000) });
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (!res.ok || !contentType.includes('application/json')) {
+      throw new Error(`MCP health returned ${res.status} ${res.statusText}`);
+    }
     const data = await res.json();
     if (data.status === 'ok') {
       statusEl.className = 'mcp-test-status ok';
@@ -1384,10 +1423,16 @@ function dismissHeroRelease() {
   if (latest) {
     localStorage.setItem('savant_seen_release', latest.version);
   }
+  if (window._savantPauseStartupDelay) window._savantPauseStartupDelay();
+  if (window._savantRestartStartupDelay) window._savantRestartStartupDelay(window.savantStartupDelayMs || 3000);
+  else if (window._resolveSavantStartupReady) window._resolveSavantStartupReady();
 }
 
 // Auto-show hero for new major releases on first visit
 (function autoShowHero() {
+  if (window._savantStartStartupDelay) {
+    window._savantStartStartupDelay(window.savantStartupDelayMs || 3000);
+  }
   const latest = RELEASES.find(r => (r.tag === 'major' || r.tag === 'new') && (r.description || r.tagline));
   if (!latest) return;
   const seen = localStorage.getItem('savant_seen_release');
@@ -1713,7 +1758,7 @@ function _applyTabUI() {
   // Header title — always SAVANT with AI brain icon
   const h = document.getElementById('header-title');
   const rocket = ' <span class="release-icon" onclick="toggleReleaseNotes()" title="Release Notes">🚀</span>';
-  const svgIcon = '<svg class="savant-logo" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="brain-grd" x1="0" y1="0" x2="64" y2="64"><stop offset="0%" stop-color="#00f0ff"/><stop offset="100%" stop-color="#a855f7"/></linearGradient></defs><path d="M32 6C20 6 12 14 12 26c0 6 2 10 5 14 2 3 3 6 3 10v2a2 2 0 002 2h20a2 2 0 002-2v-2c0-4 1-7 3-10 3-4 5-8 5-14C52 14 44 6 32 6z" stroke="url(#brain-grd)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M32 6v48M22 18h20M20 28h24M22 38h20" stroke="url(#brain-grd)" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/><circle cx="32" cy="18" r="2.5" fill="#00f0ff"/><circle cx="26" cy="28" r="2" fill="#a855f7"/><circle cx="38" cy="28" r="2" fill="#a855f7"/><circle cx="32" cy="38" r="2.5" fill="#00f0ff"/><circle cx="22" cy="22" r="1.5" fill="#00f0ff" opacity="0.7"/><circle cx="42" cy="22" r="1.5" fill="#00f0ff" opacity="0.7"/><circle cx="20" cy="33" r="1.5" fill="#a855f7" opacity="0.7"/><circle cx="44" cy="33" r="1.5" fill="#a855f7" opacity="0.7"/><path d="M24 54h16M26 58h12" stroke="url(#brain-grd)" stroke-width="2" stroke-linecap="round"/><circle cx="11" cy="20" r="3" stroke="#00f0ff" stroke-width="1.2" fill="none" opacity="0.4"/><path d="M14 20h6" stroke="#00f0ff" stroke-width="1" opacity="0.4"/><circle cx="53" cy="20" r="3" stroke="#a855f7" stroke-width="1.2" fill="none" opacity="0.4"/><path d="M44 20h6" stroke="#a855f7" stroke-width="1" opacity="0.4"/><circle cx="9" cy="34" r="2.5" stroke="#00f0ff" stroke-width="1.2" fill="none" opacity="0.3"/><path d="M12 34h6" stroke="#00f0ff" stroke-width="1" opacity="0.3"/><circle cx="55" cy="34" r="2.5" stroke="#a855f7" stroke-width="1.2" fill="none" opacity="0.3"/><path d="M46 34h6" stroke="#a855f7" stroke-width="1" opacity="0.3"/></svg>';
+  const svgIcon = '<svg class="savant-logo" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="logo-grd" x1="10" y1="10" x2="54" y2="54"><stop offset="0%" stop-color="#00e6c8"/><stop offset="100%" stop-color="#3b82f6"/></linearGradient></defs><path d="M18 18h28l10 14-10 14H18L8 32l10-14z" stroke="url(#logo-grd)" stroke-width="2.6" stroke-linejoin="round"/><path d="M22 24h20M18 32h28M22 40h20" stroke="url(#logo-grd)" stroke-width="1.6" stroke-linecap="round" opacity="0.8"/><circle cx="32" cy="32" r="5.8" fill="#0d0f18" stroke="url(#logo-grd)" stroke-width="2"/><circle cx="32" cy="32" r="2" fill="#00e6c8"/><circle cx="18" cy="18" r="2.2" fill="#00e6c8" opacity="0.9"/><circle cx="46" cy="18" r="2.2" fill="#3b82f6" opacity="0.9"/><circle cx="18" cy="46" r="2.2" fill="#3b82f6" opacity="0.9"/><circle cx="46" cy="46" r="2.2" fill="#00e6c8" opacity="0.9"/></svg>';
   h.innerHTML = svgIcon + ' SAVANT ' + rocket;
   h.style.color = '';
   h.style.textShadow = '';
@@ -1745,6 +1790,9 @@ function switchTab(tab) {
   });
 }
 function _switchTabInner(tab) {
+  if (tab !== 'sessions' && typeof exitBulkMode === 'function') {
+    exitBulkMode();
+  }
   currentTab = tab;
   fetchGeneration++;
 

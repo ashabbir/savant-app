@@ -1,8 +1,18 @@
 # Savant Monorepo
 
-## v8.1.0 Hero Release
+License Owned by Project X. This repository is private and proprietary.
 
-Savant v8.1.0 builds on the client-server rewrite baseline with multi-source context ingestion, stronger MCP/system diagnostics, and client-owned MCP config detection/setup.
+## v8.2.0 Hero Release
+
+Savant v8.2.0 extends the Context MCP with deterministic class/file analysis tools, diff-aware before/after scoring, and clearer refactor guidance for AI agents.
+
+What is included in this release:
+- Context MCP now exposes analysis tools for class-name inspection and diff-aware before/after comparisons.
+- New code paths can be measured as before=0 and after=current so refactor cost is visible from the start.
+- MCP guide/docs were updated to explain the new analysis contract for agents.
+
+Previous hero release:
+- v8.1.5: client/server split, local session ownership, source ingestion, hardened runtime, MCP diagnostics, and client-owned MCP config detection/setup.
 
 What is included in this branch:
 - The product is now split into `savant-app` (client) and `savant-server` (backend).
@@ -176,5 +186,5 @@ npm run test:ui
 - Loop 6 (2026-04-21): Removed residual reindex action handlers from context UI code and added a regression test that reindex actions stay absent.
 - Loop 7 (2026-04-21): Migrated server Pydantic models to `ConfigDict` (v2-native) and removed class-config deprecation risk while preserving 100% backend coverage.
 - Loop 8 (2026-04-21): Added a pipeline contract test to prevent accidental removal of monorepo integration tests from `run-all-tests.sh`.
-- Loop 9 (2026-04-21): Corrected server build metadata to `8.0.0` and added integration validation for `/api/system/info` version output.
+- Loop 9 (2026-04-21): Corrected server build metadata to `8.1.4` and added integration validation for `/api/system/info` version output.
 - Loop 10 (2026-04-21): Added repository hygiene test coverage to enforce DB artifact ignore rules and prevent accidental state file commits.
