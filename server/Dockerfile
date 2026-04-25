@@ -36,10 +36,10 @@ RUN mkdir -p /data/savant && chown -R savant:savant /data/savant
 # Embed abilities seed data directly into the image at the target location.
 # This bypasses the problematic materialization in /tmp and the expected /app/seed/abilities.
 RUN mkdir -p /data/savant/abilities/personas /data/savant/abilities/rules /data/savant/abilities/policies /data/savant/abilities/repos && \
-    cp /app/server/abilities/personas/*.md /data/savant/abilities/personas/ && \
-    cp /app/server/abilities/rules/*.md /data/savant/abilities/rules/ && \
-    cp /app/server/abilities/policies/*.md /data/savant/abilities/policies/ && \
-    cp /app/server/abilities/repos/*.md /data/savant/abilities/repos/ && \
+#    cp /app/server/abilities/personas/*.md /data/savant/abilities/personas/ && \
+#    cp /app/server/abilities/rules/*.md /data/savant/abilities/rules/ && \
+#    cp /app/server/abilities/policies/*.md /data/savant/abilities/policies/ && \
+#    cp /app/server/abilities/repos/*.md /data/savant/abilities/repos/ && \
     chown -R savant:savant /data/savant/abilities
 
 # Ensure the app code itself is owned by savant user for any runtime operations
