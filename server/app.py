@@ -2535,6 +2535,102 @@ def api_all_mrs():
     return jsonify(all_mrs)
 
 
+@app.route("/api/all-jira-tickets", methods=["GET"])
+def api_all_jira_tickets():
+    """Return all Jira tickets aggregated across the registry and linked sessions."""
+    filter_mode = request.args.get("filter", "open")
+    closed_statuses = {"done", "closed"}
+
+    ws_map = {w["id"]: w.get("name", "") for w in _read_workspaces()}
+    with _bg_lock:
+        for cache_key in _PROVIDER_CACHE_KEYS.values():
+            for sess in (_bg_cache.get(cache_key) or []):
+                sess_ws = str(sess.get("workspace") or sess.get("workspace_id") or "").strip()
+                if sess_ws and sess_ws not in ws_map:
+                    ws_map[sess_ws] = sess.get("workspace_name") or sess_ws
+    registry = JiraTicketDB.list_all(limit=1000)
+    registry_by_id = {t["ticket_id"]: t for t in registry}
+
+    all_tickets = []
+    processed_ticket_ids = set()
+    tickets_by_id = {}
+
+    for ticket in registry:
+        if filter_mode == "closed" and ticket.get("status") not in closed_statuses:
+            continue
+        if filter_mode == "open" and ticket.get("status") in closed_statuses:
+            continue
+        ticket.setdefault("sessions", [])
+        ticket["source"] = "registry"
+        all_tickets.append(ticket)
+        processed_ticket_ids.add(ticket["ticket_id"])
+        tickets_by_id[ticket["ticket_id"]] = ticket
+
+    for ws_id, ws_name in ws_map.items():
+        ws_sessions, _ = _workspace_linked_sessions(ws_id)
+        for s in ws_sessions:
+            if s.get("missing_local"):
+                continue
+            for ticket_link in (s.get("jira_tickets") or []):
+                ticket_id = ticket_link.get("ticket_id") or ticket_link.get("id")
+                if not ticket_id or ticket_id in processed_ticket_ids:
+                    target_ticket = tickets_by_id.get(ticket_id)
+                    if target_ticket is None:
+                        continue
+                else:
+                    target_ticket = None
+
+                reg_entry = registry_by_id.get(ticket_id)
+                session_chip = {
+                    "id": s.get("id"),
+                    "provider": s.get("provider", "copilot"),
+                    "summary": s.get("nickname") or s.get("summary") or s.get("id"),
+                    "role": ticket_link.get("role") or "",
+                    "assigned_at": ticket_link.get("assigned_at") or ticket_link.get("created_at") or "",
+                }
+
+                if reg_entry:
+                    if filter_mode == "closed" and reg_entry.get("status") not in closed_statuses:
+                        continue
+                    if filter_mode == "open" and reg_entry.get("status") in closed_statuses:
+                        continue
+                    target_ticket = target_ticket or tickets_by_id.get(ticket_id) or dict(reg_entry)
+                    target_ticket.setdefault("sessions", [])
+                    target_ticket["sessions"].append(session_chip)
+                    if target_ticket not in all_tickets:
+                        target_ticket["source"] = "session_link"
+                        all_tickets.append(target_ticket)
+                        tickets_by_id[ticket_id] = target_ticket
+                        processed_ticket_ids.add(ticket_id)
+                else:
+                    ticket_data = {
+                        "ticket_id": ticket_id,
+                        "ticket_key": ticket_link.get("ticket_key") or ticket_id,
+                        "title": ticket_link.get("title") or f"Jira {ticket_id[:8]}",
+                        "url": ticket_link.get("url") or "",
+                        "status": ticket_link.get("status") or "todo",
+                        "priority": ticket_link.get("priority") or "medium",
+                        "assignee": ticket_link.get("assignee") or "",
+                        "reporter": ticket_link.get("reporter") or "",
+                        "workspace_id": ws_id,
+                        "workspace_name": ws_name,
+                        "sessions": [session_chip],
+                        "source": "session_link",
+                        "created_at": ticket_link.get("created_at") or ticket_link.get("assigned_at") or "",
+                        "updated_at": ticket_link.get("updated_at") or ticket_link.get("assigned_at") or "",
+                    }
+                    if filter_mode == "closed" and ticket_data.get("status") not in closed_statuses:
+                        continue
+                    if filter_mode == "open" and ticket_data.get("status") in closed_statuses:
+                        continue
+                    all_tickets.append(ticket_data)
+                    tickets_by_id[ticket_id] = ticket_data
+                    processed_ticket_ids.add(ticket_id)
+
+    all_tickets.sort(key=lambda x: x.get("updated_at") or x.get("created_at") or x.get("assigned_at") or "", reverse=True)
+    return jsonify(all_tickets)
+
+
 @app.route("/api/preferences", methods=["GET"])
 def api_preferences_get():
     return jsonify(_read_preferences())

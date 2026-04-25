@@ -355,6 +355,39 @@ def test_all_jira_includes_hermes(integration_client):
     assert hermes_ticket["sessions"][0]["id"] == "h-jira-1"
 
 
+def test_all_jira_includes_registry_and_session_links(integration_client):
+    """The aggregate Jira endpoint should include registry tickets plus session chips."""
+    client, bg = integration_client
+
+    from db.jira_tickets import JiraTicketDB
+    ticket = JiraTicketDB.create({
+        "ticket_id": "jira-all-test-1",
+        "workspace_id": "",
+        "ticket_key": "ALL-123",
+        "title": "Aggregate jira ticket",
+        "status": "todo",
+        "assignee": "ashabbir",
+        "priority": "medium",
+    })
+
+    bg["set"]([
+        _hermes_session("h-all-jira-1", workspace="ws-all-jira", jira_tickets=[
+            {"ticket_id": ticket["ticket_id"], "role": "assignee"},
+        ]),
+    ])
+
+    resp = client.get("/api/all-jira-tickets?filter=open")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert isinstance(data, list)
+    found = next((t for t in data if t.get("ticket_key") == "ALL-123"), None)
+    assert found is not None
+    assert found["source"] in {"registry", "session_link"}
+    assert len(found["sessions"]) == 1
+    assert found["sessions"][0]["provider"] == "hermes"
+    assert found["sessions"][0]["id"] == "h-all-jira-1"
+
+
 # ── 6. _collect_workspace_sessions includes hermes ────────────────────────
 
 def test_collect_workspace_sessions_includes_hermes(integration_client):
