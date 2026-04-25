@@ -168,6 +168,55 @@ def ast_list():
     return jsonify({"ast_count": len(nodes), "nodes": nodes})
 
 
+@context_bp.route("/api/context/analysis", methods=["POST"])
+def analyze():
+    if not _ensure_init():
+        return jsonify({"error": "Context not initialized"}), 503
+
+    data = request.get_json(force=True) or {}
+    repo = (data.get("repo") or "").strip()
+    path = (data.get("path") or "").strip()
+    uri = (data.get("uri") or "").strip()
+    name = (data.get("name") or data.get("class_name") or data.get("symbol") or "").strip() or None
+    node_type = (data.get("node_type") or "").strip() or None
+    diff_text = data.get("diff") or None
+    code_text = data.get("code") or None
+
+    if not path and uri:
+        if ":" in uri:
+            repo_part, path_part = uri.split(":", 1)
+            repo = repo or repo_part
+            path = path or path_part
+        else:
+            path = uri
+
+    if not path and not code_text:
+        return jsonify({"error": "path, uri, or code required"}), 400
+
+    from .analysis import AnalysisTarget, analyze_code
+    from .db import ContextDB
+
+    before_text = ""
+    if code_text is None and repo and path:
+        current = ContextDB.read_code_file(f"{repo}:{path}")
+        before_text = (current or {}).get("content", "")
+    elif code_text is not None:
+        before_text = ""
+
+    target = AnalysisTarget(path=path or uri or "", name=name, node_type=node_type)
+    result = analyze_code(
+        content_before=before_text,
+        content_after=code_text,
+        target=target,
+        diff=diff_text,
+        target_missing_is_new=bool(code_text is not None and not before_text),
+    )
+    result["repo"] = repo
+    result["path"] = path
+    result["uri"] = uri or (f"{repo}:{path}" if repo and path else path)
+    return jsonify(result)
+
+
 # ---------------------------------------------------------------------------
 # Memory bank resources
 # ---------------------------------------------------------------------------

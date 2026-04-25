@@ -1,5 +1,10 @@
+import os
+import sys
 import sqlite3
 from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "mcp"))
 
 
 def _seed_python_repo(tmp_path: Path, name: str = "ctx-ast-repo") -> Path:
@@ -212,7 +217,7 @@ def test_insert_ast_node_legacy_schema_with_required_content(client):
 
 
 def test_context_mcp_structure_search_accepts_q_alias(monkeypatch):
-    from savant.mcp import context_server
+    import context_server
 
     captured = {}
 
@@ -228,3 +233,112 @@ def test_context_mcp_structure_search_accepts_q_alias(monkeypatch):
     assert captured["path"] == "/api/context/ast/search"
     assert captured["params"]["query"] == "Service"
     assert captured["params"]["repo"] == "repo-overview"
+
+
+def test_context_analysis_by_class_name(monkeypatch):
+    from context.analysis import AnalysisTarget, analyze_code
+
+    content = """
+class Service:
+    def run(self):
+        if True:
+            return 1
+""".strip()
+
+    analysis = analyze_code(
+        content_before=content,
+        target=AnalysisTarget(path="sample.py", name="Service", node_type="class"),
+    )
+
+    assert analysis["summary"]["before_complexity"] >= 1
+    assert analysis["summary"]["after_complexity"] >= 1
+    assert analysis["target"]["found_after"] is True
+
+
+def test_context_analysis_new_code_starts_from_zero_when_missing_before():
+    from context.analysis import AnalysisTarget, analyze_code
+
+    analysis = analyze_code(
+        content_before="",
+        content_after="""
+class NewService:
+    def run(self):
+        return 1
+""".strip(),
+        target=AnalysisTarget(path="new.py", name="NewService", node_type="class"),
+        target_missing_is_new=True,
+    )
+
+    assert analysis["summary"]["before_complexity"] == 0
+    assert analysis["summary"]["after_complexity"] >= 1
+    assert analysis["summary"]["status"] == "new"
+
+
+def test_context_analysis_applies_unified_diff():
+    from context.analysis import AnalysisTarget, analyze_code
+
+    before = """
+class Service:
+    def run(self):
+        return 1
+""".strip()
+    diff = """\
+@@ -1,3 +1,5 @@
+ class Service:
+     def run(self):
+-        return 1
++        if True:
++            return 2
+"""
+
+    analysis = analyze_code(
+        content_before=before,
+        diff=diff,
+        target=AnalysisTarget(path="sample.py", name="Service", node_type="class"),
+    )
+
+    assert analysis["summary"]["after_complexity"] >= analysis["summary"]["before_complexity"]
+    assert analysis["delta"]["complexity"] >= 0
+
+
+def test_context_analysis_api_and_mcp_proxy(monkeypatch, client, tmp_path):
+    from context.db import ContextDB, init_context_schema
+    from context.indexer import Indexer
+    import context_server
+
+    assert init_context_schema()
+
+    class _FakeEmbedder:
+        def embed_one(self, _text):
+            return [0.0] * 768
+
+    monkeypatch.setattr(Indexer, "_get_embedder", lambda self: _FakeEmbedder())
+
+    repo_dir = _seed_python_repo(tmp_path, "repo-analysis")
+    ContextDB.add_repo("repo-analysis", str(repo_dir))
+    Indexer().index_repository(repo_dir, repo_name="repo-analysis")
+    Indexer().generate_ast_for_repository(repo_dir, repo_name="repo-analysis")
+
+    resp = client.post("/api/context/analysis", json={
+        "repo": "repo-analysis",
+        "path": "sample.py",
+        "name": "Service",
+        "node_type": "class",
+    })
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["summary"]["after_complexity"] >= 1
+    assert data["target"]["found_after"] is True
+
+    captured = {}
+
+    def fake_post(path, json=None):
+        captured["path"] = path
+        captured["json"] = json
+        return {"ok": True}
+
+    monkeypatch.setattr(context_server, "_post", fake_post)
+    out = context_server.analyze_code(repo="repo-analysis", path="sample.py", name="Service", node_type="class")
+    assert out == {"ok": True}
+    assert captured["path"] == "/api/context/analysis"
+    assert captured["json"]["name"] == "Service"

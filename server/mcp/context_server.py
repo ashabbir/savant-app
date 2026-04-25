@@ -6,6 +6,7 @@ Follows the same pattern as workspace (8091) and abilities (8092) servers.
 Tools:
   code_search          — Semantic search across indexed repo code
   structure_search     — AST structure search for classes, functions
+  analyze_code         — Analyze a class/file before and after changes
   memory_bank_search   — Semantic search within memory bank markdown files
   memory_resources_list — List all memory bank resources (optional repo filter)
   memory_resources_read — Read a specific memory bank resource by URI
@@ -43,6 +44,7 @@ mcp = FastMCP(
         "Use memory_resources_list(repo) to browse available memory bank files; memory_resources_read(uri) to read one. "
         "Use repos_list() to see all indexed repos with README excerpts; repo_status() for index health. "
         "Use structure_search(query) to find classes, functions, or language elements via substring AST matching. "
+        "Use analyze_code(name, repo, path, node_type, diff, code) to get before/after complexity and findings for a class or file. "
         "All tools accept an optional repo filter (string name or list of names)."
     ),
     host=_args.host,
@@ -101,6 +103,37 @@ def structure_search(
     if repo:
         params["repo"] = ",".join(repo) if isinstance(repo, list) else repo
     return _get("/api/context/ast/search", params)
+
+
+@mcp.tool()
+def analyze_code(
+    repo: str | list[str] = None,
+    path: str = None,
+    uri: str = None,
+    name: str = None,
+    class_name: str = None,
+    symbol: str = None,
+    node_type: str = None,
+    diff: str = None,
+    code: str = None,
+) -> dict:
+    """Analyze a class/file before and after a diff or new code body."""
+    payload = {}
+    if repo:
+        payload["repo"] = ",".join(repo) if isinstance(repo, list) else repo
+    if path:
+        payload["path"] = path
+    if uri:
+        payload["uri"] = uri
+    if name or class_name or symbol:
+        payload["name"] = name or class_name or symbol
+    if node_type:
+        payload["node_type"] = node_type
+    if diff:
+        payload["diff"] = diff
+    if code:
+        payload["code"] = code
+    return _post("/api/context/analysis", payload)
 
 
 @mcp.tool()
